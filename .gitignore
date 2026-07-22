@@ -34,3 +34,6 @@ htmlcov/
 # Frontend build artifacts
 frontend/node_modules
 frontend/dist
+
+# Eval reports
+evals/reports/
