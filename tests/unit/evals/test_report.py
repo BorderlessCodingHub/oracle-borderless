@@ -76,3 +76,48 @@ def test_render_table_is_a_nonempty_string():
     report = aggregate([_r("a1", "answerable", faithfulness=0.9, citation_support=0.9)])
     table = render_table(report)
     assert isinstance(table, str) and FAITHFULNESS in table
+    assert "a1" in table and "answerable" in table
+    assert "r" in table  # reason from _r() helper
+
+
+def test_verdict_fails_when_appropriate_refusal_mean_below_threshold():
+    results = [
+        _r("r1", "refusal", appropriate_refusal=0.8),
+        _r("r2", "refusal", appropriate_refusal=0.8),
+        _r("a1", "answerable", faithfulness=0.9, citation_support=0.9),
+    ]
+    report = aggregate(results)
+    assert report.passed is False
+    refusal = next(m for m in report.metrics if m.metric == APPROPRIATE_REFUSAL)
+    assert refusal.passed is False
+
+
+def test_verdict_fails_when_citation_support_mean_below_threshold():
+    results = [
+        _r("a1", "answerable", faithfulness=0.9, citation_support=0.7),
+        _r("a2", "answerable", faithfulness=0.9, citation_support=0.7),
+    ]
+    report = aggregate(results)
+    assert report.passed is False
+    citation = next(m for m in report.metrics if m.metric == CITATION_SUPPORT)
+    assert citation.passed is False
+
+
+def test_judge_error_zeros_in_composed_run_fails_report():
+    """Judge error (fail-safe zeros) mixed with passing cases → report fails."""
+    results = [
+        _r("a1", "answerable", faithfulness=0.9, citation_support=0.9),
+        _r("a2", "answerable", faithfulness=0.9, citation_support=0.9),
+        # Judge error case: both metrics at 0.0 with error reason
+        CaseResult(
+            "err", "answerable", "answer",
+            {
+                FAITHFULNESS: MetricScore(0.0, "judge error: boom"),
+                CITATION_SUPPORT: MetricScore(0.0, "judge error: boom"),
+            }
+        ),
+    ]
+    report = aggregate(results)
+    assert report.passed is False  # fail-safe zeros pull overall mean below threshold
+    faith = next(m for m in report.metrics if m.metric == FAITHFULNESS)
+    assert faith.passed is False

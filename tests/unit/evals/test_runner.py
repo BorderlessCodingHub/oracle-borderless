@@ -28,8 +28,10 @@ class _FakeEngine:
     def __init__(self):
         self.received_history = None
         self.received_knowledge = None
+        self.received_question = None
 
     async def stream_answer(self, question, history, knowledge=None):
+        self.received_question = question
         self.received_history = history
         self.received_knowledge = knowledge
         yield AgentStreamChunk(type="text", text="resposta ")
@@ -64,6 +66,7 @@ async def test_answerable_retrieves_with_rewritten_query_and_scores():
     assert search.calls == ["renovação de PSP"]
     assert result.answer == "resposta gerada"
     assert set(result.scores) == {FAITHFULNESS, "citation_support"}
+    assert engine.received_question == "e as renovações?"  # raw question to engine
 
 
 @pytest.mark.asyncio
@@ -117,3 +120,4 @@ async def test_judge_error_records_zero_scores_for_applicable_metrics():
 
     assert result.scores[FAITHFULNESS].score == 0.0
     assert "judge error" in result.scores[FAITHFULNESS].reason
+    assert result.scores["citation_support"].score == 0.0

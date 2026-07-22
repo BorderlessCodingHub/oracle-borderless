@@ -70,6 +70,12 @@ def render_table(report: EvalReport) -> str:
         for case_id, metric, score in report.below_floor:
             lines.append(f"  {case_id}  {metric}={score:.2f}")
     lines.append("")
+    lines.append("per-case scores:")
+    for r in report.results:
+        lines.append(f"  {r.case_id} ({r.category})")
+        for metric, ms in r.scores.items():
+            lines.append(f"    {metric}={ms.score:.2f} ({ms.reason})")
+    lines.append("")
     lines.append(f"VERDICT: {'PASS' if report.passed else 'FAIL'}")
     return "\n".join(lines)
 
