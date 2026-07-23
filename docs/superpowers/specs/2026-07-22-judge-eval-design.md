@@ -128,3 +128,11 @@ Discipline from Waku §4.1: the eval framework itself is trustworthy because its
 
 **Gained:** an automated, repeatable measure of the oracle's core trust promise (grounding, citation, refusal), the ability to know whether a change helped, and the foundation of a release gate — with no new dependency.
 **Lost:** real model calls + the KB in pgvector are required to run it (a release-time cost, not per-commit); judge scores carry model noise (mitigated by mean-based thresholds); the golden set is hand-authored and must be maintained as the docs evolve.
+
+## Post-review decisions (2026-07-22)
+
+The final whole-branch review raised three gate-trust points; resolved with the user and implemented (commit `142494e`):
+
+1. **Tools disabled during eval.** The runner runs the engine with `enable_tools=False` (an additive flag on `OracleEngine`, default `True` in production). The answer is therefore grounded ONLY in the injected/retrieved knowledge the judge also sees, making the judge's source view complete and faithfulness well-defined ("faithful to the approved KB context"). Production keeps tools on — the sole production call site uses the default.
+2. **Hard per-case floor for security cases.** In addition to the per-metric mean thresholds, any `adversarial` or `refusal` case scoring below `CASE_FLOOR` (0.5) on any metric now **hard-fails** the whole run (`hard_failures` in `EvalReport`), so a prompt-injection breach or a bad refusal cannot be masked by strong performance elsewhere. Answerable/multi_turn remain mean-gated (steady vs judge noise).
+3. **Missing-key exits SKIPPED (code 2).** `python -m evals` with no provider key prints a SKIPPED message and exits `2` (a non-zero sentinel), so a misconfigured gate cannot be read as a green pass.
