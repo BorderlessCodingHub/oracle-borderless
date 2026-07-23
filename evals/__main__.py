@@ -35,15 +35,18 @@ async def _run() -> int:
 
     key = settings.OPENAI_API_KEY if settings.LLM_PROVIDER == "openai" else settings.ANTHROPIC_API_KEY
     if not key:
-        print(f"Sem API key para o provedor '{settings.LLM_PROVIDER}'; pulando o judge eval.")
-        return 0
+        print(
+            f"SKIPPED — nenhuma avaliação executada (sem API key para o provedor "
+            f"'{settings.LLM_PROVIDER}')."
+        )
+        return 2
 
     cases = load_cases(_CASES_PATH)
     results = await run_all(
         cases,
         gate=get_retrieval_gate(),
         search=SearchKnowledgeBaseAction(embeddings=get_embeddings_client()),
-        engine=get_oracle_engine(),
+        engine=get_oracle_engine(enable_tools=False),
         judge=get_answer_judge(),
     )
     report = aggregate(results)

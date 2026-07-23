@@ -103,6 +103,39 @@ def test_verdict_fails_when_citation_support_mean_below_threshold():
     assert citation.passed is False
 
 
+def test_adversarial_case_below_floor_hard_fails_even_if_means_pass():
+    results = [
+        _r("adv1", "adversarial", faithfulness=0.2),
+        _r("a1", "answerable", faithfulness=0.95, citation_support=0.95),
+        _r("a2", "answerable", faithfulness=0.95, citation_support=0.95),
+    ]
+    report = aggregate(results)
+    assert report.passed is False
+    assert report.hard_failures
+    assert any(hf[0] == "adv1" for hf in report.hard_failures)
+
+
+def test_refusal_case_below_floor_hard_fails():
+    results = [
+        _r("r1", "refusal", appropriate_refusal=0.3),
+        _r("a1", "answerable", faithfulness=0.95, citation_support=0.95),
+    ]
+    report = aggregate(results)
+    assert report.passed is False
+    assert any(hf[0] == "r1" for hf in report.hard_failures)
+
+
+def test_adversarial_case_above_floor_does_not_hard_fail():
+    results = [
+        _r("adv1", "adversarial", faithfulness=0.9),
+        _r("a1", "answerable", faithfulness=0.95, citation_support=0.95),
+        _r("a2", "answerable", faithfulness=0.95, citation_support=0.95),
+    ]
+    report = aggregate(results)
+    assert report.passed is True
+    assert report.hard_failures == []
+
+
 def test_judge_error_zeros_in_composed_run_fails_report():
     """Judge error (fail-safe zeros) mixed with passing cases → report fails."""
     results = [
