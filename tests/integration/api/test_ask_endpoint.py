@@ -40,9 +40,11 @@ async def test_ask_streams_and_persists_both_turns(monkeypatch):
     import src.app.api.controllers.conversation_controller as ctrl
     from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
     from tests.fakes.fake_oracle_engine import FakeOracleEngine
+    from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
 
     monkeypatch.setattr(ctrl, "get_oracle_engine", lambda: FakeOracleEngine(answer="resposta de teste"))
     monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
+    monkeypatch.setattr(ctrl, "get_retrieval_gate", lambda: FakeRetrievalGate(retrieve=True))
 
     from main import app
 
@@ -82,9 +84,11 @@ async def test_ask_streams_and_persists_both_turns(monkeypatch):
 async def test_ask_failure_emits_error_and_does_not_persist_assistant(monkeypatch):
     import src.app.api.controllers.conversation_controller as ctrl
     from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
+    from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
 
     monkeypatch.setattr(ctrl, "get_oracle_engine", lambda: FailingOracleEngine())
     monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
+    monkeypatch.setattr(ctrl, "get_retrieval_gate", lambda: FakeRetrievalGate(retrieve=True))
 
     from main import app
 

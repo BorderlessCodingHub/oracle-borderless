@@ -19,6 +19,7 @@ from src.domain.conversations.actions.get_conversation_action import GetConversa
 from src.domain.conversations.actions.list_conversations_action import ListConversationsAction
 from src.domain.documents.actions.search_knowledge_base_action import SearchKnowledgeBaseAction
 from src.support.agent.oracle_engine import get_oracle_engine
+from src.support.agent.retrieval_gate import get_retrieval_gate
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
 from src.support.core.session_scope import run_in_async_session
 
@@ -40,7 +41,9 @@ class ConversationController:
     async def ask(request: Request, data: AskQuestionRequest) -> StreamingResponse:
         user_email = request.headers.get(_USER_EMAIL_HEADER)
         search = SearchKnowledgeBaseAction(embeddings=get_embeddings_client())
-        action = AnswerQuestionAction(engine=get_oracle_engine(), search=search)
+        action = AnswerQuestionAction(
+            engine=get_oracle_engine(), search=search, gate=get_retrieval_gate()
+        )
 
         # Conversa + user message são gravadas aqui (sessão do request viva).
         conversation_id, stream = await action.execute(

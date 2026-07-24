@@ -28,9 +28,13 @@ class _FakeSearch:
 class _FakeEngine:
     def __init__(self):
         self.received_history = None
+        self.received_question = None
+        self.received_knowledge = None
 
     async def stream_answer(self, question, history, knowledge):
         self.received_history = history
+        self.received_question = question
+        self.received_knowledge = knowledge
         yield AgentStreamChunk(type="text", text="ok")
 
 
@@ -63,8 +67,12 @@ class _FakeMsgRepo:
         return [AgentMessage(role=m.role, content=m.content) for m in self.appended]
 
 
-def _make(engine, search, conv_repo, msg_repo):
-    action = AnswerQuestionAction(engine=engine, search=search)
+def _make(engine, search, conv_repo, msg_repo, gate=None):
+    from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
+
+    action = AnswerQuestionAction(
+        engine=engine, search=search, gate=gate or FakeRetrievalGate(retrieve=True)
+    )
     action.conversations = conv_repo
     action.messages = msg_repo
     return action
@@ -135,3 +143,48 @@ async def test_long_question_title_is_truncated_to_80_chars():
     [c async for c in stream]
 
     assert len(conv_repo.created.title) == 80
+
+
+class _RecordingSearch:
+    def __init__(self):
+        self.calls = []
+
+    async def execute(self, query):
+        self.calls.append(query)
+        from src.support.agent.ports import KnowledgeSnippet
+        from src.domain.shared.value_objects.citation import Citation
+
+        return [KnowledgeSnippet("trecho", Citation("notion", "Doc", "https://n/a", "t", "a"))]
+
+
+@pytest.mark.asyncio
+async def test_gate_skip_injects_no_knowledge_and_skips_search():
+    from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
+
+    engine, conv_repo, msg_repo = _FakeEngine(), _FakeConvRepo(), _FakeMsgRepo()
+    search = _RecordingSearch()
+    action = _make(engine, search, conv_repo, msg_repo, gate=FakeRetrievalGate(retrieve=False))
+
+    _cid, stream = await action.execute("valeu!", None, "a@x.com")
+    async for _ in stream:  # drena o stream
+        pass
+
+    assert search.calls == []  # não recuperou
+    assert engine.received_knowledge == []
+
+
+@pytest.mark.asyncio
+async def test_gate_retrieve_uses_rewritten_query():
+    from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
+
+    engine, conv_repo, msg_repo = _FakeEngine(), _FakeConvRepo(), _FakeMsgRepo()
+    search = _RecordingSearch()
+    gate = FakeRetrievalGate(retrieve=True, search_query="renovação de PSP")
+    action = _make(engine, search, conv_repo, msg_repo, gate=gate)
+
+    _cid, stream = await action.execute("e as renovações?", None, "a@x.com")
+    async for _ in stream:
+        pass
+
+    assert search.calls == ["renovação de PSP"]  # query reescrita, não a crua
+    assert engine.received_question == "e as renovações?"  # engine recebe pergunta original

@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # --- Base de conhecimento: Notion via MCP ---
     NOTION_MCP_URL: str | None = None
     NOTION_MCP_TOKEN: str | None = None
+    # Raiz da KB: a base é EXCLUSIVAMENTE o subtree deste folder do Notion
+    # (folder "Products"). Sem ele, o sync aborta (ver NotionClient).
+    NOTION_KB_ROOT_PAGE_ID: str | None = None
 
     # --- LLM do oráculo (Claude ou GPT, selecionável) ---
     LLM_PROVIDER: Literal["anthropic", "openai"] = "anthropic"
@@ -49,6 +52,10 @@ class Settings(BaseSettings):
     ANTHROPIC_MODEL: str = "claude-opus-4-8"
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4o"
+    ANTHROPIC_SMALL_MODEL: str = "claude-haiku-4-5-20251001"
+    OPENAI_SMALL_MODEL: str = "gpt-4o-mini"
+    GATE_TIMEOUT_SECONDS: float = 5.0
+    JUDGE_MODEL: str | None = None  # eval judge; defaults to the provider's main model
 
     # --- Embeddings (desacoplado do provedor de chat; ver ADR-0008) ---
     EMBEDDING_PROVIDER: Literal["openai"] = "openai"

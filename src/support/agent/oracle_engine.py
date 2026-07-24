@@ -50,8 +50,9 @@ def _build_prompt(question: str, history: list[AgentMessage], knowledge: list[Kn
 
 
 class OracleEngine:
-    def __init__(self, model=None) -> None:
+    def __init__(self, model=None, enable_tools: bool = True) -> None:
         self._model = model or _build_model()
+        self._enable_tools = enable_tools
 
     async def stream_answer(
         self,
@@ -60,28 +61,30 @@ class OracleEngine:
         knowledge: list[KnowledgeSnippet],
     ) -> AsyncIterator[AgentStreamChunk]:
         web_citations: list[Citation] = []
-        web_tool = WebSearchTool(tavily=TavilyClient(), collected=web_citations)
-        notion_tool = FetchNotionTool(notion=NotionClient())
 
         agent = Agent(self._model, system_prompt=SYSTEM_PROMPT)
 
-        @agent.tool_plain
-        async def web_search(query: str) -> str:
-            """Busca informação pública na web quando a base interna não cobre."""
-            try:
-                return await web_tool.run(query)
-            except Exception as exc:  # falha de tool não deve derrubar o streaming
-                logger.exception("web_search tool failed")
-                return wrap_tool_content(f"(falha ao buscar na web: {exc})")
+        if self._enable_tools:
+            web_tool = WebSearchTool(tavily=TavilyClient(), collected=web_citations)
+            notion_tool = FetchNotionTool(notion=NotionClient())
 
-        @agent.tool_plain
-        async def fetch_notion_page(page_id: str) -> str:
-            """Busca o conteúdo completo/atualizado de uma página do Notion."""
-            try:
-                return await notion_tool.run(page_id)
-            except Exception as exc:  # falha de tool não deve derrubar o streaming
-                logger.exception("fetch_notion_page tool failed")
-                return wrap_tool_content(f"(falha ao buscar página do Notion: {exc})")
+            @agent.tool_plain
+            async def web_search(query: str) -> str:
+                """Busca informação pública na web quando a base interna não cobre."""
+                try:
+                    return await web_tool.run(query)
+                except Exception as exc:  # falha de tool não deve derrubar o streaming
+                    logger.exception("web_search tool failed")
+                    return wrap_tool_content(f"(falha ao buscar na web: {exc})")
+
+            @agent.tool_plain
+            async def fetch_notion_page(page_id: str) -> str:
+                """Busca o conteúdo completo/atualizado de uma página do Notion."""
+                try:
+                    return await notion_tool.run(page_id)
+                except Exception as exc:  # falha de tool não deve derrubar o streaming
+                    logger.exception("fetch_notion_page tool failed")
+                    return wrap_tool_content(f"(falha ao buscar página do Notion: {exc})")
 
         prompt = _build_prompt(question, history, knowledge)
         async with agent.run_stream(prompt) as result:
@@ -92,5 +95,5 @@ class OracleEngine:
         yield AgentStreamChunk(type="sources", citations=kb_citations + web_citations)
 
 
-def get_oracle_engine() -> "OracleEngine":
-    return OracleEngine()
+def get_oracle_engine(enable_tools: bool = True) -> "OracleEngine":
+    return OracleEngine(enable_tools=enable_tools)

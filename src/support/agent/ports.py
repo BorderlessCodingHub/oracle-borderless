@@ -30,6 +30,20 @@ class KnowledgeSnippet:
     citation: Citation
 
 
+@dataclass
+class RetrievalDecision:
+    """Decisão do retrieval gate: recuperar ou não, e a query já resolvida."""
+
+    retrieve: bool
+    search_query: str  # standalone, context-resolved; "" quando retrieve é False
+
+
+class RetrievalGatePort(Protocol):
+    async def decide(
+        self, question: str, history: list[AgentMessage]
+    ) -> RetrievalDecision: ...
+
+
 class OracleEnginePort(Protocol):
     def stream_answer(
         self,
