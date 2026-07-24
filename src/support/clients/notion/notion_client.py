@@ -17,6 +17,11 @@ from src.domain.documents.services.knowledge_curation_policy import (
 )
 from src.support.clients.notion.mcp_session import ToolCall, notion_mcp_session
 from src.support.clients.notion.page_markdown_assembler import PageMarkdownAssembler
+from src.support.core.settings import settings
+
+
+class KnowledgeBaseConfigError(RuntimeError):
+    """Configuração da base de conhecimento ausente/inválida (ex.: root não definido)."""
 
 
 @dataclass
@@ -78,32 +83,65 @@ class NotionClient:
             return await self._assemble(call, page_id)
 
     async def list_approved_pages(self) -> list[NotionPage]:
-        """Lista (metadados) as páginas-documento aprovadas pela curadoria."""
-        async with notion_mcp_session() as call:
-            raw = await self._search_all(call)
+        """Páginas-documento aprovadas — só o subtree do folder raiz configurado.
 
-        approved: list[NotionPage] = []
-        for item in raw:
-            if item.get("object") != "page":
-                continue
-            title = _extract_title(item)
-            ref = NotionPageRef(
-                object_type="page",
-                parent_type=item.get("parent", {}).get("type", ""),
-                title=title,
+        A KB é EXCLUSIVAMENTE a subárvore de `NOTION_KB_ROOT_PAGE_ID` (folder
+        "Products"). Sem root configurado, **aborta** em vez de devolver ``[]``:
+        o sync completo removeria (soft-delete) toda a base ao reconciliar.
+        """
+        root_id = settings.NOTION_KB_ROOT_PAGE_ID
+        if not root_id or root_id.lstrip().startswith("#"):
+            raise KnowledgeBaseConfigError(
+                "NOTION_KB_ROOT_PAGE_ID não configurado — a KB é o subtree do folder "
+                "Products; sem root, o sync abortaria e apagaria toda a base."
             )
-            if self._policy.should_ingest(ref):
+        async with notion_mcp_session() as call:
+            return await self._collect_scope(call, root_id)
+
+    async def _collect_scope(self, call: ToolCall, root_id: str) -> list[NotionPage]:
+        """Percorre a subárvore de `root_id` e devolve só páginas-documento aprovadas.
+
+        Desce apenas em `child_page` aprovadas pela policy. `child_database`
+        (linhas de banco / PII) e demais blocos de conteúdo ficam fora — e a
+        subárvore de uma página rejeitada pela denylist não é visitada.
+        """
+        approved: list[NotionPage] = []
+        stack = [root_id]
+        while stack:
+            parent_id = stack.pop()
+            for block in await self._child_blocks(call, parent_id):
+                if block.get("type") != "child_page":
+                    continue
+                title = block.get("child_page", {}).get("title", "")
+                ref = NotionPageRef(object_type="page", parent_type="page_id", title=title)
+                if not self._policy.should_ingest(ref):
+                    continue
                 approved.append(
                     NotionPage(
-                        id=item["id"],
+                        id=block["id"],
                         title=title,
                         content="",
-                        url=item.get("url", ""),
+                        url="",
                         is_approved=True,
-                        last_edited_time=_parse_ts(item.get("last_edited_time")),
+                        last_edited_time=_parse_ts(block.get("last_edited_time")),
                     )
                 )
+                stack.append(block["id"])
         return approved
+
+    @staticmethod
+    async def _child_blocks(call: ToolCall, block_id: str) -> list[dict[str, Any]]:
+        blocks: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            args: dict[str, Any] = {"block_id": block_id, "page_size": 100}
+            if cursor:
+                args["start_cursor"] = cursor
+            data = await call("API-get-block-children", args)
+            blocks.extend(data.get("results", []))
+            if not data.get("has_more"):
+                return blocks
+            cursor = data.get("next_cursor")
 
     # --- transporte MCP (privado) ---
 
@@ -131,18 +169,4 @@ class NotionClient:
             ids.extend(b["id"] for b in data.get("results", []))
             if not data.get("has_more"):
                 return ids
-            cursor = data.get("next_cursor")
-
-    @staticmethod
-    async def _search_all(call: ToolCall) -> list[dict[str, Any]]:
-        results: list[dict[str, Any]] = []
-        cursor: str | None = None
-        while True:
-            args: dict[str, Any] = {"query": "", "page_size": 100}
-            if cursor:
-                args["start_cursor"] = cursor
-            data = await call("API-post-search", args)
-            results.extend(data.get("results", []))
-            if not data.get("has_more"):
-                return results
             cursor = data.get("next_cursor")
