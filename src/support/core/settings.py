@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # --- Base de conhecimento: Notion via MCP ---
     NOTION_MCP_URL: str | None = None
     NOTION_MCP_TOKEN: str | None = None
+    # Raiz da KB: a base é EXCLUSIVAMENTE o subtree deste folder do Notion
+    # (folder "Products"). Sem ele, o sync aborta (ver NotionClient).
+    NOTION_KB_ROOT_PAGE_ID: str | None = None
 
     # --- LLM do oráculo (Claude ou GPT, selecionável) ---
     LLM_PROVIDER: Literal["anthropic", "openai"] = "anthropic"
