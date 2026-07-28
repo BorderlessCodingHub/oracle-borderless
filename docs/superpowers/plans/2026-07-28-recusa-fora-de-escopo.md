@@ -812,13 +812,24 @@ RAG_MAX_DISTANCE=0.55
 
 - [ ] **Step 5: Aplicar o limiar na query**
 
-Em `src/domain/documents/repositories/document_chunk_repository.py`, no `search_similar`, extrair a expressão de distância e usá-la nos dois lugares (filtro e ordenação):
+Em `src/domain/documents/repositories/document_chunk_repository.py`, no `search_similar`,
+extrair a expressão de distância e usá-la nos dois lugares (filtro e ordenação).
+
+> ⚠️ **A Task 4 já introduziu a guarda de fail-closed** (`root is None` → `return []`,
+> porque `== None` compila para `IS NULL` e casaria justamente com os documentos sem
+> procedência). **Preserve-a.** O bloco abaixo mostra só a mudança do limiar; leia o
+> método como ele está no arquivo e acrescente o predicado de distância sem remover a
+> guarda nem a comparação de root.
 
 ```python
     async def search_similar(
         self, embedding: list[float], top_k: int | None = None
     ) -> list[KnowledgeSnippet]:
         limit = top_k if top_k is not None else settings.RAG_TOP_K
+        root = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
+        if root is None:
+            # Guarda da Task 4 — NÃO remover.
+            return []
         distance = DocumentChunkModel.embedding.cosine_distance(embedding)
         stmt = (
             select(
@@ -831,8 +842,7 @@ Em `src/domain/documents/repositories/document_chunk_repository.py`, no `search_
             .where(
                 DocumentModel.status == "approved",
                 DocumentModel.deleted_at.is_(None),
-                DocumentModel.kb_root_page_id
-                == normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID),
+                DocumentModel.kb_root_page_id == root,
                 # Sem limiar, top-k sempre devolve algo: pergunta fora do assunto
                 # recuperaria os vizinhos menos distantes e viraria contexto.
                 distance <= settings.RAG_MAX_DISTANCE,
@@ -841,6 +851,9 @@ Em `src/domain/documents/repositories/document_chunk_repository.py`, no `search_
             .limit(limit)
         )
 ```
+
+Se a forma exata da guarda na Task 4 divergir deste bloco, **a do arquivo vence** —
+ajuste apenas o que diz respeito ao limiar.
 
 - [ ] **Step 6: Rodar e confirmar que passa**
 
@@ -937,14 +950,18 @@ E o método:
 ```python
     async def list_sections(self) -> list[str]:
         """Seções distintas dos documentos ativos do root vigente, ordenadas."""
+        root = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
+        if root is None:
+            # Mesma guarda de search_similar: `== None` compila para `IS NULL` e
+            # casaria justamente com os documentos sem procedência. Não simplificar.
+            return []
         result = await self.session.execute(
             select(DocumentModel.kb_section)
             .where(
                 DocumentModel.status == "approved",
                 DocumentModel.deleted_at.is_(None),
                 DocumentModel.kb_section.is_not(None),
-                DocumentModel.kb_root_page_id
-                == normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID),
+                DocumentModel.kb_root_page_id == root,
             )
             .distinct()
         )
@@ -1053,14 +1070,14 @@ def test_portuguese_copy_lists_every_section():
     assert text.startswith("Não encontrei informações sobre isso na base de conhecimento.")
     for secao in SECOES:
         assert secao in text
-    assert "Masterclasses e Programs" in text  # conjunção em português
+    assert "Mentorship e Programs" in text  # conjunção em português (último par)
     assert "Tente perguntar sobre um desses temas." in text
 
 
 def test_english_copy_uses_english_conjunction():
     text = build_out_of_scope_reply(SECOES, "what is the renewal process?")
     assert text.startswith("I didn't find information about this in the knowledge base.")
-    assert "Masterclasses and Programs" in text
+    assert "Mentorship and Programs" in text
 
 
 def test_section_titles_are_stripped():
@@ -1578,6 +1595,10 @@ class KnowledgeCalibrateCommand(Command):
 
     async def handle(self) -> None:
         limiar = settings.RAG_MAX_DISTANCE
+        root = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
+        if root is None:
+            print("NOTION_KB_ROOT_PAGE_ID não configurado — nada a calibrar.")
+            return
         embeddings = get_embeddings_client()
         print(f"RAG_MAX_DISTANCE atual: {limiar}\n")
 
@@ -1598,8 +1619,7 @@ class KnowledgeCalibrateCommand(Command):
                             .where(
                                 DocumentModel.status == "approved",
                                 DocumentModel.deleted_at.is_(None),
-                                DocumentModel.kb_root_page_id
-                                == normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID),
+                                DocumentModel.kb_root_page_id == root,
                             )
                             .order_by(distancia)
                             .limit(1)
