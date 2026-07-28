@@ -37,3 +37,41 @@ async def test_ignores_soft_deleted_and_null_sections(
     await seed_document_with_chunk(title="sem", kb_root_page_id=ROOT, kb_section=None)
 
     assert await ListKnowledgeSectionsAction().execute() == ["Programs"]
+
+
+@pytest.mark.asyncio
+async def test_list_sections_returns_empty_when_root_unconfigured(
+    monkeypatch, seed_document_with_chunk
+):
+    """Sem root configurado, a lista de seções degrada para vazia.
+
+    `DocumentModel.kb_root_page_id == None` compilaria para `IS NULL`, que
+    combina exatamente com os documentos sem procedência — o guard-clause em
+    `list_sections` existe para que a ausência de configuração nunca vire um
+    "libera tudo sem procedência" por acidente.
+    """
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", None, raising=False)
+    from src.domain.documents.actions.list_knowledge_sections_action import (
+        ListKnowledgeSectionsAction,
+    )
+
+    await seed_document_with_chunk(
+        title="Sem procedência", kb_root_page_id=None, kb_section="Fantasma"
+    )
+
+    assert await ListKnowledgeSectionsAction().execute() == []
+
+
+@pytest.mark.asyncio
+async def test_sections_differing_only_by_whitespace_collapse(
+    monkeypatch, seed_document_with_chunk
+):
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    from src.domain.documents.actions.list_knowledge_sections_action import (
+        ListKnowledgeSectionsAction,
+    )
+
+    await seed_document_with_chunk(title="c1", kb_root_page_id=ROOT, kb_section="Conferences ")
+    await seed_document_with_chunk(title="c2", kb_root_page_id=ROOT, kb_section="Conferences")
+
+    assert await ListKnowledgeSectionsAction().execute() == ["Conferences"]
