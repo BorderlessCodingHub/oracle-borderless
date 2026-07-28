@@ -10,3 +10,8 @@ def test_prompt_contains_the_literal_refusal_opening():
 
 def test_prompt_instructs_to_use_it_verbatim():
     assert "literalmente" in SYSTEM_PROMPT.lower()
+
+
+def test_prompt_contains_the_english_refusal_contiguously():
+    english_refusal = "I didn't find information about this in the knowledge base."
+    assert english_refusal in SYSTEM_PROMPT
