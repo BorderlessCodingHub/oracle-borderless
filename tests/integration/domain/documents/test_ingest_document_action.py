@@ -11,14 +11,21 @@ from src.domain.documents.repositories.document_chunk_repository import Document
 from src.domain.documents.repositories.document_repository import DocumentRepository
 from src.domain.documents.services.chunking_service import ChunkingService
 from src.support.core.exceptions import DomainError
+from src.support.core.settings import settings
+from src.support.utils.notion_ids import normalize_page_id
 from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
+
+ROOT = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
 
 
 @pytest.mark.asyncio
 async def test_ingest_persists_document_and_chunks(db_session):
     now = datetime(2026, 1, 1)
     long_content = "parágrafo. " * 400  # força múltiplos chunks
-    doc = Document(uuid4(), f"pid-{uuid4()}", "Guia", long_content, "https://n", "approved", now, now, None)
+    doc = Document(
+        uuid4(), f"pid-{uuid4()}", "Guia", long_content, "https://n", "approved", now, now, None,
+        kb_root_page_id=ROOT,
+    )
 
     action = IngestDocumentAction(embeddings=FakeEmbeddingsClient())
     persisted = await action.execute(doc)
@@ -81,11 +88,17 @@ async def test_ingest_is_idempotent_and_replaces_chunks(db_session):
 
     action = IngestDocumentAction(embeddings=FakeEmbeddingsClient())
 
-    first_doc = Document(uuid4(), page_id, "Guia", old_content, "https://n", "approved", now, now, None)
+    first_doc = Document(
+        uuid4(), page_id, "Guia", old_content, "https://n", "approved", now, now, None,
+        kb_root_page_id=ROOT,
+    )
     first = await action.execute(first_doc)
     await db_session.flush()
 
-    second_doc = Document(uuid4(), page_id, "Guia", new_content, "https://n", "approved", now, now, None)
+    second_doc = Document(
+        uuid4(), page_id, "Guia", new_content, "https://n", "approved", now, now, None,
+        kb_root_page_id=ROOT,
+    )
     second = await action.execute(second_doc)
     await db_session.flush()
 

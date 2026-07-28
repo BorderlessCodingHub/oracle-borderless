@@ -7,8 +7,11 @@ from src.domain.documents.entities.document import Document
 from src.domain.documents.entities.document_chunk import DocumentChunk
 from src.domain.documents.repositories.document_repository import DocumentRepository
 from src.domain.documents.repositories.document_chunk_repository import DocumentChunkRepository
+from src.support.core.settings import settings
+from src.support.utils.notion_ids import normalize_page_id
 
 DIM = 1536
+ROOT = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
 
 
 def _vec(seed: float):
@@ -19,7 +22,10 @@ def _vec(seed: float):
 async def test_search_similar_returns_nearest_approved(db_session):
     now = datetime(2026, 1, 1)
     doc = await DocumentRepository().upsert(
-        Document(uuid4(), f"pid-{uuid4()}", "Regras", "c", "https://n", "approved", now, now, None)
+        Document(
+            uuid4(), f"pid-{uuid4()}", "Regras", "c", "https://n", "approved", now, now, None,
+            kb_root_page_id=ROOT,
+        )
     )
     await db_session.flush()
 
@@ -45,13 +51,22 @@ async def test_search_similar_excludes_non_approved_and_deleted(db_session):
     now = datetime(2026, 1, 1)
 
     approved_doc = await DocumentRepository().upsert(
-        Document(uuid4(), f"pid-{uuid4()}", "Regras Aprovadas", "c", "https://n", "approved", now, now, None)
+        Document(
+            uuid4(), f"pid-{uuid4()}", "Regras Aprovadas", "c", "https://n", "approved", now, now, None,
+            kb_root_page_id=ROOT,
+        )
     )
     pending_doc = await DocumentRepository().upsert(
-        Document(uuid4(), f"pid-{uuid4()}", "Rascunho Pendente", "c", "https://n", "pending", now, now, None)
+        Document(
+            uuid4(), f"pid-{uuid4()}", "Rascunho Pendente", "c", "https://n", "pending", now, now, None,
+            kb_root_page_id=ROOT,
+        )
     )
     deleted_doc = await DocumentRepository().upsert(
-        Document(uuid4(), f"pid-{uuid4()}", "Documento Removido", "c", "https://n", "approved", now, now, now)
+        Document(
+            uuid4(), f"pid-{uuid4()}", "Documento Removido", "c", "https://n", "approved", now, now, now,
+            kb_root_page_id=ROOT,
+        )
     )
     await db_session.flush()
 

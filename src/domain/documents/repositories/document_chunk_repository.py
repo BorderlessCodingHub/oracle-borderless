@@ -10,6 +10,7 @@ from src.domain.shared.value_objects.citation import Citation
 from src.support.agent.ports import KnowledgeSnippet
 from src.support.core.context import CurrentAsyncSessionContext
 from src.support.core.settings import settings
+from src.support.utils.notion_ids import normalize_page_id
 
 
 class DocumentChunkRepository:
@@ -36,7 +37,14 @@ class DocumentChunkRepository:
                 DocumentModel.notion_page_id,
             )
             .join(DocumentModel, DocumentChunkModel.document_id == DocumentModel.uuid)
-            .where(DocumentModel.status == "approved", DocumentModel.deleted_at.is_(None))
+            .where(
+                DocumentModel.status == "approved",
+                DocumentModel.deleted_at.is_(None),
+                # Escopo como invariante de leitura (ADR-0012): documento de outro
+                # root — ou sem procedência — não é servido, mesmo sem sync.
+                DocumentModel.kb_root_page_id
+                == normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID),
+            )
             .order_by(DocumentChunkModel.embedding.cosine_distance(embedding))
             .limit(limit)
         )
