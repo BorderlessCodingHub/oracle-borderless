@@ -34,6 +34,7 @@ class NotionPage:
     url: str
     is_approved: bool
     last_edited_time: datetime | None = None
+    section: str | None = None  # ancestral de 1º nível abaixo do root (ADR-0012)
 
 
 def _parse_ts(value: Any) -> datetime | None:
@@ -165,11 +166,14 @@ class NotionClient:
         Desce apenas em `child_page` aprovadas pela policy. `child_database`
         (linhas de banco / PII) e demais blocos de conteúdo ficam fora — e a
         subárvore de uma página rejeitada pela denylist não é visitada.
+
+        Cada página carrega sua `section`: o título do ancestral de primeiro nível
+        abaixo do root. Filhos diretos do root são sua própria seção.
         """
         approved: list[NotionPage] = []
-        stack = [root_id]
+        stack: list[tuple[str, str | None]] = [(root_id, None)]
         while stack:
-            parent_id = stack.pop()
+            parent_id, inherited = stack.pop()
             for block in await self._child_blocks(call, parent_id):
                 if block.get("type") != "child_page":
                     continue
@@ -177,6 +181,7 @@ class NotionClient:
                 ref = NotionPageRef(object_type="page", parent_type="page_id", title=title)
                 if not self._policy.should_ingest(ref):
                     continue
+                section = inherited if inherited is not None else title.strip()
                 approved.append(
                     NotionPage(
                         id=block["id"],
@@ -185,9 +190,10 @@ class NotionClient:
                         url="",
                         is_approved=True,
                         last_edited_time=_parse_ts(block.get("last_edited_time")),
+                        section=section,
                     )
                 )
-                stack.append(block["id"])
+                stack.append((block["id"], section))
         return approved
 
     @staticmethod

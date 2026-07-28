@@ -68,3 +68,29 @@ async def test_list_approved_pages_raises_when_root_not_configured(monkeypatch):
 
     with pytest.raises(KnowledgeBaseConfigError):
         await client.list_approved_pages()
+
+
+@pytest.mark.asyncio
+async def test_collect_scope_propagates_section_from_first_level():
+    # root → [Bootcamps, Programs] ; Bootcamps → [Web3] ; Web3 → [Edição 02]
+    tree = {
+        "root": [_child_page("BC", "Bootcamps"), _child_page("PR", "Programs")],
+        "BC": [_child_page("W3", "Web3 Global Developer")],
+        "W3": [_child_page("E2", "Edição #02")],
+        "PR": [],
+        "E2": [],
+    }
+    pages = await NotionClient()._collect_scope(_make_call(tree, []), "root")
+    section_by_id = {p.id: p.section for p in pages}
+
+    assert section_by_id["BC"] == "Bootcamps"   # filho direto: seção é ele mesmo
+    assert section_by_id["PR"] == "Programs"
+    assert section_by_id["W3"] == "Bootcamps"   # neto herda
+    assert section_by_id["E2"] == "Bootcamps"   # bisneto herda
+
+
+@pytest.mark.asyncio
+async def test_collect_scope_strips_section_title():
+    tree = {"root": [_child_page("CF", "Conferences ")], "CF": []}
+    pages = await NotionClient()._collect_scope(_make_call(tree, []), "root")
+    assert pages[0].section == "Conferences"

@@ -5,6 +5,7 @@ from src.support.clients.notion.notion_client import NotionClient
 from src.support.core.console.command import Command
 from src.support.core.context import CurrentAsyncSessionContext
 from src.support.core.database import AsyncSessionLocal
+from src.support.core.settings import settings
 
 
 class KnowledgeIngestCommand(Command):
@@ -17,7 +18,8 @@ class KnowledgeIngestCommand(Command):
             CurrentAsyncSessionContext.set(session)
             try:
                 page = await NotionClient().get_page(page_id)
-                document = NotionPageMapper.to_document(page)
+                root_page_id = settings.NOTION_KB_ROOT_PAGE_ID or ""
+                document = NotionPageMapper.to_document(page, root_page_id)
                 action = IngestDocumentAction(embeddings=get_embeddings_client())
                 result = await action.execute(document)
                 await session.commit()

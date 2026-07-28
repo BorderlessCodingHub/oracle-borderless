@@ -7,6 +7,7 @@ from src.domain.documents.mappers.notion_page_mapper import NotionPageMapper
 from src.domain.documents.repositories.document_chunk_repository import DocumentChunkRepository
 from src.domain.documents.repositories.document_repository import DocumentRepository
 from src.support.core.context import CurrentAsyncSessionContext
+from src.support.core.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class SyncKnowledgeBaseAction:
 
     async def execute(self, force: bool = False, limit: int | None = None) -> SyncReport:
         approved = await self.notion.list_approved_pages()
+        root_page_id = settings.NOTION_KB_ROOT_PAGE_ID or ""
         existing = {doc.notion_page_id: doc for doc in await self.documents.list_all()}
         report = SyncReport(total_approved=len(approved))
 
@@ -71,7 +73,10 @@ class SyncKnowledgeBaseAction:
                 try:
                     async with self._atomic():
                         full = await self.notion.get_page(page.id)
-                        await self.ingest.execute(NotionPageMapper.to_document(full))
+                        full.section = page.section
+                        await self.ingest.execute(
+                            NotionPageMapper.to_document(full, root_page_id)
+                        )
                     report.ingested += 1
                 except Exception as exc:  # falha de uma página não derruba o bloco
                     logger.warning(
