@@ -7,6 +7,8 @@ from src.domain.documents.entities.document import Document
 from src.domain.documents.mappers import DocumentMapper
 from src.domain.documents.models.document import DocumentModel
 from src.support.core.context import CurrentAsyncSessionContext
+from src.support.core.settings import settings
+from src.support.utils.notion_ids import normalize_page_id
 
 
 class DocumentRepository:
@@ -66,3 +68,18 @@ class DocumentRepository:
         if model is not None:
             model.deleted_at = when
             await self.session.flush()
+
+    async def list_sections(self) -> list[str]:
+        """Seções distintas dos documentos ativos do root vigente, ordenadas."""
+        result = await self.session.execute(
+            select(DocumentModel.kb_section)
+            .where(
+                DocumentModel.status == "approved",
+                DocumentModel.deleted_at.is_(None),
+                DocumentModel.kb_section.is_not(None),
+                DocumentModel.kb_root_page_id
+                == normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID),
+            )
+            .distinct()
+        )
+        return sorted({(s or "").strip() for s in result.scalars().all() if (s or "").strip()})
