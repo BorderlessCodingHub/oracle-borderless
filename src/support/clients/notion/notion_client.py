@@ -18,6 +18,7 @@ from src.domain.documents.services.knowledge_curation_policy import (
 from src.support.clients.notion.mcp_session import ToolCall, notion_mcp_session
 from src.support.clients.notion.page_markdown_assembler import PageMarkdownAssembler
 from src.support.core.settings import settings
+from src.support.utils.notion_ids import normalize_page_id
 
 
 class KnowledgeBaseConfigError(RuntimeError):
@@ -34,6 +35,7 @@ class NotionPage:
     url: str
     is_approved: bool
     last_edited_time: datetime | None = None
+    section: str | None = None  # ancestral de 1º nível abaixo do root (ADR-0012)
 
 
 def _parse_ts(value: Any) -> datetime | None:
@@ -82,6 +84,32 @@ class NotionClient:
         async with notion_mcp_session() as call:
             return await self._assemble(call, page_id)
 
+    async def get_page_in_scope(self, page_id: str) -> NotionPage | None:
+        """Página **só se** dentro da subárvore do root (ADR-0011); senão ``None``.
+
+        Acesso avulso por id (ex.: tool do agente) não passa pela travessia de
+        descoberta, então precisa checar ancestralidade — do contrário qualquer
+        página do workspace visível à integração viraria contexto de resposta.
+        """
+        root_id = self._require_root()
+        async with notion_mcp_session() as call:
+            if not await self._is_in_scope(call, page_id, root_id):
+                return None
+            page = await call("API-retrieve-a-page", {"page_id": page_id})
+            markdown = await self._assemble(call, page_id)
+
+        title = _extract_title(page)
+        parent_type = page.get("parent", {}).get("type", "")
+        ref = NotionPageRef(object_type="page", parent_type=parent_type, title=title)
+        return NotionPage(
+            id=page_id,
+            title=title,
+            content=markdown,
+            url=page.get("url", ""),
+            is_approved=self._policy.should_ingest(ref),
+            last_edited_time=_parse_ts(page.get("last_edited_time")),
+        )
+
     async def list_approved_pages(self) -> list[NotionPage]:
         """Páginas-documento aprovadas — só o subtree do folder raiz configurado.
 
@@ -89,14 +117,43 @@ class NotionClient:
         "Products"). Sem root configurado, **aborta** em vez de devolver ``[]``:
         o sync completo removeria (soft-delete) toda a base ao reconciliar.
         """
+        root_id = self._require_root()
+        async with notion_mcp_session() as call:
+            return await self._collect_scope(call, root_id)
+
+    @staticmethod
+    def _require_root() -> str:
         root_id = settings.NOTION_KB_ROOT_PAGE_ID
         if not root_id or root_id.lstrip().startswith("#"):
             raise KnowledgeBaseConfigError(
                 "NOTION_KB_ROOT_PAGE_ID não configurado — a KB é o subtree do folder "
                 "Products; sem root, o sync abortaria e apagaria toda a base."
             )
-        async with notion_mcp_session() as call:
-            return await self._collect_scope(call, root_id)
+        return root_id
+
+    async def _is_in_scope(
+        self, call: ToolCall, page_id: str, root_id: str | None = None
+    ) -> bool:
+        """A página é o root ou descende dele? Sobe a cadeia de `parent`.
+
+        Para em `workspace` (topo) ou `database_id` (linha de banco): nenhum dos
+        dois pode ser descendente do root. `seen` protege de ciclo/repetição.
+        """
+        target = normalize_page_id(root_id or self._require_root())
+        current = page_id
+        seen: set[str] = set()
+        while True:
+            key = normalize_page_id(current)
+            if key == target:
+                return True
+            if key in seen:
+                return False
+            seen.add(key)
+            page = await call("API-retrieve-a-page", {"page_id": current})
+            parent = page.get("parent", {})
+            if parent.get("type") != "page_id":
+                return False  # workspace ou database_id — fora da subárvore
+            current = parent["page_id"]
 
     async def _collect_scope(self, call: ToolCall, root_id: str) -> list[NotionPage]:
         """Percorre a subárvore de `root_id` e devolve só páginas-documento aprovadas.
@@ -104,11 +161,14 @@ class NotionClient:
         Desce apenas em `child_page` aprovadas pela policy. `child_database`
         (linhas de banco / PII) e demais blocos de conteúdo ficam fora — e a
         subárvore de uma página rejeitada pela denylist não é visitada.
+
+        Cada página carrega sua `section`: o título do ancestral de primeiro nível
+        abaixo do root. Filhos diretos do root são sua própria seção.
         """
         approved: list[NotionPage] = []
-        stack = [root_id]
+        stack: list[tuple[str, str | None]] = [(root_id, None)]
         while stack:
-            parent_id = stack.pop()
+            parent_id, inherited = stack.pop()
             for block in await self._child_blocks(call, parent_id):
                 if block.get("type") != "child_page":
                     continue
@@ -116,6 +176,7 @@ class NotionClient:
                 ref = NotionPageRef(object_type="page", parent_type="page_id", title=title)
                 if not self._policy.should_ingest(ref):
                     continue
+                section = inherited if inherited is not None else title.strip()
                 approved.append(
                     NotionPage(
                         id=block["id"],
@@ -124,9 +185,10 @@ class NotionClient:
                         url="",
                         is_approved=True,
                         last_edited_time=_parse_ts(block.get("last_edited_time")),
+                        section=section,
                     )
                 )
-                stack.append(block["id"])
+                stack.append((block["id"], section))
         return approved
 
     @staticmethod

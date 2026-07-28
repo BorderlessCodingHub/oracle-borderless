@@ -40,9 +40,20 @@ class WebSearchTool:
 
 
 class FetchNotionTool:
+    """Busca uma página do Notion por id — **restrita ao escopo da KB** (ADR-0011).
+
+    O id chega do modelo (via citação ou inferência), não da travessia de
+    descoberta, então o escopo tem de ser checado aqui: sem isso a tool leria
+    qualquer página do workspace visível à integração.
+    """
+
     def __init__(self, notion: NotionClient) -> None:
         self._notion = notion
 
     async def run(self, page_id: str) -> str:
-        page = await self._notion.get_page(page_id)
+        page = await self._notion.get_page_in_scope(page_id)
+        if page is None:
+            return wrap_tool_content(
+                "(página fora do escopo da base de conhecimento — não disponível)"
+            )
         return wrap_tool_content(f"[{page.title} — {page.url}]\n{page.content}")

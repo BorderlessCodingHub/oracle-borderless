@@ -8,7 +8,10 @@
 #   3. Espera o banco ficar saudável.
 #   4. Roda as migrations (alembic upgrade head).
 #   5. Roda os seeds de dev — tolerando falha (ex.: sem OPENAI_API_KEY).
-#   6. Sobe a aplicação: uvicorn main:app --reload (bloqueante).
+#   6. Sobe o backend (uvicorn main:app --reload) em background e espera o /health.
+#   7. Sobe o frontend (vite dev server) em primeiro plano (bloqueante).
+#
+# Ctrl+C derruba os dois — o backend é morto junto com o frontend.
 #
 # Uso:  ./start_dev
 #
@@ -23,6 +26,12 @@ CONTAINER="oracle_borderless_db"
 ENV_FILE=".env"
 CANDIDATE_PORTS=(5432 5434 5435 5436 5437)
 
+FRONTEND_DIR="frontend"
+FRONTEND_ENV_FILE="$FRONTEND_DIR/.env"
+# Porta do backend: fixa, porque o proxy do vite (frontend/vite.config.ts) aponta
+# para http://localhost:8000.
+API_PORT=8000
+
 # --- Helpers de log ---
 info()  { printf '\033[1;34m›\033[0m %s\n' "$*"; }
 ok()    { printf '\033[1;32m✓\033[0m %s\n' "$*"; }
@@ -32,30 +41,46 @@ die()   { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 # Porta livre no host? (usa /dev/tcp — não depende de ss/lsof)
 port_free() { ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
 
-# Lê o valor de uma chave do .env (vazio se ausente).
-env_get() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true; }
+# Lê o valor de uma chave de um arquivo .env (vazio se ausente).
+env_get() { grep -E "^$2=" "$1" 2>/dev/null | tail -1 | cut -d= -f2- || true; }
 
-# Grava/atualiza uma chave no .env.
+# Grava/atualiza uma chave em um arquivo .env.
 env_set() {
-    local key="$1" val="$2"
-    if grep -qE "^$key=" "$ENV_FILE" 2>/dev/null; then
-        sed -i "s|^$key=.*|$key=$val|" "$ENV_FILE"
+    local file="$1" key="$2" val="$3"
+    if grep -qE "^$key=" "$file" 2>/dev/null; then
+        sed -i "s|^$key=.*|$key=$val|" "$file"
     else
-        printf '%s=%s\n' "$key" "$val" >> "$ENV_FILE"
+        printf '%s=%s\n' "$key" "$val" >> "$file"
     fi
 }
 
 command -v docker >/dev/null || die "docker não encontrado no PATH."
 command -v uv >/dev/null     || die "uv não encontrado no PATH."
+command -v npm >/dev/null    || die "npm não encontrado no PATH (necessário para o frontend)."
+command -v curl >/dev/null   || die "curl não encontrado no PATH (usado no health check do backend)."
+command -v setsid >/dev/null || die "setsid não encontrado no PATH (usado para derrubar o backend junto com o script)."
+[[ -d "$FRONTEND_DIR" ]]     || die "Diretório '$FRONTEND_DIR' não encontrado."
 
 # ---------------------------------------------------------------------------
-# 1. .env
+# 1. .env (backend e frontend)
 # ---------------------------------------------------------------------------
 if [[ ! -f "$ENV_FILE" ]]; then
     cp .env.example "$ENV_FILE"
     warn "Criado .env a partir de .env.example — preencha as chaves (ANTHROPIC/OPENAI/NOTION_MCP/TAVILY) quando for usar o oráculo de verdade."
 else
     ok ".env já existe."
+fi
+
+if [[ ! -f "$FRONTEND_ENV_FILE" ]]; then
+    cp "$FRONTEND_DIR/.env.example" "$FRONTEND_ENV_FILE"
+    # O .env.example do frontend vem com demo mode ligado; aqui o backend real
+    # sobe junto, então o default do start_dev é falar com a API.
+    env_set "$FRONTEND_ENV_FILE" VITE_DEMO_MODE "false"
+    warn "Criado $FRONTEND_ENV_FILE (VITE_DEMO_MODE=false — usando o backend local)."
+else
+    ok "$FRONTEND_ENV_FILE já existe."
+    [[ "$(env_get "$FRONTEND_ENV_FILE" VITE_DEMO_MODE)" == "true" ]] \
+        && warn "VITE_DEMO_MODE=true em $FRONTEND_ENV_FILE — o frontend vai ignorar o backend e usar dados de demo."
 fi
 
 # ---------------------------------------------------------------------------
@@ -71,7 +96,7 @@ fi
 
 # Senão, respeita DB_PORT do .env se ainda estiver livre.
 if [[ -z "$DB_PORT" ]]; then
-    current="$(env_get DB_PORT)"
+    current="$(env_get "$ENV_FILE" DB_PORT)"
     if [[ -n "$current" ]] && port_free "$current"; then
         DB_PORT="$current"
     fi
@@ -86,8 +111,8 @@ if [[ -z "$DB_PORT" ]]; then
     [[ "$DB_PORT" != "5432" ]] && warn "Porta 5432 ocupada — usando $DB_PORT."
 fi
 
-env_set DB_PORT "$DB_PORT"
-env_set DB_HOST "localhost"
+env_set "$ENV_FILE" DB_PORT "$DB_PORT"
+env_set "$ENV_FILE" DB_HOST "localhost"
 export DB_PORT
 ok "Postgres mapeado na porta $DB_PORT do host."
 
@@ -142,10 +167,63 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 6. Sobe a aplicação
+# 6. Dependências do frontend
 # ---------------------------------------------------------------------------
-ok "Ambiente pronto. Subindo a API em http://localhost:8000 (Ctrl+C para parar)…"
-# --reload-include .env: o uvicorn só recarrega em mudança de *.py por padrão;
-# incluir o .env faz o servidor reiniciar (e reler as settings) quando você
-# edita chaves como OPENAI_API_KEY — sem isso, a mudança só vale no próximo start.
-exec uv run uvicorn main:app --reload --reload-include .env --host 0.0.0.0 --port 8000
+if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
+    info "Instalando dependências do frontend (npm ci)…"
+    (cd "$FRONTEND_DIR" && npm ci)
+    ok "Dependências do frontend instaladas."
+else
+    ok "node_modules do frontend já existe."
+fi
+
+# ---------------------------------------------------------------------------
+# 7. Backend em background
+# ---------------------------------------------------------------------------
+API_PID=""
+
+api_healthy() { curl -fsS -m 2 "http://localhost:$API_PORT/health" >/dev/null 2>&1; }
+
+# O uvicorn --reload é um supervisor que forka um worker; matar só o PID pai
+# deixa o worker órfão segurando a porta 8000. Rodar em sessão própria (setsid)
+# permite matar o grupo inteiro de uma vez.
+stop_api() {
+    [[ -n "$API_PID" ]] || return 0
+    local pid="$API_PID"
+    API_PID=""
+    info "Derrubando o backend (pid $pid)…"
+    kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+}
+trap stop_api EXIT INT TERM
+
+if port_free "$API_PORT"; then
+    info "Subindo o backend em http://localhost:$API_PORT…"
+    # --reload-include .env: o uvicorn só recarrega em mudança de *.py por padrão;
+    # incluir o .env faz o servidor reiniciar (e reler as settings) quando você
+    # edita chaves como OPENAI_API_KEY — sem isso, a mudança só vale no próximo start.
+    setsid uv run uvicorn main:app --reload --reload-include .env --host 0.0.0.0 --port "$API_PORT" &
+    API_PID=$!
+
+    info "Aguardando o backend responder em /health…"
+    for _ in $(seq 1 30); do
+        kill -0 "$API_PID" 2>/dev/null || die "O backend morreu durante o boot — veja os logs acima."
+        api_healthy && break
+        sleep 1
+    done
+    api_healthy || die "Backend não respondeu ao /health a tempo."
+    ok "Backend pronto em http://localhost:$API_PORT (docs em /docs)."
+elif api_healthy; then
+    # Backend já de pé (outro terminal / run anterior). Reutiliza em vez de
+    # brigar pela porta — e NÃO derruba no fim, porque não é nosso.
+    warn "Já existe um backend saudável em http://localhost:$API_PORT — reutilizando (não será derrubado no Ctrl+C)."
+else
+    die "Porta $API_PORT está ocupada por outro processo que não responde ao /health. Derrube-o e rode de novo."
+fi
+
+# ---------------------------------------------------------------------------
+# 8. Frontend em primeiro plano
+# ---------------------------------------------------------------------------
+ok "Subindo o frontend (vite) em http://localhost:5173 (Ctrl+C para parar tudo)…"
+cd "$FRONTEND_DIR"
+npm run dev

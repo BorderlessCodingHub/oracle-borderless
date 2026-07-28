@@ -9,11 +9,21 @@ from src.domain.conversations.entities.message import Message
 from src.domain.conversations.repositories.conversation_repository import ConversationRepository
 from src.domain.conversations.repositories.message_repository import MessageRepository
 from src.domain.conversations.services.conversation_access_policy import ConversationAccessPolicy
+from src.domain.conversations.services.out_of_scope_reply import build_out_of_scope_reply
+from src.domain.documents.actions.list_knowledge_sections_action import (
+    ListKnowledgeSectionsAction,
+)
 from src.domain.documents.actions.search_knowledge_base_action import SearchKnowledgeBaseAction
 from src.support.agent.ports import AgentStreamChunk, OracleEnginePort, RetrievalGatePort
 from src.support.core.exceptions import NotFoundError
 
 _TITLE_MAX = 80
+
+
+async def _refusal_stream(text: str) -> AsyncIterator[AgentStreamChunk]:
+    """Stream de recusa no mesmo contrato do motor: texto + sources vazio."""
+    yield AgentStreamChunk(type="text", text=text)
+    yield AgentStreamChunk(type="sources", citations=[])
 
 
 class AnswerQuestionAction:
@@ -22,11 +32,16 @@ class AnswerQuestionAction:
     delega o streaming ao motor. Composição de Actions/repos + engine."""
 
     def __init__(
-        self, engine: OracleEnginePort, search: SearchKnowledgeBaseAction, gate: RetrievalGatePort
+        self,
+        engine: OracleEnginePort,
+        search: SearchKnowledgeBaseAction,
+        gate: RetrievalGatePort,
+        sections=None,
     ) -> None:
         self.engine = engine
         self.search = search
         self.gate = gate
+        self.sections = sections or ListKnowledgeSectionsAction()
         self.conversations = ConversationRepository()
         self.messages = MessageRepository()
 
@@ -70,6 +85,18 @@ class AnswerQuestionAction:
 
         if decision.retrieve:
             knowledge = await self.search.execute(decision.search_query)  # query reescrita
+            if not knowledge and not decision.degraded:
+                # Nada passou do limiar: recusa determinística, sem chamar o LLM.
+                # Só vale quando o gate PEDIU busca de verdade — `retrieve=False`
+                # (saudação, agradecimento) também dá knowledge vazio e deve ir ao
+                # motor, e um gate `degraded` (erro/timeout) nunca classificou o
+                # turno: `retrieve=True` ali é só o chute de segurança do
+                # fail-open, não uma decisão fundamentada — recusar seria
+                # injustificado (ex.: "oi" durante um timeout do gate). Cai no
+                # motor com o knowledge que houver (possivelmente vazio), que é o
+                # comportamento seguro pré-existente.
+                reply = build_out_of_scope_reply(await self.sections.execute(), question)
+                return conversation.uuid, _refusal_stream(reply)
         else:
             knowledge = []  # nada injetado — sem poluição de contexto
 

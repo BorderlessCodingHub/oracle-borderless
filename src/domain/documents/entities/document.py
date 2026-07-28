@@ -17,6 +17,8 @@ class Document:
     updated_at: datetime
     deleted_at: datetime | None = None
     last_edited_time: datetime | None = None  # last_edited_time do Notion (sync incremental)
+    kb_root_page_id: str | None = None  # root da KB sob o qual foi ingerido (ADR-0012)
+    kb_section: str | None = None  # seção = ancestral de 1º nível abaixo do root
 
     def is_approved(self) -> bool:
         return self.status == "approved" and self.deleted_at is None

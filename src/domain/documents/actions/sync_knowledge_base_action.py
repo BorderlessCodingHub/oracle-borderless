@@ -7,6 +7,8 @@ from src.domain.documents.mappers.notion_page_mapper import NotionPageMapper
 from src.domain.documents.repositories.document_chunk_repository import DocumentChunkRepository
 from src.domain.documents.repositories.document_repository import DocumentRepository
 from src.support.core.context import CurrentAsyncSessionContext
+from src.support.core.settings import settings
+from src.support.utils.notion_ids import normalize_page_id
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,7 @@ class SyncKnowledgeBaseAction:
 
     async def execute(self, force: bool = False, limit: int | None = None) -> SyncReport:
         approved = await self.notion.list_approved_pages()
+        root_page_id = settings.NOTION_KB_ROOT_PAGE_ID or ""
         existing = {doc.notion_page_id: doc for doc in await self.documents.list_all()}
         report = SyncReport(total_approved=len(approved))
 
@@ -66,12 +69,25 @@ class SyncKnowledgeBaseAction:
                 or current is None
                 or current.deleted_at is not None
                 or _is_stale(page.last_edited_time, current.last_edited_time)
+                # Auto-cura: se a provenência gravada não bate com o root atual
+                # (ex.: coluna NULL logo após a migração 0004, ou troca de
+                # NOTION_KB_ROOT_PAGE_ID), reingere mesmo sem --force. Sem isso,
+                # um sync incremental nunca re-stampa `kb_root_page_id` e o
+                # retrieval filtrado por root passa a devolver [] pra sempre.
+                or (
+                    current is not None
+                    and normalize_page_id(current.kb_root_page_id)
+                    != normalize_page_id(root_page_id)
+                )
             )
             if needs_ingest:
                 try:
                     async with self._atomic():
                         full = await self.notion.get_page(page.id)
-                        await self.ingest.execute(NotionPageMapper.to_document(full))
+                        full.section = page.section
+                        await self.ingest.execute(
+                            NotionPageMapper.to_document(full, root_page_id)
+                        )
                     report.ingested += 1
                 except Exception as exc:  # falha de uma página não derruba o bloco
                     logger.warning(

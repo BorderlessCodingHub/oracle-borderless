@@ -6,7 +6,8 @@ import pytest
 from src.domain.conversations.actions.answer_question_action import AnswerQuestionAction
 from src.domain.conversations.entities.conversation import Conversation
 from src.domain.conversations.entities.message import Message
-from src.support.agent.ports import AgentMessage, AgentStreamChunk
+from src.domain.shared.value_objects.citation import Citation
+from src.support.agent.ports import AgentMessage, AgentStreamChunk, KnowledgeSnippet
 from src.support.core.exceptions import NotFoundError, UnauthorizedDomainError
 
 
@@ -21,8 +22,24 @@ def _msg(content: str, role: str = "user", conversation_id=None) -> Message:
 
 
 class _FakeSearch:
-    async def execute(self, question):
-        return []
+    """Por padrão devolve 1 trecho não-vazio: estes testes exercitam mecânica de
+    conversa (título, persistência, ordem do histórico), não retrieval — precisam
+    seguir para o engine, não cair no caminho de recusa (retrieve=True + [] vazio)."""
+
+    def __init__(self, hits=None):
+        self.hits = (
+            hits
+            if hits is not None
+            else [KnowledgeSnippet("trecho", Citation("notion", "Doc", "https://n/a", "s", "pid"))]
+        )
+
+    async def execute(self, question, top_k=None):
+        return self.hits
+
+
+class _FakeSections:
+    async def execute(self):
+        return ["Bootcamps", "Programs"]
 
 
 class _FakeEngine:
@@ -71,7 +88,10 @@ def _make(engine, search, conv_repo, msg_repo, gate=None):
     from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
 
     action = AnswerQuestionAction(
-        engine=engine, search=search, gate=gate or FakeRetrievalGate(retrieve=True)
+        engine=engine,
+        search=search,
+        gate=gate or FakeRetrievalGate(retrieve=True),
+        sections=_FakeSections(),
     )
     action.conversations = conv_repo
     action.messages = msg_repo
@@ -171,6 +191,28 @@ async def test_gate_skip_injects_no_knowledge_and_skips_search():
 
     assert search.calls == []  # não recuperou
     assert engine.received_knowledge == []
+
+
+@pytest.mark.asyncio
+async def test_degraded_decision_with_empty_knowledge_falls_through_to_engine():
+    """Gate degradado (erro/timeout) não classificou o turno de verdade — uma
+    recusa aqui seria injustificada (ex.: "oi" durante um timeout do gate).
+    Com knowledge vazio, deve cair no engine mesmo assim, não na recusa."""
+    from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
+
+    engine, conv_repo, msg_repo = _FakeEngine(), _FakeConvRepo(), _FakeMsgRepo()
+    search = _FakeSearch(hits=[])  # nada recuperado
+    gate = FakeRetrievalGate(retrieve=True, degraded=True)
+    action = _make(engine, search, conv_repo, msg_repo, gate=gate)
+
+    _cid, stream = await action.execute("oi", None, "a@x.com")
+    chunks = [c async for c in stream]
+
+    # engine foi chamado (não a recusa determinística)
+    assert engine.received_question == "oi"
+    assert not any(
+        c.type == "text" and "Não encontrei informações" in c.text for c in chunks
+    )
 
 
 @pytest.mark.asyncio

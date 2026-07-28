@@ -7,6 +7,8 @@ from src.domain.documents.entities.document import Document
 from src.domain.documents.mappers import DocumentMapper
 from src.domain.documents.models.document import DocumentModel
 from src.support.core.context import CurrentAsyncSessionContext
+from src.support.core.settings import settings
+from src.support.utils.notion_ids import normalize_page_id
 
 
 class DocumentRepository:
@@ -37,7 +39,16 @@ class DocumentRepository:
             model = DocumentModel(**attrs)
             self.session.add(model)
         else:
-            for key in ("title", "content", "source_url", "status", "deleted_at", "last_edited_time"):
+            for key in (
+                "title",
+                "content",
+                "source_url",
+                "status",
+                "deleted_at",
+                "last_edited_time",
+                "kb_root_page_id",
+                "kb_section",
+            ):
                 setattr(model, key, attrs[key])
         await self.session.flush()
         await self.session.refresh(model)
@@ -57,3 +68,26 @@ class DocumentRepository:
         if model is not None:
             model.deleted_at = when
             await self.session.flush()
+
+    async def list_sections(self) -> list[str]:
+        """Seções distintas dos documentos ativos do root vigente, ordenadas."""
+        root = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
+        if root is None:
+            # Guarda deliberada, não simplificar: `DocumentModel.kb_root_page_id
+            # == None` compila para `WHERE kb_root_page_id IS NULL`, que
+            # combina exatamente com os documentos sem procedência — o
+            # conjunto que este filtro existe para excluir. Sem root
+            # configurado, a lista de seções degrada para vazia em vez de
+            # expor tudo que não tem procedência.
+            return []
+        result = await self.session.execute(
+            select(DocumentModel.kb_section)
+            .where(
+                DocumentModel.status == "approved",
+                DocumentModel.deleted_at.is_(None),
+                DocumentModel.kb_section.is_not(None),
+                DocumentModel.kb_root_page_id == root,
+            )
+            .distinct()
+        )
+        return sorted({(s or "").strip() for s in result.scalars().all() if (s or "").strip()})

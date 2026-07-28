@@ -71,6 +71,18 @@ async def test_fails_open_on_timeout():
 
 
 @pytest.mark.asyncio
+async def test_marks_decision_degraded_on_error():
+    """A gate NÃO classificou o turno — só chutou retrieve=True por segurança.
+    O chamador precisa saber disso pra não tratar como recusa fundamentada."""
+    agent = _StubAgent(raises=RuntimeError("boom"))
+    gate = RetrievalGate(agent=agent)
+
+    decision = await gate.decide("oi", [])
+
+    assert decision.degraded is True
+
+
+@pytest.mark.asyncio
 async def test_coerces_blank_query_to_raw_question():
     agent = _StubAgent(output=RetrievalDecision(retrieve=True, search_query="   "))
     gate = RetrievalGate(agent=agent)
