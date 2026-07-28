@@ -15,16 +15,22 @@ from src.support.core.settings import settings
 from src.support.utils.notion_ids import normalize_page_id
 from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
 
-ROOT = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
+# Literal fixo (não lido de settings ao vivo): se NOTION_KB_ROOT_PAGE_ID nunca
+# estivesse setado em ambiente algum, `normalize_page_id(settings...)` viraria
+# None e — via o guard-clause do repository — o teste continuaria passando
+# sem de fato exercitar o filtro de escopo.
+ROOT = "23d8d655-c889-806d-8828-d527ce6a1529"
+NORMALIZED_ROOT = normalize_page_id(ROOT)
 
 
 @pytest.mark.asyncio
-async def test_ingest_persists_document_and_chunks(db_session):
+async def test_ingest_persists_document_and_chunks(db_session, monkeypatch):
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
     now = datetime(2026, 1, 1)
     long_content = "parágrafo. " * 400  # força múltiplos chunks
     doc = Document(
         uuid4(), f"pid-{uuid4()}", "Guia", long_content, "https://n", "approved", now, now, None,
-        kb_root_page_id=ROOT,
+        kb_root_page_id=NORMALIZED_ROOT,
     )
 
     action = IngestDocumentAction(embeddings=FakeEmbeddingsClient())
@@ -79,8 +85,9 @@ async def test_ingest_rejects_non_approved_document(db_session):
 
 
 @pytest.mark.asyncio
-async def test_ingest_is_idempotent_and_replaces_chunks(db_session):
+async def test_ingest_is_idempotent_and_replaces_chunks(db_session, monkeypatch):
     """Re-ingerir a mesma notion_page_id deve atualizar o documento in place e substituir os chunks, sem acumular."""
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
     now = datetime(2026, 1, 1)
     page_id = f"pid-{uuid4()}"
     old_content = "conteúdo antigo sobre regras antigas. " * 400
@@ -90,14 +97,14 @@ async def test_ingest_is_idempotent_and_replaces_chunks(db_session):
 
     first_doc = Document(
         uuid4(), page_id, "Guia", old_content, "https://n", "approved", now, now, None,
-        kb_root_page_id=ROOT,
+        kb_root_page_id=NORMALIZED_ROOT,
     )
     first = await action.execute(first_doc)
     await db_session.flush()
 
     second_doc = Document(
         uuid4(), page_id, "Guia", new_content, "https://n", "approved", now, now, None,
-        kb_root_page_id=ROOT,
+        kb_root_page_id=NORMALIZED_ROOT,
     )
     second = await action.execute(second_doc)
     await db_session.flush()

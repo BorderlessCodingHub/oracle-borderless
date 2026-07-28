@@ -28,6 +28,15 @@ class DocumentChunkRepository:
     async def search_similar(
         self, embedding: list[float], top_k: int | None = None
     ) -> list[KnowledgeSnippet]:
+        root = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
+        if root is None:
+            # Guarda deliberada, não simplificar: `DocumentModel.kb_root_page_id
+            # == None` compila para `WHERE kb_root_page_id IS NULL`, que
+            # combina exatamente com os documentos sem procedência — o
+            # conjunto que este filtro existe para excluir. Sem root
+            # configurado, a retrieval degrada para "sem conhecimento"
+            # (lista vazia) em vez de expor tudo que não tem procedência.
+            return []
         limit = top_k if top_k is not None else settings.RAG_TOP_K
         stmt = (
             select(
@@ -42,8 +51,7 @@ class DocumentChunkRepository:
                 DocumentModel.deleted_at.is_(None),
                 # Escopo como invariante de leitura (ADR-0012): documento de outro
                 # root — ou sem procedência — não é servido, mesmo sem sync.
-                DocumentModel.kb_root_page_id
-                == normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID),
+                DocumentModel.kb_root_page_id == root,
             )
             .order_by(DocumentChunkModel.embedding.cosine_distance(embedding))
             .limit(limit)

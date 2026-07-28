@@ -11,7 +11,12 @@ from src.support.core.settings import settings
 from src.support.utils.notion_ids import normalize_page_id
 
 DIM = 1536
-ROOT = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
+# Literal fixo (não lido de settings ao vivo): se NOTION_KB_ROOT_PAGE_ID nunca
+# estivesse setado em ambiente algum, `normalize_page_id(settings...)` viraria
+# None e — via o guard-clause do repository — o teste continuaria passando
+# sem de fato exercitar o filtro de escopo.
+ROOT = "23d8d655-c889-806d-8828-d527ce6a1529"
+NORMALIZED_ROOT = normalize_page_id(ROOT)
 
 
 def _vec(seed: float):
@@ -19,12 +24,13 @@ def _vec(seed: float):
 
 
 @pytest.mark.asyncio
-async def test_search_similar_returns_nearest_approved(db_session):
+async def test_search_similar_returns_nearest_approved(db_session, monkeypatch):
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
     now = datetime(2026, 1, 1)
     doc = await DocumentRepository().upsert(
         Document(
             uuid4(), f"pid-{uuid4()}", "Regras", "c", "https://n", "approved", now, now, None,
-            kb_root_page_id=ROOT,
+            kb_root_page_id=NORMALIZED_ROOT,
         )
     )
     await db_session.flush()
@@ -47,25 +53,26 @@ async def test_search_similar_returns_nearest_approved(db_session):
 
 
 @pytest.mark.asyncio
-async def test_search_similar_excludes_non_approved_and_deleted(db_session):
+async def test_search_similar_excludes_non_approved_and_deleted(db_session, monkeypatch):
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
     now = datetime(2026, 1, 1)
 
     approved_doc = await DocumentRepository().upsert(
         Document(
             uuid4(), f"pid-{uuid4()}", "Regras Aprovadas", "c", "https://n", "approved", now, now, None,
-            kb_root_page_id=ROOT,
+            kb_root_page_id=NORMALIZED_ROOT,
         )
     )
     pending_doc = await DocumentRepository().upsert(
         Document(
             uuid4(), f"pid-{uuid4()}", "Rascunho Pendente", "c", "https://n", "pending", now, now, None,
-            kb_root_page_id=ROOT,
+            kb_root_page_id=NORMALIZED_ROOT,
         )
     )
     deleted_doc = await DocumentRepository().upsert(
         Document(
             uuid4(), f"pid-{uuid4()}", "Documento Removido", "c", "https://n", "approved", now, now, now,
-            kb_root_page_id=ROOT,
+            kb_root_page_id=NORMALIZED_ROOT,
         )
     )
     await db_session.flush()

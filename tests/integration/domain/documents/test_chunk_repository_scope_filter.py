@@ -43,3 +43,25 @@ async def test_document_without_provenance_is_not_retrieved(
 
     hits = await DocumentChunkRepository().search_similar(_QUERY, top_k=10)
     assert "Sem procedência" not in {h.citation.title for h in hits}
+
+
+@pytest.mark.asyncio
+async def test_search_similar_returns_empty_when_root_unconfigured(
+    monkeypatch, seed_document_with_chunk
+):
+    """Sem root configurado, a busca degrada para 'sem conhecimento' (lista vazia).
+
+    `DocumentModel.kb_root_page_id == None` compilaria para `IS NULL`, que
+    combina exatamente com os documentos sem procedência — o guard-clause em
+    `search_similar` existe para que a ausência de configuração nunca vire um
+    "libera tudo sem procedência" por acidente.
+    """
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", None, raising=False)
+    from src.domain.documents.repositories.document_chunk_repository import (
+        DocumentChunkRepository,
+    )
+
+    await seed_document_with_chunk(title="Sem procedência", kb_root_page_id=None)
+
+    hits = await DocumentChunkRepository().search_similar(_QUERY, top_k=10)
+    assert hits == []
