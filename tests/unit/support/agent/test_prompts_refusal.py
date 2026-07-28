@@ -15,3 +15,9 @@ def test_prompt_instructs_to_use_it_verbatim():
 def test_prompt_contains_the_english_refusal_contiguously():
     english_refusal = "I didn't find information about this in the knowledge base."
     assert english_refusal in SYSTEM_PROMPT
+
+
+def test_prompt_carves_out_conversational_turns():
+    """Conversational turns (greetings, thanks, oracle questions) must not trigger refusal."""
+    assert "saudações" in SYSTEM_PROMPT.lower()
+    assert "agradecimentos" in SYSTEM_PROMPT.lower()
