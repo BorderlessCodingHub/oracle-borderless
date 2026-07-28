@@ -6,7 +6,8 @@ import pytest
 from src.domain.conversations.actions.answer_question_action import AnswerQuestionAction
 from src.domain.conversations.entities.conversation import Conversation
 from src.domain.conversations.entities.message import Message
-from src.support.agent.ports import AgentMessage, AgentStreamChunk
+from src.domain.shared.value_objects.citation import Citation
+from src.support.agent.ports import AgentMessage, AgentStreamChunk, KnowledgeSnippet
 from src.support.core.exceptions import NotFoundError, UnauthorizedDomainError
 
 
@@ -21,8 +22,24 @@ def _msg(content: str, role: str = "user", conversation_id=None) -> Message:
 
 
 class _FakeSearch:
-    async def execute(self, question):
-        return []
+    """Por padrão devolve 1 trecho não-vazio: estes testes exercitam mecânica de
+    conversa (título, persistência, ordem do histórico), não retrieval — precisam
+    seguir para o engine, não cair no caminho de recusa (retrieve=True + [] vazio)."""
+
+    def __init__(self, hits=None):
+        self.hits = (
+            hits
+            if hits is not None
+            else [KnowledgeSnippet("trecho", Citation("notion", "Doc", "https://n/a", "s", "pid"))]
+        )
+
+    async def execute(self, question, top_k=None):
+        return self.hits
+
+
+class _FakeSections:
+    async def execute(self):
+        return ["Bootcamps", "Programs"]
 
 
 class _FakeEngine:
@@ -71,7 +88,10 @@ def _make(engine, search, conv_repo, msg_repo, gate=None):
     from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
 
     action = AnswerQuestionAction(
-        engine=engine, search=search, gate=gate or FakeRetrievalGate(retrieve=True)
+        engine=engine,
+        search=search,
+        gate=gate or FakeRetrievalGate(retrieve=True),
+        sections=_FakeSections(),
     )
     action.conversations = conv_repo
     action.messages = msg_repo
