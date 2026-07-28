@@ -37,7 +37,16 @@ class DocumentRepository:
             model = DocumentModel(**attrs)
             self.session.add(model)
         else:
-            for key in ("title", "content", "source_url", "status", "deleted_at", "last_edited_time"):
+            for key in (
+                "title",
+                "content",
+                "source_url",
+                "status",
+                "deleted_at",
+                "last_edited_time",
+                "kb_root_page_id",
+                "kb_section",
+            ):
                 setattr(model, key, attrs[key])
         await self.session.flush()
         await self.session.refresh(model)

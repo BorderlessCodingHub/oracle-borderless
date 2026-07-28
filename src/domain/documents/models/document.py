@@ -17,3 +17,7 @@ class DocumentModel(BaseModel, HasUUID, HasTimestamps, ApplyRelations):
     status: Mapped[str] = mapped_column(String(20), index=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_edited_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    kb_root_page_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    kb_section: Mapped[str | None] = mapped_column(String(512), nullable=True)

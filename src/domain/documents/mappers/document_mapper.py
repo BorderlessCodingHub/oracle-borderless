@@ -16,6 +16,8 @@ class DocumentMapper:
             updated_at=model.updated_at,
             deleted_at=model.deleted_at,
             last_edited_time=model.last_edited_time,
+            kb_root_page_id=model.kb_root_page_id,
+            kb_section=model.kb_section,
         )
 
     @staticmethod
@@ -29,4 +31,6 @@ class DocumentMapper:
             "status": entity.status,
             "deleted_at": entity.deleted_at,
             "last_edited_time": entity.last_edited_time,
+            "kb_root_page_id": entity.kb_root_page_id,
+            "kb_section": entity.kb_section,
         }
