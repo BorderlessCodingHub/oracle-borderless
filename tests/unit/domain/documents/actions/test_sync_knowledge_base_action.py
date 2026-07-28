@@ -7,16 +7,17 @@ import pytest
 from src.domain.documents.actions.sync_knowledge_base_action import SyncKnowledgeBaseAction
 from src.domain.documents.entities.document import Document
 from src.support.clients.notion.notion_client import NotionPage
+from src.support.core.settings import settings
 
 
 def _dt(day: int) -> datetime:
     return datetime(2026, 7, day, tzinfo=timezone.utc)
 
 
-def _approved(page_id: str, edited: datetime) -> NotionPage:
+def _approved(page_id: str, edited: datetime, section: str | None = None) -> NotionPage:
     return NotionPage(
         id=page_id, title=f"Doc {page_id}", content="", url="https://n", is_approved=True,
-        last_edited_time=edited,
+        last_edited_time=edited, section=section,
     )
 
 
@@ -44,12 +45,14 @@ class FakeNotion:
 class FakeIngest:
     def __init__(self, fail_on: set[str] | None = None):
         self.executed: list[str] = []
+        self.documents: list[Document] = []
         self.fail_on = fail_on or set()
 
     async def execute(self, document: Document) -> Document:
         if document.notion_page_id in self.fail_on:
             raise RuntimeError(f"boom {document.notion_page_id}")
         self.executed.append(document.notion_page_id)
+        self.documents.append(document)
         return document
 
 
@@ -173,3 +176,23 @@ async def test_force_reingests_even_when_unchanged():
     action = _action(notion, ingest, FakeDocRepo([_existing("a", _dt(5))]), FakeChunkRepo())
     report = await action.execute(force=True)
     assert ingest.executed == ["a"] and report.ingested == 1
+
+
+@pytest.mark.asyncio
+async def test_provenance_is_stamped_from_traversal_section(monkeypatch):
+    """`get_page` (FakeNotion) devolve uma NotionPage 'fresca' sem `section` — como
+    o client real. A `section` só existe na `page` da travessia (`list_approved_pages`).
+    Sem `full.section = page.section` no sync, a provenência se perderia."""
+    monkeypatch.setattr(
+        settings, "NOTION_KB_ROOT_PAGE_ID", "23d8d655-c889-806d-8828-d527ce6a1529", raising=False
+    )
+    notion = FakeNotion([_approved("a", _dt(5), section="Bootcamps")])
+    ingest = FakeIngest()
+    action = _action(notion, ingest, FakeDocRepo([]), FakeChunkRepo())
+
+    await action.execute()
+
+    assert len(ingest.documents) == 1
+    doc = ingest.documents[0]
+    assert doc.kb_section == "Bootcamps"
+    assert doc.kb_root_page_id == "23d8d655c889806d8828d527ce6a1529"  # sem hífens
