@@ -38,6 +38,7 @@ class DocumentChunkRepository:
             # (lista vazia) em vez de expor tudo que não tem procedência.
             return []
         limit = top_k if top_k is not None else settings.RAG_TOP_K
+        distance = DocumentChunkModel.embedding.cosine_distance(embedding)
         stmt = (
             select(
                 DocumentChunkModel.content,
@@ -52,8 +53,11 @@ class DocumentChunkRepository:
                 # Escopo como invariante de leitura (ADR-0012): documento de outro
                 # root — ou sem procedência — não é servido, mesmo sem sync.
                 DocumentModel.kb_root_page_id == root,
+                # Sem limiar, top-k sempre devolve algo: pergunta fora do assunto
+                # recuperaria os vizinhos menos distantes e viraria contexto.
+                distance <= settings.RAG_MAX_DISTANCE,
             )
-            .order_by(DocumentChunkModel.embedding.cosine_distance(embedding))
+            .order_by(distance)
             .limit(limit)
         )
         rows = (await self.session.execute(stmt)).all()

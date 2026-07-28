@@ -55,6 +55,12 @@ async def test_search_similar_returns_nearest_approved(db_session, monkeypatch):
 @pytest.mark.asyncio
 async def test_search_similar_excludes_non_approved_and_deleted(db_session, monkeypatch):
     monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    # This test isolates status/soft-delete filtering from distance filtering:
+    # the only approved chunk is deliberately placed at the far vector so the
+    # assertion can't pass by distance alone. Neutralize RAG_MAX_DISTANCE at
+    # its bound (cosine distance is capped at 2.0) so the new threshold from
+    # Task 5 doesn't also exclude it here. Do not remove this line.
+    monkeypatch.setattr(settings, "RAG_MAX_DISTANCE", 2.0, raising=False)
     now = datetime(2026, 1, 1)
 
     approved_doc = await DocumentRepository().upsert(

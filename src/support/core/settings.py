@@ -67,6 +67,9 @@ class Settings(BaseSettings):
 
     # --- RAG ---
     RAG_TOP_K: int = 6
+    # Distância cosseno máxima para um chunk virar contexto. Calibrado em
+    # 2026-07-28: pergunta legítima ficou <= 0.532, pergunta sem relação >= 0.615.
+    RAG_MAX_DISTANCE: float = 0.55
     RAG_CHUNK_SIZE: int = 1500
     RAG_CHUNK_OVERLAP: int = 200
 
