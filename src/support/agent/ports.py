@@ -36,6 +36,12 @@ class RetrievalDecision:
 
     retrieve: bool
     search_query: str  # standalone, context-resolved; "" quando retrieve é False
+    # True só no caminho de exceção do gate (erro/timeout): o gate NÃO chegou a
+    # classificar o turno, então `retrieve=True` aqui é um chute de segurança
+    # (fail-open), não uma classificação real. Uma recusa fundamentada exige
+    # ter classificado o turno como substantivo — sem isso, refusal seria
+    # injustificada (ex.: "oi" durante um timeout do gate).
+    degraded: bool = False
 
 
 class RetrievalGatePort(Protocol):

@@ -85,10 +85,16 @@ class AnswerQuestionAction:
 
         if decision.retrieve:
             knowledge = await self.search.execute(decision.search_query)  # query reescrita
-            if not knowledge:
+            if not knowledge and not decision.degraded:
                 # Nada passou do limiar: recusa determinística, sem chamar o LLM.
-                # Só vale quando o gate PEDIU busca — `retrieve=False` (saudação,
-                # agradecimento) também dá knowledge vazio e deve ir ao motor.
+                # Só vale quando o gate PEDIU busca de verdade — `retrieve=False`
+                # (saudação, agradecimento) também dá knowledge vazio e deve ir ao
+                # motor, e um gate `degraded` (erro/timeout) nunca classificou o
+                # turno: `retrieve=True` ali é só o chute de segurança do
+                # fail-open, não uma decisão fundamentada — recusar seria
+                # injustificado (ex.: "oi" durante um timeout do gate). Cai no
+                # motor com o knowledge que houver (possivelmente vazio), que é o
+                # comportamento seguro pré-existente.
                 reply = build_out_of_scope_reply(await self.sections.execute(), question)
                 return conversation.uuid, _refusal_stream(reply)
         else:

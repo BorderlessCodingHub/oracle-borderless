@@ -18,6 +18,7 @@ from src.domain.documents.services.knowledge_curation_policy import (
 from src.support.clients.notion.mcp_session import ToolCall, notion_mcp_session
 from src.support.clients.notion.page_markdown_assembler import PageMarkdownAssembler
 from src.support.core.settings import settings
+from src.support.utils.notion_ids import normalize_page_id
 
 
 class KnowledgeBaseConfigError(RuntimeError):
@@ -44,12 +45,6 @@ def _parse_ts(value: Any) -> datetime | None:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
-
-
-def _normalize_id(value: str) -> str:
-    """Compara ids de página sem depender de hífens/caixa (o MCP devolve com
-    hífens; ids vindos de citação ou digitados pelo modelo podem vir sem)."""
-    return value.replace("-", "").strip().lower()
 
 
 def _extract_title(page: dict[str, Any]) -> str:
@@ -144,11 +139,11 @@ class NotionClient:
         Para em `workspace` (topo) ou `database_id` (linha de banco): nenhum dos
         dois pode ser descendente do root. `seen` protege de ciclo/repetição.
         """
-        target = _normalize_id(root_id or self._require_root())
+        target = normalize_page_id(root_id or self._require_root())
         current = page_id
         seen: set[str] = set()
         while True:
-            key = _normalize_id(current)
+            key = normalize_page_id(current)
             if key == target:
                 return True
             if key in seen:

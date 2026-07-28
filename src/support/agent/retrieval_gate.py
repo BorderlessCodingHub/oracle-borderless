@@ -77,7 +77,10 @@ class RetrievalGate:
             return decision
         except Exception:  # fail-open: uma recuperação a mais > uma perdida
             logger.warning("retrieval gate falhou; fail-open (query crua)", exc_info=True)
-            return RetrievalDecision(retrieve=True, search_query=question)
+            # degraded=True: o gate não classificou nada, só chutou retrieve=True
+            # por segurança. Sinaliza pro chamador não tratar isso como uma
+            # classificação real (ver AnswerQuestionAction).
+            return RetrievalDecision(retrieve=True, search_query=question, degraded=True)
 
 
 def get_retrieval_gate() -> "RetrievalGate":

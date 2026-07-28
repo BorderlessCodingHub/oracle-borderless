@@ -26,6 +26,11 @@ NORMALIZED_ROOT = normalize_page_id(ROOT)
 @pytest.mark.asyncio
 async def test_ingest_persists_document_and_chunks(db_session, monkeypatch):
     monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    # Neutralize RAG_MAX_DISTANCE at its bound (cosine distance is capped at
+    # 2.0) so this test doesn't break if someone lowers the threshold in
+    # `.env` — it's testing persistence + retrievability, not the distance
+    # filter itself.
+    monkeypatch.setattr(settings, "RAG_MAX_DISTANCE", 2.0, raising=False)
     now = datetime(2026, 1, 1)
     long_content = "parágrafo. " * 400  # força múltiplos chunks
     doc = Document(

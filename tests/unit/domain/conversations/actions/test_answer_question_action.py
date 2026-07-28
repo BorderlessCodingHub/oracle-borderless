@@ -194,6 +194,28 @@ async def test_gate_skip_injects_no_knowledge_and_skips_search():
 
 
 @pytest.mark.asyncio
+async def test_degraded_decision_with_empty_knowledge_falls_through_to_engine():
+    """Gate degradado (erro/timeout) não classificou o turno de verdade — uma
+    recusa aqui seria injustificada (ex.: "oi" durante um timeout do gate).
+    Com knowledge vazio, deve cair no engine mesmo assim, não na recusa."""
+    from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
+
+    engine, conv_repo, msg_repo = _FakeEngine(), _FakeConvRepo(), _FakeMsgRepo()
+    search = _FakeSearch(hits=[])  # nada recuperado
+    gate = FakeRetrievalGate(retrieve=True, degraded=True)
+    action = _make(engine, search, conv_repo, msg_repo, gate=gate)
+
+    _cid, stream = await action.execute("oi", None, "a@x.com")
+    chunks = [c async for c in stream]
+
+    # engine foi chamado (não a recusa determinística)
+    assert engine.received_question == "oi"
+    assert not any(
+        c.type == "text" and "Não encontrei informações" in c.text for c in chunks
+    )
+
+
+@pytest.mark.asyncio
 async def test_gate_retrieve_uses_rewritten_query():
     from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
 

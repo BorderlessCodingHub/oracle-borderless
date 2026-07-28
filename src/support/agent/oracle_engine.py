@@ -70,7 +70,9 @@ class OracleEngine:
 
             @agent.tool_plain
             async def web_search(query: str) -> str:
-                """Busca informação pública na web quando a base interna não cobre."""
+                """Busca informação pública na web. NÃO é fallback para lacunas da
+                base interna — quando o contexto fornecido não cobre a pergunta, a
+                resposta é a recusa padrão, não uma busca web."""
                 try:
                     return await web_tool.run(query)
                 except Exception as exc:  # falha de tool não deve derrubar o streaming
