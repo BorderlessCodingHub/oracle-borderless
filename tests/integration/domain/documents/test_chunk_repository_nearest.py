@@ -51,6 +51,13 @@ async def test_returns_none_when_root_is_unconfigured(
     db_session, seed_document_with_chunk, monkeypatch
 ):
     monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", None)
-    await seed_document_with_chunk("qualquer", kb_root_page_id=ROOT)
+    # Documento SEM procedência (kb_root_page_id=None): sem a guarda fail-closed,
+    # `DocumentModel.kb_root_page_id == root` degeneraria para `IS NULL` (já que
+    # `normalize_page_id(None)` é `None`), e este documento passaria a bater —
+    # exatamente o vazamento que o comentário em `search_similar` descreve.
+    # Semear um doc com kb_root_page_id=ROOT (válido) não prenderia essa guarda,
+    # pois ele ficaria fora do resultado de qualquer forma, com ou sem o early
+    # return.
+    await seed_document_with_chunk("sem procedência", kb_root_page_id=None)
     repo = DocumentChunkRepository()
     assert await repo.nearest_distance(_vector(1.0)) is None
