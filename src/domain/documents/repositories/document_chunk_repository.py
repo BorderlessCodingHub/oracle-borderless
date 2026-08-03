@@ -74,3 +74,30 @@ class DocumentChunkRepository:
             )
             for row in rows
         ]
+
+    async def nearest_distance(self, embedding: list[float]) -> float | None:
+        """Distância do chunk mais próximo **ignorando o limiar**.
+
+        Serve o trace no caminho de recusa: `search_similar` filtra pelo limiar
+        dentro do SQL, então quando ela devolve vazio não se sabe se faltou 0,01
+        ou 0,3. Uma query de índice, chamada só quando nada passou — turno que
+        recusa não chamou o LLM e tem folga de sobra.
+        """
+        root = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
+        if root is None:
+            return None  # mesma degradação fail-closed do search_similar
+
+        distance = DocumentChunkModel.embedding.cosine_distance(embedding)
+        stmt = (
+            select(distance)
+            .join(DocumentModel, DocumentChunkModel.document_id == DocumentModel.uuid)
+            .where(
+                DocumentModel.status == "approved",
+                DocumentModel.deleted_at.is_(None),
+                DocumentModel.kb_root_page_id == root,
+            )
+            .order_by(distance)
+            .limit(1)
+        )
+        value = (await self.session.execute(stmt)).scalar_one_or_none()
+        return float(value) if value is not None else None
