@@ -54,12 +54,10 @@ Para arquitetura completa, leia **`docs/architecture.md`**.
 │   │   │   ├── routes/              # APIRouter por subdomínio (autodiscovery)
 │   │   │   └── exception_handlers.py
 │   │   │
-│   │   ├── console/                 # CLI + jobs agendados
-│   │   │   ├── commands/            # comandos CLI — Command subclasses (auto-discovered by cli.py)
-│   │   │   ├── jobs/                # subclasses de Job (scheduled tasks, ex.: sync do Notion)
-│   │   │   └── schedule.py          # registro: schedule.call(MeuJob).daily()
-│   │   │
-│   │   └── web/                     # SSR (se houver — opcional)
+│   │   └── console/                 # CLI + jobs agendados
+│   │       ├── commands/            # comandos CLI — Command subclasses (auto-discovered by cli.py)
+│   │       ├── jobs/                # subclasses de Job (scheduled tasks, ex.: sync do Notion)
+│   │       └── schedule.py          # registro: schedule.call(MeuJob).daily()
 │   │
 │   ├── domain/                      # o que é o negócio
 │   │   ├── documents/               # subdomínio: base de conhecimento (docs do Notion)

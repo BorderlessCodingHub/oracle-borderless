@@ -621,9 +621,11 @@ schedule.call(CleanupConversationsJob).daily(hour=3)
 
 `LifespanManager` carrega esse `schedule.py` no startup automaticamente.
 
-## Web (opcional)
+## Interface web
 
-`src/app/web/` é reservado para SSR (server-side rendered), se a interface do oráculo vier a ser servida pelo próprio backend. Convive paralelo a `api/` sem interferência. Hoje, vazio.
+A interface é uma **SPA React + Vite** em [`frontend/`](../frontend/), fora de `src/` e com toolchain própria. Ela fala com o backend só por HTTP/SSE — não há SSR nem template servido pelo FastAPI. A UI mínima em HTML puro do M1 (`src/app/web/index.html` + `routes/web.py`) foi removida quando o front React entrou em uso.
+
+Servir o `frontend/dist` em produção (static do FastAPI ou host dedicado) é decisão de deploy, ainda aberta.
 
 ## Quando reconsiderar a arquitetura
 
