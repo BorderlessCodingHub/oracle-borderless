@@ -44,10 +44,13 @@ def _fill_usage(metrics: TurnMetrics, result) -> None:
 
     O nome dos campos variou entre versões do pydantic-ai, e a spec registra
     isso como incerteza: se nada casar, o trace fica sem tokens em vez de
-    quebrar o turno.
+    quebrar o turno. Em 2.4.0 (versão instalada), `usage` é property, não
+    método — NÃO troque `result.usage` de volta para `result.usage()`; o
+    `except` abaixo existe justamente para engolir isso caso uma versão
+    futura volte a expor `usage` como método.
     """
     try:
-        usage = result.usage()
+        usage = result.usage  # property em pydantic-ai 2.4.0, não método
         for attr in ("input_tokens", "request_tokens", "prompt_tokens"):
             if getattr(usage, attr, None) is not None:
                 metrics.input_tokens = int(getattr(usage, attr))
