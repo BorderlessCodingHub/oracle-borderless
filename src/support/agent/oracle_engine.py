@@ -11,7 +11,7 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.domain.shared.value_objects.citation import Citation
-from src.support.agent.ports import AgentMessage, AgentStreamChunk, KnowledgeSnippet
+from src.support.agent.ports import AgentMessage, AgentStreamChunk, KnowledgeSnippet, TurnMetrics
 from src.support.agent.prompts import SYSTEM_PROMPT
 from src.support.agent.tools import FetchNotionTool, WebSearchTool, format_knowledge, wrap_tool_content
 from src.support.clients.notion.notion_client import NotionClient
@@ -59,6 +59,7 @@ class OracleEngine:
         question: str,
         history: list[AgentMessage],
         knowledge: list[KnowledgeSnippet],
+        metrics: TurnMetrics | None = None,
     ) -> AsyncIterator[AgentStreamChunk]:
         web_citations: list[Citation] = []
 
