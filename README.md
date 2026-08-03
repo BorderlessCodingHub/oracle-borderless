@@ -27,6 +27,8 @@ A **"Claude Code"-style AI agent repositioned as an oracle**: a *single source o
 - `src/domain/` — business logic, organized by subdomain (bounded contexts)
 - `src/support/` — cross-cutting tooling (infra, integrations, utils)
 
+The web interface is a separate React + Vite SPA in [`frontend/`](frontend/), which talks to the backend over HTTP/SSE.
+
 Start with **[`CLAUDE.md`](CLAUDE.md)** (rules and condensed overview) and **[`docs/architecture.md`](docs/architecture.md)** (full architecture).
 
 ## Running in development
@@ -47,7 +49,7 @@ pytest
 
 ## Open questions
 
-Still to be decided together (don't make assumptions): the interface (web chat vs. code context), the agent's internal architecture, the knowledge base ingestion/update strategy, and the **authentication layer** (there will be auth restricted to the ecosystem; the mechanism is yet to be defined).
+Still to be decided together (don't make assumptions): the **authentication layer** (there will be auth restricted to the ecosystem — Cloudflare Access at the edge is the leading candidate, pending confirmation with the product owner) and the production deployment (domain, how `frontend/dist` is served).
 
 ## Documentation
 
