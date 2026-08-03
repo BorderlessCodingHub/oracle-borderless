@@ -80,10 +80,11 @@ Três pilares definem esta arquitetura:
 │       │
 │       ├── clients/                 # integrações externas
 │       │   ├── notion/              # NotionClient (base de conhecimento via MCP)
-│       │   └── llm/                 # LLMClient — Claude (Anthropic) ou GPT (OpenAI), via LLM_PROVIDER
+│       │   ├── embeddings/          # EmbeddingsClient (OpenAI text-embedding-3-small)
+│       │   └── tavily/              # TavilyClient (web search com atribuição)
 │       │
 │       └── utils/                   # genéricos
-│           └── paginator.py
+│           └── notion_ids.py        # normalização de page id do Notion
 │
 ├── database/                        # FORA de src/
 │   ├── env.py                       # Alembic
@@ -460,22 +461,23 @@ class NotionClient:
 
 O desenho fino da ingestão (full sync vs. incremental, embeddings, cache) é **ponto em aberto** — ver seção de decisões pendentes.
 
-### LLM: Claude ou GPT (`src/support/clients/llm/`)
+### LLM: Claude ou GPT (`src/support/agent/`)
 
 O oráculo pode usar **Claude (Anthropic)** ou **GPT (OpenAI)**. O provedor é escolhido em runtime pela variável `LLM_PROVIDER` (`anthropic` | `openai`), sem mudar código de domínio.
 
-```python
-# src/support/clients/llm/llm_client.py
-class LLMClient(ABC):
-    async def complete(self, messages: list[LLMMessage], system: str | None = None) -> str: ...
+Não existe client HTTP de LLM próprio: o único acesso ao modelo é via **Pydantic AI** (ADR-0007), e apenas dois arquivos importam o framework:
 
-def get_llm_client() -> LLMClient:   # devolve AnthropicLLMClient ou OpenAILLMClient
-    ...
+```python
+# src/support/agent/oracle_engine.py     — resposta em streaming, com tools
+def get_oracle_engine(enable_tools: bool = True) -> OracleEngine: ...
+
+# src/support/agent/retrieval_gate.py    — decisão skip/rewrite, modelo pequeno
+def get_retrieval_gate() -> RetrievalGate: ...
 ```
 
-Modelos e chaves por provedor vêm das settings: `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` e `OPENAI_API_KEY` / `OPENAI_MODEL`.
+O domínio consome ambos por Protocols finos (`OracleEnginePort`, `RetrievalGatePort`) em `src/support/agent/ports.py` — nunca importa `pydantic_ai`.
 
-**Importante:** este client é apenas a **primitiva de geração de texto** — não o agente. A orquestração do agente (tools, RAG sobre a base, roteamento) é ponto em aberto e, quando definida, vive em `src/domain/` como subdomínio próprio, consumindo este client.
+Modelos e chaves por provedor vêm das settings: `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` / `ANTHROPIC_SMALL_MODEL` e `OPENAI_API_KEY` / `OPENAI_MODEL` / `OPENAI_SMALL_MODEL`.
 
 ### Scheduler distribuído (`src/support/core/scheduling/`)
 

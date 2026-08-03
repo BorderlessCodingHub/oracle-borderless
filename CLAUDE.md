@@ -30,7 +30,7 @@ Para arquitetura completa, leia **`docs/architecture.md`**.
 - **Migrations:** Alembic (diretório `database/migrations/`)
 - **Validação:** Pydantic v2 + `pydantic-settings`
 - **Base de conhecimento:** Notion via **MCP (Model Context Protocol)** — client em `src/support/clients/notion/`. Só consome documentos aprovados/liberados.
-- **LLM:** o oráculo pode usar **Claude (Anthropic)** ou **GPT (OpenAI)**, selecionável via `LLM_PROVIDER` (`anthropic` | `openai`). Client fino de integração em `src/support/clients/llm/` (`get_llm_client()`); SDKs `anthropic` e `openai`. É só a primitiva de geração — **não** o agente.
+- **LLM:** o oráculo pode usar **Claude (Anthropic)** ou **GPT (OpenAI)**, selecionável via `LLM_PROVIDER` (`anthropic` | `openai`). O acesso ao modelo é **exclusivamente** pelo Pydantic AI dentro de `src/support/agent/` (`oracle_engine.py` para a resposta, `retrieval_gate.py` para o gate) — não há client HTTP próprio de LLM.
 - **Agente de IA:** orquestração LLM (Claude ou GPT) sobre a base de conhecimento. Desenho interno é ponto em aberto; quando definido, vive em `src/domain/` como subdomínio próprio.
 - **Autenticação:** ponto em aberto (haverá auth restrita ao ecossistema; mecanismo a definir). **Não há Keycloak/OpenFGA neste projeto.**
 - **Scheduler:** APScheduler com jobstore PostgreSQL (`src/support/core/scheduling/`) — usado, entre outros, para jobs de sincronização da base de conhecimento.
@@ -83,8 +83,8 @@ Para arquitetura completa, leia **`docs/architecture.md`**.
 │       │   ├── models/              # BaseModel, JobExecution, SeedExecution
 │       │   ├── mixins/              # HasUUID, HasTimestamps, ApplyRelations
 │       │   └── scheduling/          # Schedule, Job, JobScheduler
-│       ├── clients/                 # integrações externas (notion/MCP, LLM, ...)
-│       └── utils/                   # utilitários genéricos (paginator, ...)
+│       ├── clients/                 # integrações externas (notion/MCP, embeddings, tavily)
+│       └── utils/                   # utilitários genéricos (notion_ids, ...)
 │
 ├── database/                        # FORA de src/
 │   ├── migrations/                  # Alembic
