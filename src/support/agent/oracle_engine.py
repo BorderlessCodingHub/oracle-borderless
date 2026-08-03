@@ -39,6 +39,27 @@ def _build_model():
     )
 
 
+def _fill_usage(metrics: TurnMetrics, result) -> None:
+    """Tokens do run, quando o pydantic-ai os expõe no caminho de streaming.
+
+    O nome dos campos variou entre versões do pydantic-ai, e a spec registra
+    isso como incerteza: se nada casar, o trace fica sem tokens em vez de
+    quebrar o turno.
+    """
+    try:
+        usage = result.usage()
+        for attr in ("input_tokens", "request_tokens", "prompt_tokens"):
+            if getattr(usage, attr, None) is not None:
+                metrics.input_tokens = int(getattr(usage, attr))
+                break
+        for attr in ("output_tokens", "response_tokens", "completion_tokens"):
+            if getattr(usage, attr, None) is not None:
+                metrics.output_tokens = int(getattr(usage, attr))
+                break
+    except Exception:  # pragma: no cover - observabilidade não derruba turno
+        logger.warning("não foi possível ler usage() do run", exc_info=True)
+
+
 def _build_prompt(question: str, history: list[AgentMessage], knowledge: list[KnowledgeSnippet]) -> str:
     parts: list[str] = []
     for msg in history:
@@ -74,6 +95,8 @@ class OracleEngine:
                 """Busca informação pública na web. NÃO é fallback para lacunas da
                 base interna — quando o contexto fornecido não cobre a pergunta, a
                 resposta é a recusa padrão, não uma busca web."""
+                if metrics is not None:
+                    metrics.tool_calls += 1
                 try:
                     return await web_tool.run(query)
                 except Exception as exc:  # falha de tool não deve derrubar o streaming
@@ -83,6 +106,8 @@ class OracleEngine:
             @agent.tool_plain
             async def fetch_notion_page(page_id: str) -> str:
                 """Busca o conteúdo completo/atualizado de uma página do Notion."""
+                if metrics is not None:
+                    metrics.tool_calls += 1
                 try:
                     return await notion_tool.run(page_id)
                 except Exception as exc:  # falha de tool não deve derrubar o streaming
@@ -93,6 +118,8 @@ class OracleEngine:
         async with agent.run_stream(prompt) as result:
             async for delta in result.stream_text(delta=True):
                 yield AgentStreamChunk(type="text", text=delta)
+            if metrics is not None:
+                _fill_usage(metrics, result)
 
         kb_citations = [s.citation for s in knowledge]
         yield AgentStreamChunk(type="sources", citations=kb_citations + web_citations)

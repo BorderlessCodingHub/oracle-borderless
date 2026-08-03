@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from typing import AsyncIterator
 from uuid import UUID
 
@@ -18,6 +19,7 @@ from src.domain.conversations.actions.append_assistant_message_action import (
 from src.domain.conversations.actions.get_conversation_action import GetConversationAction
 from src.domain.conversations.actions.list_conversations_action import ListConversationsAction
 from src.domain.documents.actions.search_knowledge_base_action import SearchKnowledgeBaseAction
+from src.domain.observability.actions.record_turn_trace_action import RecordTurnTraceAction
 from src.support.agent.oracle_engine import get_oracle_engine
 from src.support.agent.retrieval_gate import get_retrieval_gate
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
@@ -46,7 +48,7 @@ class ConversationController:
         )
 
         # Conversa + user message são gravadas aqui (sessão do request viva).
-        conversation_id, stream, _draft = await action.execute(
+        conversation_id, stream, draft = await action.execute(
             data.question, data.conversation_id, user_email
         )
 
@@ -55,9 +57,15 @@ class ConversationController:
         async def event_source() -> AsyncIterator[str]:
             yield _sse("conversation", {"id": str(conversation_id)})
             failed = False
+            engine_started = time.monotonic()
             try:
                 async for chunk in stream:
                     if chunk.type == "text":
+                        if draft.first_token_ms is None:
+                            draft.first_token_ms = int(
+                                (time.monotonic() - engine_started) * 1000
+                            )
+                            draft.record("first_token")
                         captured["text"] += chunk.text
                         yield _sse("token", {"text": chunk.text})
                     elif chunk.type == "sources":
@@ -69,16 +77,26 @@ class ConversationController:
             except Exception:
                 failed = True
                 logger.exception("stream falhou durante /conversations/ask")
+                draft.outcome = "error"
+                draft.error = "erro ao gerar a resposta"
                 yield _sse("error", {"message": "erro ao gerar a resposta"})
 
-            # Persiste a resposta só quando o stream terminou com sucesso e há texto.
-            if not failed and captured["text"]:
-                try:
-                    await _persist_assistant(
-                        conversation_id, captured["text"], captured["citations"]
-                    )
-                except Exception:
-                    logger.exception("falha ao persistir a resposta do oráculo")
+            draft.engine_ms = int((time.monotonic() - engine_started) * 1000)
+            draft.citations_count = len(captured["citations"])
+            _absorb_engine_metrics(draft)
+            draft.record("turn_end", outcome=draft.outcome)
+
+            # A resposta só é persistida em sucesso (decisão do M2); o trace é
+            # gravado SEMPRE — turno que quebrou é o que mais interessa no trace.
+            try:
+                await _persist_turn(
+                    conversation_id,
+                    draft,
+                    captured["text"] if (not failed and captured["text"]) else None,
+                    captured["citations"],
+                )
+            except Exception:
+                logger.exception("falha ao persistir turno (resposta e/ou trace)")
 
             yield _sse("done", {})
 
@@ -99,8 +117,25 @@ class ConversationController:
         return ConversationDetailResponse.from_entity(conversation, messages)
 
 
-async def _persist_assistant(conversation_id: UUID, content: str, citations: list) -> None:
+def _absorb_engine_metrics(draft) -> None:
+    metrics = getattr(draft, "engine_metrics", None)
+    if metrics is None:
+        return  # caminho de recusa: não houve engine
+    draft.tool_calls = metrics.tool_calls
+    draft.input_tokens = metrics.input_tokens
+    draft.output_tokens = metrics.output_tokens
+
+
+async def _persist_turn(conversation_id: UUID, draft, content: str | None, citations: list) -> None:
+    """Uma sessão própria para as duas escritas pós-stream."""
+
     async def _work() -> None:
-        await AppendAssistantMessageAction().execute(conversation_id, content, citations)
+        if content:
+            await AppendAssistantMessageAction().execute(conversation_id, content, citations)
+        try:
+            await RecordTurnTraceAction().execute(conversation_id, draft)
+        except Exception:
+            # Invariante da spec: observabilidade não pode custar a resposta.
+            logger.exception("falha ao gravar o trace do turno")
 
     await run_in_async_session(_work)

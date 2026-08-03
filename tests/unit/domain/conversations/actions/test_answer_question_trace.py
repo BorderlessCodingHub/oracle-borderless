@@ -53,6 +53,21 @@ class FakeEngine:
         yield AgentStreamChunk(type="sources", citations=[])
 
 
+class FakeEngineCapturingMetrics:
+    """Grava o objeto `metrics` recebido — usado para prender que é o MESMO
+    objeto que o draft carrega em `engine_metrics` (débito da revisão da Task
+    4: sem isso, um wiring dividido em duas instâncias gravaria zeros no trace
+    sem nenhum teste falhar)."""
+
+    def __init__(self) -> None:
+        self.received_metrics = None
+
+    async def stream_answer(self, question, history, knowledge, metrics=None):
+        self.received_metrics = metrics
+        yield AgentStreamChunk(type="text", text="resposta")
+        yield AgentStreamChunk(type="sources", citations=[])
+
+
 class FakeSections:
     async def execute(self):
         return ["Mentorship", "Bootcamps"]
@@ -181,3 +196,27 @@ async def test_history_tokens_are_estimated_from_the_loaded_recency():
 
     assert draft.history_messages == 1
     assert draft.history_tokens_est == 100  # 400 // 4
+
+
+@pytest.mark.asyncio
+async def test_engine_metrics_is_the_same_object_the_engine_receives():
+    """Se o wiring se dividir em duas instâncias de TurnMetrics, o controller
+    absorveria zeros do draft mesmo com o engine tendo preenchido a sua cópia —
+    e nenhum teste indireto pegaria isso. Prende a identidade diretamente."""
+    engine = FakeEngineCapturingMetrics()
+    action = AnswerQuestionAction(
+        engine=engine,
+        search=FakeSearch([]),
+        gate=FakeGate(RetrievalDecision(retrieve=False, search_query="")),
+        sections=FakeSections(),
+        chunks=FakeChunks(),
+    )
+    action.conversations = FakeConvRepo()
+    action.messages = FakeMsgRepo()
+
+    _, stream, draft = await action.execute("oi", None, None)
+    async for _ in stream:
+        pass  # consome o stream para o engine de fato registrar `metrics`
+
+    assert draft.engine_metrics is not None
+    assert engine.received_metrics is draft.engine_metrics
