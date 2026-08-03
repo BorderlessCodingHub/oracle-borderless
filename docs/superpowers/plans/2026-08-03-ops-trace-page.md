@@ -258,12 +258,15 @@ class TurnTraceModel(BaseModel, HasUUID):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    __table_args__ = (Index("ix_agent_traces_created_at", created_at.desc()),)
+    __table_args__ = (Index("ix_agent_traces_created_at", "created_at"),)
 ```
 
-> **Nota:** `Index("...", created_at.desc())` referencia a coluna declarada acima —
-> dentro do corpo da classe `created_at` já é o `mapped_column`, então `.desc()`
-> funciona. Não trocar por string, senão o índice fica ascendente e o autogenerate acusa diff.
+> **Por que índice ascendente e não `created_at DESC`:** a comparação de índices
+> por expressão do Alembic é fraca — um índice funcional tende a aparecer como
+> diff em todo `alembic check`, que é justamente o que o Step 8 exige limpo. Um
+> btree ascendente é varrido de trás para frente pelo Postgres sem custo extra,
+> então `ORDER BY created_at DESC` usa este índice do mesmo jeito. Declare o índice
+> como string nos dois lugares (Model e migration).
 
 - [ ] **Step 6: Escrever o Mapper**
 
@@ -400,9 +403,7 @@ def upgrade() -> None:
     op.create_index("ix_agent_traces_conversation_id", "agent_traces", ["conversation_id"])
     op.create_index("ix_agent_traces_gate_retrieve", "agent_traces", ["gate_retrieve"])
     op.create_index("ix_agent_traces_outcome", "agent_traces", ["outcome"])
-    op.create_index(
-        "ix_agent_traces_created_at", "agent_traces", [sa.text("created_at DESC")]
-    )
+    op.create_index("ix_agent_traces_created_at", "agent_traces", ["created_at"])
 
 
 def downgrade() -> None:
@@ -554,8 +555,11 @@ pós-stream converte para Entity e persiste.
 
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Callable
-from uuid import UUID, uuid4
+from uuid import UUID
+
+from uuid6 import uuid7
 
 from src.domain.observability.entities.turn_trace import TurnTrace
 
@@ -623,10 +627,8 @@ class TurnTraceDraft:
         )
 
     def to_entity(self, conversation_id: UUID) -> TurnTrace:
-        from datetime import datetime, timezone
-
         return TurnTrace(
-            uuid=uuid4(),
+            uuid=uuid7(),
             conversation_id=conversation_id,
             message_id=self.message_id,
             user_email=self.user_email,
@@ -656,23 +658,15 @@ class TurnTraceDraft:
         )
 ```
 
-> **Nota sobre `uuid4` vs `uuid7`:** o resto do projeto usa `uuid7` para PK. Aqui o
-> uuid é gerado no `to_entity`, já fora do caminho de latência, e a ordenação da
-> lista usa `created_at DESC` — não o uuid. Use `uuid7` se quiser consistência
-> total; o teste não depende disso. **Decisão deste plano: usar `uuid7`** para não
-> abrir exceção à convenção. Troque o import para `from uuid6 import uuid7` e a
-> chamada para `uuid7()`.
+> **Nota:** o uuid é `uuid7()`, como todo PK do projeto (mixin `HasUUID`). É
+> gerado no `to_entity`, fora do caminho de latência do turno.
 
-- [ ] **Step 4: Aplicar a decisão do uuid7**
-
-Trocar no arquivo acima: `from uuid import UUID, uuid4` → `from uuid import UUID` + `from uuid6 import uuid7`, e `uuid=uuid4()` → `uuid=uuid7()`.
-
-- [ ] **Step 5: Rodar e ver passar**
+- [ ] **Step 4: Rodar e ver passar**
 
 Run: `DB_PORT=5434 uv run pytest tests/unit/domain/observability -v`
 Expected: 9 PASS (3 do mapper + 6 do draft)
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/domain/observability/dtos tests/unit/domain/observability/dtos
@@ -1184,17 +1178,19 @@ Em `src/app/api/controllers/conversation_controller.py`, trocar:
 ```python
         conversation_id, stream = await action.execute(
 ```
-por:
+por um desempacotamento de três valores.
+
+A fase do engine e a gravação entram na Task 5, então nesta task a variável ainda
+não tem uso. Nomeie com underscore para o `pylint` não acusar `unused-variable`:
 
 ```python
-        conversation_id, stream, draft = await action.execute(
+        conversation_id, stream, _draft = await action.execute(
+            data.question, data.conversation_id, user_email
+        )
 ```
 
-A fase do engine e a gravação entram na Task 5. `draft` fica sem uso por ora — **adicione `# noqa` não; deixe usado** anexando já a linha:
-
-```python
-        draft.record("stream_handoff")
-```
+A Task 5 renomeia `_draft` → `draft` quando passa a preenchê-lo. **Não** invente um
+evento de trace só para "usar" a variável.
 
 - [ ] **Step 6: Ajustar os três arquivos de teste existentes**
 
