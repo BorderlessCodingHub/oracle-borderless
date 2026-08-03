@@ -6,6 +6,7 @@ __pycache__/
 .eggs/
 build/
 dist/
+superpowers/
 
 # Virtualenv / uv
 .venv/
@@ -37,3 +38,6 @@ frontend/dist
 
 # Eval reports
 evals/reports/
+
+# Artefatos do brainstorming visual (superpowers)
+.superpowers/
