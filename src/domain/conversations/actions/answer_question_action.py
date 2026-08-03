@@ -164,6 +164,6 @@ class AnswerQuestionAction:
         try:
             vector = await self.search.embeddings.embed_query(query)
             return await self.chunks.nearest_distance(vector)
-        except Exception:  # pragma: no cover - defensivo
+        except Exception:
             logger.warning("falha ao medir a distância do vizinho mais próximo", exc_info=True)
             return None

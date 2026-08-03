@@ -11,14 +11,40 @@ from tests.fakes.fake_oracle_engine import FakeOracleEngine
 from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
 
 
+class _Embeddings:
+    """Vetor plausível para `embed_query` — o caminho de recusa embeda a query
+    para medir a distância do vizinho mais próximo (ver `_nearest_or_none`)."""
+
+    async def embed_query(self, query):
+        return [0.1, 0.2, 0.3]
+
+
+class _RaisingEmbeddings:
+    """Simula uma falha real de medição (ex.: client de embeddings fora do ar)."""
+
+    async def embed_query(self, query):
+        raise RuntimeError("embeddings client indisponível")
+
+
 class _FakeSearch:
-    def __init__(self, hits=None):
+    def __init__(self, hits=None, embeddings=None):
         self.hits = hits or []
         self.called = False
+        self.embeddings = embeddings or _Embeddings()
 
     async def execute(self, question, top_k=None):
         self.called = True
         return self.hits
+
+
+class _FakeChunks:
+    """Substitui `DocumentChunkRepository` — sem banco, sem sessão real."""
+
+    def __init__(self, nearest=None):
+        self.nearest = nearest
+
+    async def nearest_distance(self, embedding):
+        return self.nearest
 
 
 class _FakeSections:
@@ -45,12 +71,13 @@ class _FakeMsgRepo:
         self.appended.append(message)
 
 
-def _build(gate, search):
+def _build(gate, search, chunks=None):
     action = AnswerQuestionAction(
         engine=FakeOracleEngine(answer="resposta do motor"),
         search=search,
         gate=gate,
         sections=_FakeSections(),
+        chunks=chunks or _FakeChunks(),
     )
     action.conversations = _FakeConvRepo()
     action.messages = _FakeMsgRepo()
@@ -69,15 +96,22 @@ async def _collect(stream):
 
 @pytest.mark.asyncio
 async def test_refuses_when_retrieval_wanted_but_nothing_found():
-    action = _build(FakeRetrievalGate(retrieve=True), _FakeSearch(hits=[]))
+    action = _build(
+        FakeRetrievalGate(retrieve=True),
+        _FakeSearch(hits=[]),
+        chunks=_FakeChunks(nearest=0.83),
+    )
 
-    _, stream, _ = await action.execute("qual a capital da Austrália?", None, None)
+    _, stream, draft = await action.execute("qual a capital da Austrália?", None, None)
     text, citations = await _collect(stream)
 
     assert text.startswith("Não encontrei informações sobre isso na base de conhecimento.")
     assert "Bootcamps e Programs" in text
     assert citations == []
     assert "resposta do motor" not in text
+    # prova que passou pelo caminho REAL de medição (embed_query + nearest_distance),
+    # não pelo `except` do `_nearest_or_none` — um valor vindo do `except` seria None.
+    assert draft.retrieval_best_distance == 0.83
 
 
 @pytest.mark.asyncio
@@ -110,10 +144,36 @@ async def test_goes_to_the_engine_when_knowledge_was_found():
 
 @pytest.mark.asyncio
 async def test_refusal_answers_in_english_for_an_english_question():
-    action = _build(FakeRetrievalGate(retrieve=True), _FakeSearch(hits=[]))
+    action = _build(
+        FakeRetrievalGate(retrieve=True),
+        _FakeSearch(hits=[]),
+        chunks=_FakeChunks(nearest=0.61),
+    )
 
-    _, stream, _ = await action.execute("what is the capital of Australia?", None, None)
+    _, stream, draft = await action.execute("what is the capital of Australia?", None, None)
     text, _ = await _collect(stream)
 
     assert text.startswith("I didn't find information about this in the knowledge base.")
     assert "Bootcamps and Programs" in text
+    assert draft.retrieval_best_distance == 0.61
+
+
+@pytest.mark.asyncio
+async def test_refusal_still_emitted_when_distance_measurement_fails():
+    """Invariante: trace nunca derruba um turno. Se `embed_query` levantar (ex.:
+    client de embeddings fora do ar), a recusa ainda tem que ser emitida — só
+    perde o diagnóstico da distância, que vira `None`, não uma exceção
+    propagada."""
+    action = _build(
+        FakeRetrievalGate(retrieve=True),
+        _FakeSearch(hits=[], embeddings=_RaisingEmbeddings()),
+        chunks=_FakeChunks(nearest=0.5),  # não deveria nem ser consultado
+    )
+
+    _, stream, draft = await action.execute("qual a capital da Austrália?", None, None)
+    text, citations = await _collect(stream)
+
+    assert text.startswith("Não encontrei informações sobre isso na base de conhecimento.")
+    assert citations == []
+    assert draft.outcome == "refusal"
+    assert draft.retrieval_best_distance is None
