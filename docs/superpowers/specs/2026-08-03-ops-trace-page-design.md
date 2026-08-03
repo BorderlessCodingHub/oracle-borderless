@@ -26,6 +26,7 @@ Some-se a isso que a arquitetura só é legível hoje lendo código ou `docs/arc
 4. **Mapa desenhado à mão em React + CSS** (não Mermaid), porque o controle visual é o ponto — com o requisito do "mapa honesto" abaixo compensando o risco.
 5. **A página fica aberta agora**, com o encaixe da auth de admin pronto num ponto de cada lado. Quando a auth existir, quem não for admin **não renderiza a página nem o link** — recebe 404, não "acesso negado".
 6. **O painel de eval lê os reports existentes**; a página nunca dispara eval (é chamada de modelo de verdade, feita no release).
+7. **O juiz do eval é pinado em OpenAI, num modelo de tier médio** (seção 7) — a chave já é obrigatória para embeddings, e juiz de outro provedor reduz viés de auto-preferência.
 
 ## Requisito: o mapa não pode mentir
 
@@ -188,6 +189,46 @@ Um ponto de cada lado, os dois marcados com `TODO` amarrado à decisão de auth:
 
 Esse é o mesmo `getCurrentUser()` que o design do frontend já previa como fast-follow — esta spec o cria com o campo `isAdmin` desde o começo, sem implementar auth.
 
+### 7. O juiz do eval passa a ser OpenAI, num modelo barato
+
+Hoje `_build_judge_model()` em [judge.py](../../../evals/judge/judge.py) segue o
+`LLM_PROVIDER` — que é `anthropic` — e cai no `ANTHROPIC_MODEL`, hoje `claude-opus-4-8`.
+Julgar 13 casos com o modelo mais caro do catálogo é um default ruim. A decisão desta spec:
+**o juiz é sempre OpenAI, independente do `LLM_PROVIDER` do oráculo.**
+
+Três razões, na ordem de importância:
+
+1. **Menos viés de auto-preferência.** As respostas avaliadas são geradas por Claude. Um juiz
+   da mesma família tende a favorecer o próprio estilo — fraqueza conhecida de LLM-as-judge.
+   Juiz de outro provedor é metodologicamente melhor, não só mais barato.
+2. **A chave já é obrigatória.** `OPENAI_API_KEY` é requisito do projeto para embeddings
+   (ADR-0008, `EMBEDDING_PROVIDER` fixo em `openai`). Se a base funciona, a chave do juiz
+   existe — o gate de "sem chave, SKIPPED" fica mais simples e mais honesto.
+3. **Custo.** Sai do topo do catálogo para um modelo de tier médio.
+
+Mudanças concretas:
+
+- `settings.JUDGE_MODEL` deixa de ser `str | None` e passa a `str = "gpt-4.1-mini"`.
+- `_build_judge_model()` perde o ramo por provedor: sempre `OpenAIChatModel(settings.JUDGE_MODEL,
+  provider=OpenAIProvider(api_key=settings.OPENAI_API_KEY))`.
+- [`evals/__main__.py`](../../../evals/__main__.py) passa a checar `OPENAI_API_KEY` em vez da
+  chave do provedor ativo, e a mensagem de SKIPPED muda junto.
+
+**Por que `gpt-4.1-mini` e não o mais barato de todos:** `gpt-4o-mini` é o mesmo tier que já
+serve o retrieval gate, e o gate faz uma classificação binária — enquanto o juiz precisa
+detectar afirmação sutilmente não sustentada pelas fontes, que é trabalho de leitura fina.
+Com 13 casos e até 2 métricas por caso, **qualquer** modelo desse tier custa centavos por run:
+a escolha aqui é sobre confiabilidade do juiz, não sobre orçamento. Descer para `gpt-4o-mini`
+economiza pouco e arrisca justamente a métrica que sustenta a promessa do produto.
+
+> **Incerteza registrada:** não tenho como verificar deste ambiente a disponibilidade e o preço
+> corrente desse id para a sua conta. É uma setting — trocar não exige deploy de código. Se o
+> id não existir para a conta, o run falha na primeira chamada, de forma visível, o que é
+> aceitável numa ferramenta de release.
+
+O run continua **manual** e fora da web. A primeira execução de verdade fica para uma conversa
+à parte, por decisão da dona do produto — até lá o painel mostra estado vazio.
+
 ## Onde cada peça mora
 
 | Peça | Lugar |
@@ -199,6 +240,7 @@ Esse é o mesmo `getCurrentUser()` que o design do frontend já previa como fast
 | `RecordTurnTraceAction`, `ListRecentTracesAction`, `GetTurnTraceAction`, `GetOpsOverviewAction`, `ReadEvalReportAction` | `src/domain/observability/actions/` |
 | `CountKnowledgeBaseAction` | `src/domain/documents/actions/` |
 | `EvalReportStore` (filesystem) | `src/support/observability/` |
+| Juiz pinado em OpenAI (`JUDGE_MODEL`) | `evals/judge/judge.py` + `src/support/core/settings.py` |
 | `TurnMetrics` (parâmetro aditivo do engine) | `src/support/agent/ports.py` |
 | `OpsController`, rota, responses | `src/app/api/` |
 | `require_admin` | `src/app/api/dependencies/` |
@@ -230,6 +272,7 @@ O plano deve seguir esta ordem, porque a tela sem dado não é testável de verd
 4. `CountKnowledgeBaseAction`, `EvalReportStore` e as Actions de leitura.
 5. Endpoints de ops + `require_admin` no-op.
 6. Frontend: `ARCHITECTURE_MAP` + teste do mapa honesto, depois os três blocos.
+7. Pinar o juiz do eval em OpenAI (seção 7) — mudança pequena e isolada, **sem rodar** o harness.
 
 Ao fim do passo 3 já é possível fazer uma pergunta pelo chat e ver a linha em `agent_traces` —
 esse é o marco que valida o desenho antes de existir tela.
@@ -244,6 +287,7 @@ esse é o marco que valida o desenho antes de existir tela.
 - **fail-safe:** `RecordTurnTraceAction` levantando não altera o stream nem propaga exceção;
 - matemática dos agregados sobre linhas sintéticas;
 - `EvalReportStore`: diretório ausente → estado vazio; JSON corrompido → erro claro;
+- `_build_judge_model()` monta OpenAI **mesmo com `LLM_PROVIDER=anthropic`** (o teste tranca a decisão), e o SKIPPED do `__main__` dispara pela falta de `OPENAI_API_KEY`;
 - **teste do mapa honesto:** todo caminho do `ARCHITECTURE_MAP` existe no repo;
 - `require_admin` hoje é no-op (o teste documenta o encaixe e falha se ele desaparecer).
 
