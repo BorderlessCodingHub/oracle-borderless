@@ -16,6 +16,7 @@ class FakeOracleEngine:
         question: str,
         history: list[AgentMessage],
         knowledge: list[KnowledgeSnippet] | None = None,
+        metrics=None,
     ) -> AsyncIterator[AgentStreamChunk]:
         for token in self._answer.split():
             yield AgentStreamChunk(type="text", text=token + " ")

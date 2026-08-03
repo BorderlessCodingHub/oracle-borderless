@@ -71,7 +71,7 @@ async def _collect(stream):
 async def test_refuses_when_retrieval_wanted_but_nothing_found():
     action = _build(FakeRetrievalGate(retrieve=True), _FakeSearch(hits=[]))
 
-    _, stream = await action.execute("qual a capital da Austrália?", None, None)
+    _, stream, _ = await action.execute("qual a capital da Austrália?", None, None)
     text, citations = await _collect(stream)
 
     assert text.startswith("Não encontrei informações sobre isso na base de conhecimento.")
@@ -86,7 +86,7 @@ async def test_greeting_is_not_refused_even_though_knowledge_is_empty():
     search = _FakeSearch(hits=[])
     action = _build(FakeRetrievalGate(retrieve=False), search)
 
-    _, stream = await action.execute("oi, tudo bem?", None, None)
+    _, stream, _ = await action.execute("oi, tudo bem?", None, None)
     text, _ = await _collect(stream)
 
     assert "resposta do motor" in text
@@ -102,7 +102,7 @@ async def test_goes_to_the_engine_when_knowledge_was_found():
     hits = [KnowledgeSnippet("trecho", Citation("notion", "Doc", "u", "s", "p"))]
     action = _build(FakeRetrievalGate(retrieve=True), _FakeSearch(hits=hits))
 
-    _, stream = await action.execute("o que é o Web3 Bootcamp?", None, None)
+    _, stream, _ = await action.execute("o que é o Web3 Bootcamp?", None, None)
     text, _ = await _collect(stream)
 
     assert "resposta do motor" in text
@@ -112,7 +112,7 @@ async def test_goes_to_the_engine_when_knowledge_was_found():
 async def test_refusal_answers_in_english_for_an_english_question():
     action = _build(FakeRetrievalGate(retrieve=True), _FakeSearch(hits=[]))
 
-    _, stream = await action.execute("what is the capital of Australia?", None, None)
+    _, stream, _ = await action.execute("what is the capital of Australia?", None, None)
     text, _ = await _collect(stream)
 
     assert text.startswith("I didn't find information about this in the knowledge base.")

@@ -30,7 +30,7 @@ class _FakeEngine:
         self.received_knowledge = None
         self.received_question = None
 
-    async def stream_answer(self, question, history, knowledge=None):
+    async def stream_answer(self, question, history, knowledge=None, metrics=None):
         self.received_question = question
         self.received_history = history
         self.received_knowledge = knowledge

@@ -46,7 +46,7 @@ class ConversationController:
         )
 
         # Conversa + user message são gravadas aqui (sessão do request viva).
-        conversation_id, stream = await action.execute(
+        conversation_id, stream, _draft = await action.execute(
             data.question, data.conversation_id, user_email
         )
 
