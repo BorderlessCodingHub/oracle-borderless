@@ -1,9 +1,11 @@
 import { Link } from "react-router-dom";
 import { Logo } from "../Logo/Logo";
 import { Button } from "../Button/Button";
+import { useCurrentUser } from "../../hooks/useCurrentUser";
 import styles from "./Header.module.css";
 
 export function Header() {
+  const { isAdmin } = useCurrentUser();
   return (
     <header className={styles.header}>
       <div className={`container ${styles.inner}`}>
@@ -14,6 +16,7 @@ export function Header() {
         <nav className={styles.nav}>
           <Link to="/about">Sobre &amp; Fontes</Link>
           <Link to="/knowledge">Base de conhecimento</Link>
+          {isAdmin && <Link to="/ops">Ops</Link>}
           <Button variant="gradient" to="/oracle">Abrir o oráculo →</Button>
         </nav>
       </div>

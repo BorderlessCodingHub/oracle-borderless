@@ -6,6 +6,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/conversations": "http://localhost:8000",
+      "/ops": "http://localhost:8000",
     },
   },
   test: {
