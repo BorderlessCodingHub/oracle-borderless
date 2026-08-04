@@ -10,6 +10,7 @@ from pathlib import Path
 from evals.models import CATEGORIES, load_cases
 from evals.report import aggregate, render_table, write_report
 from evals.runner import run_all
+from src.support.core.session_scope import run_in_async_session
 
 _CASES_PATH = Path(__file__).parent / "cases" / "golden_set.json"
 _REPORTS_DIR = Path(__file__).parent / "reports"
@@ -42,13 +43,20 @@ async def _run() -> int:
         return 2
 
     cases = load_cases(_CASES_PATH)
-    results = await run_all(
-        cases,
-        gate=get_retrieval_gate(),
-        search=SearchKnowledgeBaseAction(embeddings=get_embeddings_client()),
-        engine=get_oracle_engine(enable_tools=False),
-        judge=get_answer_judge(),
-    )
+
+    async def _work():
+        # A Action é montada AQUI DENTRO de propósito: DocumentChunkRepository lê a
+        # sessão do ContextVar no __init__ (regra 3), e fora de um request só existe
+        # sessão dentro deste escopo. Construir antes deixa o repo com session=None.
+        return await run_all(
+            cases,
+            gate=get_retrieval_gate(),
+            search=SearchKnowledgeBaseAction(embeddings=get_embeddings_client()),
+            engine=get_oracle_engine(enable_tools=False),
+            judge=get_answer_judge(),
+        )
+
+    results = await run_in_async_session(_work)
     report = aggregate(results)
     print(render_table(report))
     write_report(report, _REPORTS_DIR, datetime.now(timezone.utc))
