@@ -10,7 +10,12 @@
       // não dá para importar um módulo ES aqui sem bloquear o paint.
       (function () {
         try {
-          var saved = localStorage.getItem("ob-theme");
+          var saved = null;
+          try {
+            saved = localStorage.getItem("ob-theme");
+          } catch (e) {
+            /* storage bloqueado: segue para o matchMedia abaixo mesmo assim */
+          }
           var theme =
             saved === "light" || saved === "dark"
               ? saved
@@ -19,7 +24,7 @@
                 : "light";
           document.documentElement.setAttribute("data-theme", theme);
         } catch (e) {
-          /* storage/matchMedia indisponível: fica no escuro do :root */
+          /* matchMedia indisponível: fica no escuro do :root */
         }
       })();
     </script>

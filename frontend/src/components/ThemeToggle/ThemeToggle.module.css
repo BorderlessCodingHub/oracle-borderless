@@ -3,6 +3,8 @@
 .option { background: transparent; color: var(--text-muted); }
 .option:hover { color: var(--text); }
 .active { background: var(--violet-soft); color: var(--text); }
+/* Fallback explícito: alguns fallbacks default do sistema não têm ☾ (Windows) */
+.icon { font-family: "Segoe UI Symbol", "Apple Symbols", sans-serif; }
 
 /* Abaixo de 720px vira ícone-only, mas o rótulo continua no leitor de tela. */
 @media (max-width: 720px) {

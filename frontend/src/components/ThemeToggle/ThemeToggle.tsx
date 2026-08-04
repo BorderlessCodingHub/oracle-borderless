@@ -2,10 +2,13 @@ import { useTheme } from "../../hooks/useTheme";
 import type { Theme } from "../../lib/theme";
 import styles from "./ThemeToggle.module.css";
 
+// Selector U+FE0E força apresentação de texto (monocromática) em vez de
+// emoji colorido — sem ele, "☀" vira um sol colorido no iOS/Android e "☾"
+// falta em várias fontes fallback do Windows.
 const OPTIONS: { value: Theme; label: string; icon: string; title: string }[] = [
-  { value: "system", label: "Sistema", icon: "◐", title: "Seguir o tema do sistema" },
-  { value: "light", label: "Claro", icon: "☀", title: "Tema claro" },
-  { value: "dark", label: "Escuro", icon: "☾", title: "Tema escuro" },
+  { value: "system", label: "Sistema", icon: "◐︎", title: "Seguir o tema do sistema" },
+  { value: "light", label: "Claro", icon: "☀︎", title: "Tema claro" },
+  { value: "dark", label: "Escuro", icon: "☾︎", title: "Tema escuro" },
 ];
 
 export function ThemeToggle() {
@@ -21,7 +24,7 @@ export function ThemeToggle() {
           className={theme === option.value ? styles.active : styles.option}
           onClick={() => setTheme(option.value)}
         >
-          <span aria-hidden="true">{option.icon}</span>
+          <span aria-hidden="true" className={styles.icon}>{option.icon}</span>
           <span className={styles.label}>{option.label}</span>
         </button>
       ))}

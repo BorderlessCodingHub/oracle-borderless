@@ -12,7 +12,7 @@ export function Header() {
       <div className={`container ${styles.inner}`}>
         <Link to="/" className={styles.brand}>
           <Logo size={40} />
-          <span>Oracle <span className="text-gradient">Borderless</span></span>
+          <span className={styles.brandText}>Oracle <span className="text-gradient">Borderless</span></span>
         </Link>
         <nav className={styles.nav}>
           <Link to="/about">Sobre &amp; Fontes</Link>

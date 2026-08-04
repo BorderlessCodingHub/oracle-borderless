@@ -16,7 +16,14 @@
 .stepCard p, .diffCard p { color: var(--text-muted); margin-top: var(--space-3); }
 .stepNum { display: inline-flex; padding: 8px 12px; border-radius: 10px; background: var(--violet-soft); color: var(--violet-ink); font-family: var(--font-mono); }
 .diffIcon { display: inline-flex; width: 48px; height: 48px; align-items: center; justify-content: center; border-radius: 12px; background: var(--gradient); color: #06231b; font-size: 1.3rem; margin-bottom: var(--space-3); }
-.ctaCard { text-align: center; background: var(--indigo-deep); color: var(--on-indigo); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-10); display: grid; justify-items: center; gap: var(--space-4); }
+.ctaCard {
+  /* .ctaCard é escuro nos dois modos (--indigo-deep); a borda herdada de --border
+     precisa continuar clara-sobre-escuro nos dois temas, senão o modo claro desenha
+     um anel quase branco. Como --border é herdado, isso também corrige o chip do
+     Logo (Logo.module.css .chip) renderizado dentro do card. */
+  --border: rgba(255, 255, 255, .10);
+  text-align: center; background: var(--indigo-deep); color: var(--on-indigo); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-10); display: grid; justify-items: center; gap: var(--space-4);
+}
 .ctaCard h2 { font-size: clamp(1.6rem, 3.5vw, 2.6rem); max-width: 20ch; }
 .ctaCard p { color: var(--on-indigo-muted); }
 @media (max-width: 900px) { .hero { grid-template-columns: 1fr; } .grid3 { grid-template-columns: 1fr; } }

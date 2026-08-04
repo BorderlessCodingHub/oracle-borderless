@@ -11,7 +11,7 @@
   --indigo: #3F179F;
   --indigo-deep: #221060;
   --emerald: #25C494;
-  --teal: #23BD8F;
+  --teal: #23BD8F;               /* amostrado do logo; sem consumidor em src/ hoje — mantido de propósito */
 
   /* Surfaces */
   --bg: #080808;
@@ -81,5 +81,5 @@
   --emerald-border: rgba(11, 122, 90, .30);
   --glow-1: rgba(65, 23, 163, 0.07);
   --glow-2: rgba(37, 196, 148, 0.06);
-  --gradient-text: linear-gradient(135deg, var(--violet), #0B7A5A);
+  --gradient-text: linear-gradient(135deg, var(--violet), var(--emerald-ink));
 }

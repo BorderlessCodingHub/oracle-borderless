@@ -3,4 +3,9 @@
 .brand { display: flex; align-items: center; gap: 12px; font-weight: 800; font-size: 1.15rem; }
 .nav { display: flex; align-items: center; gap: 28px; color: var(--text-muted); }
 .nav a:hover { color: var(--text); }
-@media (max-width: 720px) { .nav a:not([class]) { display: none; } }
+@media (max-width: 720px) {
+  .nav a:not([class]) { display: none; }
+  /* Libera ~160px: mantém o símbolo do logo (Logo tem <img alt> próprio,
+     então o <Link> continua com nome acessível) e esconde só o texto. */
+  .brandText { display: none; }
+}
