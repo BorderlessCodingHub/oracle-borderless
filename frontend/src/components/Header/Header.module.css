@@ -1,4 +1,4 @@
-.header { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px); background: rgba(11,11,13,.6); }
+.header { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px); background: var(--header-bg); }
 .inner { display: flex; align-items: center; justify-content: space-between; height: 76px; }
 .brand { display: flex; align-items: center; gap: 12px; font-weight: 800; font-size: 1.15rem; }
 .nav { display: flex; align-items: center; gap: 28px; color: var(--text-muted); }

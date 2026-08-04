@@ -6,9 +6,9 @@
 .icon { display: inline-flex; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 12px; background: var(--gradient); color: #06231b; margin-bottom: var(--space-3); }
 .flowPanel { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-6); }
 .flowGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-5); margin-top: var(--space-5); }
-.flowLabel { font-family: var(--font-mono); font-size: .68rem; letter-spacing: .1em; color: #c9b6ff; }
+.flowLabel { font-family: var(--font-mono); font-size: .68rem; letter-spacing: .1em; color: var(--violet-ink); }
 .flowCol { display: grid; gap: 6px; }
 .flowCol p { color: var(--text-muted); font-size: .9rem; }
-.callout { display: flex; gap: 14px; align-items: flex-start; margin: var(--space-6) 0; padding: var(--space-5); border-radius: var(--radius); background: var(--emerald-soft); border: 1px solid rgba(47,224,166,.3); }
+.callout { display: flex; gap: 14px; align-items: flex-start; margin: var(--space-6) 0; padding: var(--space-5); border-radius: var(--radius); background: var(--emerald-soft); border: 1px solid var(--emerald-border); }
 .calloutCheck { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: 8px; background: var(--emerald); color: #06231b; flex: none; }
 @media (max-width: 900px) { .cards { grid-template-columns: 1fr; } .flowGrid { grid-template-columns: 1fr 1fr; } }

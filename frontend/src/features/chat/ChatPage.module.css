@@ -11,10 +11,10 @@
 .sidebarFoot { display: grid; gap: 10px; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: var(--space-3); }
 .userChip { display: flex; align-items: center; gap: 10px; background: var(--surface-2); border-radius: var(--radius); padding: 10px; }
 .userChip span:last-child { color: var(--text-muted); font-size: .78rem; display: block; }
-.avatar { display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; border-radius: 50%; background: var(--violet); color: #fff; }
+.avatar { display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; border-radius: 50%; background: var(--violet); color: var(--on-violet); }
 .main { display: flex; flex-direction: column; min-width: 0; }
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: var(--space-4) var(--space-6); border-bottom: 1px solid var(--border); }
-.topSub { display: block; color: var(--emerald); font-size: .82rem; }
+.topSub { display: block; color: var(--emerald-ink); font-size: .82rem; }
 .emailChip { background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 8px 14px; font-size: .85rem; }
 .thread { flex: 1; overflow-y: auto; padding: var(--space-6); }
 .threadInner { max-width: 820px; margin: 0 auto; display: grid; gap: var(--space-5); }
@@ -23,9 +23,9 @@
 .exampleGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); margin-top: var(--space-4); }
 .exampleCard { text-align: left; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); display: grid; gap: 8px; }
 .exampleCard:hover { border-color: var(--violet); }
-.exampleTag { font-family: var(--font-mono); font-size: .66rem; letter-spacing: .1em; color: #c9b6ff; }
+.exampleTag { font-family: var(--font-mono); font-size: .66rem; letter-spacing: .1em; color: var(--violet-ink); }
 .userTurn { display: flex; justify-content: flex-end; }
-.userBubble { background: var(--violet); padding: 14px 18px; border-radius: 16px 16px 4px 16px; max-width: 70%; }
+.userBubble { background: var(--violet); color: var(--on-violet); padding: 14px 18px; border-radius: 16px 16px 4px 16px; max-width: 70%; }
 .botTurn { display: flex; gap: 14px; align-items: flex-start; }
 .botBody { flex: 1; min-width: 0; }
 .botText { line-height: 1.6; }
@@ -38,10 +38,10 @@
 .botText ul, .botText ol { margin: 0 0 var(--space-3); padding-left: 1.4em; }
 .botText li { margin: 2px 0; }
 .botText strong { font-weight: 700; }
-.botText a { color: var(--emerald); text-decoration: underline; }
+.botText a { color: var(--emerald-ink); text-decoration: underline; }
 .botText code { font-family: var(--font-mono); font-size: .9em; background: var(--surface-2); padding: 1px 5px; border-radius: 6px; }
 .botText pre { background: var(--surface-2); padding: var(--space-3); border-radius: var(--radius-sm); overflow-x: auto; }
-.cursor { display: inline-block; width: 8px; height: 1.1em; margin-left: 2px; background: var(--emerald); vertical-align: text-bottom; animation: blink 1s steps(2) infinite; }
+.cursor { display: inline-block; width: 8px; height: 1.1em; margin-left: 2px; background: var(--emerald-ink); vertical-align: text-bottom; animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 .thinking { display: inline-flex; gap: 6px; padding: 10px 0; }
 .thinking span { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); animation: bounce 1.2s infinite; }
@@ -54,10 +54,10 @@
 .citationHead { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px; text-align: left; }
 .citationIndex { margin-left: auto; font-family: var(--font-mono); color: var(--text-muted); }
 .citationBody { padding: 0 14px 14px; color: var(--text-muted); display: grid; gap: 8px; }
-.citationBody a { color: var(--emerald); }
-.citationTag { font-family: var(--font-mono); font-size: .66rem; letter-spacing: .06em; text-transform: uppercase; padding: 4px 8px; border-radius: 6px; background: var(--violet-soft); color: #c9b6ff; white-space: nowrap; }
+.citationBody a { color: var(--emerald-ink); }
+.citationTag { font-family: var(--font-mono); font-size: .66rem; letter-spacing: .06em; text-transform: uppercase; padding: 4px 8px; border-radius: 6px; background: var(--violet-soft); color: var(--violet-ink); white-space: nowrap; }
 .citationRef { color: var(--text-muted); font-size: .85rem; }
-.errorBox { background: rgba(240,52,52,.1); border: 1px solid rgba(240,52,52,.4); border-radius: var(--radius); padding: var(--space-4); display: grid; gap: 10px; justify-items: start; }
+.errorBox { background: var(--danger-soft); border: 1px solid var(--danger-border); border-radius: var(--radius); padding: var(--space-4); display: grid; gap: 10px; justify-items: start; }
 .retry { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 14px; }
 .composerWrap { padding: var(--space-4) var(--space-6) var(--space-5); }
 .composer { max-width: 820px; margin: 0 auto; display: flex; align-items: center; gap: 10px; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 8px 8px 18px; }
