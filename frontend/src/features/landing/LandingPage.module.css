@@ -2,7 +2,10 @@
 .heroCopy { display: flex; flex-direction: column; gap: var(--space-4); align-items: flex-start; }
 .headline { font-size: clamp(2.6rem, 6vw, 5rem); margin: var(--space-4) 0; }
 .sub { color: var(--text-muted); font-size: 1.15rem; max-width: 32ch; }
-.heroCtas { display: flex; gap: var(--space-3); margin-top: var(--space-5); }
+/* wrap: os dois botões somam ~346px de largura mínima, mais que os 312px
+   úteis de um telefone de 360px. Sem wrap eles forçavam scroll horizontal
+   na página inteira. */
+.heroCtas { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-5); }
 .previewCard { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-5); display: grid; gap: var(--space-3); }
 .previewHead { display: flex; align-items: center; gap: 10px; }
 .online { margin-left: auto; color: var(--emerald-ink); font-size: .8rem; }
