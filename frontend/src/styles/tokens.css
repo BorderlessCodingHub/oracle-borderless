@@ -1,4 +1,11 @@
+/*
+ * :root é a paleta escura (default histórico do produto).
+ * :root[data-theme="light"] sobrescreve só o que muda.
+ * Marca (--violet, --indigo*, --emerald, --teal, --gradient) é igual nos dois modos.
+ */
 :root {
+  color-scheme: dark;
+
   /* Brand — exact hex sampled from the official logo */
   --violet: #4117A3;
   --indigo: #3F179F;
@@ -21,6 +28,21 @@
   --violet-soft: rgba(65, 23, 163, 0.20);
   --emerald-soft: rgba(37, 196, 148, 0.14);
 
+  /* Semânticos — cada um existe porque a cor crua correspondente assumia fundo escuro */
+  --header-bg: rgba(11, 11, 13, .6);
+  --violet-ink: #c9b6ff;          /* texto sobre --violet-soft */
+  --emerald-ink: #25C494;         /* esmeralda usada como TEXTO (não como fundo) */
+  --on-violet: #fff;              /* texto sobre fundo --violet sólido */
+  --on-indigo: #F5F5F7;           /* .ctaCard é escuro nos dois modos */
+  --on-indigo-muted: #B9B4D4;
+  --warning: #f0b429;
+  --danger-soft: rgba(240, 52, 52, .1);
+  --danger-border: rgba(240, 52, 52, .4);
+  --emerald-border: rgba(47, 224, 166, .3);
+  --glow-1: rgba(65, 23, 163, 0.16);
+  --glow-2: rgba(37, 196, 148, 0.09);
+  --gradient-text: linear-gradient(135deg, var(--violet), var(--emerald));
+
   /* Scale */
   --radius-sm: 8px;
   --radius: 14px;
@@ -30,4 +52,34 @@
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
   --maxw: 1200px;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --bg: #FBFBFD;
+  --surface-1: #FFFFFF;
+  --surface-2: #F2F2F6;
+  --border: #E2E2EA;
+
+  /* Text */
+  --text: #14141A;
+  --text-muted: #5A5A68;          /* 6.5:1 sobre --bg */
+
+  /* Accents */
+  --violet-soft: rgba(65, 23, 163, 0.09);
+  --emerald-soft: rgba(37, 196, 148, 0.12);
+
+  /* Semânticos */
+  --header-bg: rgba(251, 251, 253, .72);
+  --violet-ink: #4117A3;          /* 10:1 sobre --violet-soft claro */
+  --emerald-ink: #0B7A5A;         /* 5.1:1 sobre --bg; #25C494 daria 2.2:1 */
+  --warning: #8A5A00;             /* 5.7:1 sobre --bg; #f0b429 é ilegível no claro */
+  --danger-soft: rgba(214, 58, 58, .08);
+  --danger-border: rgba(196, 30, 30, .35);
+  --emerald-border: rgba(11, 122, 90, .30);
+  --glow-1: rgba(65, 23, 163, 0.07);
+  --glow-2: rgba(37, 196, 148, 0.06);
+  --gradient-text: linear-gradient(135deg, var(--violet), #0B7A5A);
 }
