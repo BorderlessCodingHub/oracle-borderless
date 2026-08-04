@@ -65,6 +65,7 @@
 .composer button { width: 40px; height: 40px; border-radius: 50%; background: var(--surface-2); }
 .composer button:disabled { opacity: .4; }
 .composerNote { text-align: center; color: var(--text-muted); font-size: .8rem; margin-top: var(--space-3); }
+.sidebarFoot > [role="group"] { justify-self: start; }
 @media (max-width: 820px) {
   .shell { grid-template-columns: 1fr; }
   .sidebar { display: none; }
