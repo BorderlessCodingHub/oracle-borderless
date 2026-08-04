@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from src.domain.documents.entities.document_chunk import DocumentChunk
 from src.domain.documents.mappers import DocumentChunkMapper
@@ -101,3 +101,26 @@ class DocumentChunkRepository:
         )
         value = (await self.session.execute(stmt)).scalar_one_or_none()
         return float(value) if value is not None else None
+
+    async def count_in_scope(self) -> int:
+        """Chunks de documentos ativos e aprovados do root vigente.
+
+        Mesmo filtro de `search_similar`, sem o corte por distância — é a
+        contagem "quanto conhecimento o oráculo tem para servir", não uma
+        busca por uma pergunta específica. Sem root configurado, degrada
+        para zero (mesma convenção fail-closed das outras leituras).
+        """
+        root = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
+        if root is None:
+            return 0
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(DocumentChunkModel)
+            .join(DocumentModel, DocumentChunkModel.document_id == DocumentModel.uuid)
+            .where(
+                DocumentModel.status == "approved",
+                DocumentModel.deleted_at.is_(None),
+                DocumentModel.kb_root_page_id == root,
+            )
+        )
+        return result.scalar_one()

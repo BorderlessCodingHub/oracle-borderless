@@ -65,8 +65,11 @@ async def test_summarize_respects_the_window(db_session):
     repo = TurnTraceRepository()
     old = _trace(conversation.uuid)
     await repo.append(old)
+    fresh = await repo.append(_trace(conversation.uuid))
     await db_session.flush()
-    # empurra a linha para 10 dias atrás
+    # empurra só a linha `old` para 10 dias atrás — `fresh` fica com created_at
+    # do server_default (agora), provando que uma linha recente é incluída,
+    # não só que uma linha velha é excluída.
     from sqlalchemy import update
 
     from src.domain.observability.models.turn_trace import TurnTraceModel
@@ -78,9 +81,10 @@ async def test_summarize_respects_the_window(db_session):
     )
     await db_session.flush()
 
-    assert (await repo.summarize(window="all")).turns == 1
-    assert (await repo.summarize(window="7d")).turns == 0
-    assert (await repo.summarize(window="24h")).turns == 0
+    assert (await repo.summarize(window="all")).turns == 2
+    assert (await repo.summarize(window="7d")).turns == 1
+    assert (await repo.summarize(window="24h")).turns == 1
+    assert [t.uuid for t in await repo.list_recent(window="7d", limit=10)] == [fresh.uuid]
 
 
 @pytest.mark.asyncio
