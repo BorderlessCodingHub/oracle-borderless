@@ -19,33 +19,33 @@ function renderToggle() {
 }
 
 describe("ThemeToggle", () => {
-  it("expõe as três opções num radiogroup", () => {
+  it("expõe as três opções num group", () => {
     stubMatchMedia(true);
     renderToggle();
-    expect(screen.getByRole("radiogroup", { name: "Tema da interface" })).toBeInTheDocument();
-    expect(screen.getAllByRole("radio")).toHaveLength(3);
+    expect(screen.getByRole("group", { name: "Tema da interface" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toHaveLength(3);
   });
 
   it("marca 'Sistema' quando não há preferência salva", () => {
     stubMatchMedia(true);
     renderToggle();
-    expect(screen.getByRole("radio", { name: "Sistema" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Sistema" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("aplica o tema claro no <html> e persiste ao clicar em 'Claro'", () => {
     stubMatchMedia(true);
     renderToggle();
-    fireEvent.click(screen.getByRole("radio", { name: "Claro" }));
+    fireEvent.click(screen.getByRole("button", { name: "Claro" }));
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    expect(screen.getByRole("radio", { name: "Claro" })).toBeChecked();
-    expect(screen.getByRole("radio", { name: "Sistema" })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Claro" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Sistema" })).toHaveAttribute("aria-pressed", "false");
     expect(localStorage.getItem("ob-theme")).toBe("light");
   });
 
   it("volta para escuro ao clicar em 'Escuro'", () => {
     stubMatchMedia(false);
     renderToggle();
-    fireEvent.click(screen.getByRole("radio", { name: "Escuro" }));
+    fireEvent.click(screen.getByRole("button", { name: "Escuro" }));
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     expect(localStorage.getItem("ob-theme")).toBe("dark");
   });

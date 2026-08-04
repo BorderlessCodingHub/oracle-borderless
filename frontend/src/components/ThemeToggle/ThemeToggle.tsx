@@ -11,13 +11,12 @@ const OPTIONS: { value: Theme; label: string; icon: string; title: string }[] = 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
   return (
-    <div className={styles.group} role="radiogroup" aria-label="Tema da interface">
+    <div className={styles.group} role="group" aria-label="Tema da interface">
       {OPTIONS.map((option) => (
         <button
           key={option.value}
           type="button"
-          role="radio"
-          aria-checked={theme === option.value}
+          aria-pressed={theme === option.value}
           title={option.title}
           className={theme === option.value ? styles.active : styles.option}
           onClick={() => setTheme(option.value)}
