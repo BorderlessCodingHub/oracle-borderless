@@ -35,6 +35,7 @@
   --on-violet: #fff;              /* texto sobre fundo --violet sólido */
   --on-indigo: #F5F5F7;           /* .ctaCard é escuro nos dois modos */
   --on-indigo-muted: #B9B4D4;
+  --on-indigo-border: rgba(255, 255, 255, .10);  /* borda clara-sobre-escuro do .ctaCard */
   --warning: #f0b429;
   --danger-soft: rgba(240, 52, 52, .1);
   --danger-border: rgba(240, 52, 52, .4);

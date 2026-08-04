@@ -14,12 +14,12 @@ import { describe, expect, it } from "vitest";
 // para que o próximo componente novo não reintroduza o problema.
 const SRC_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 
-// Exceções sancionadas: valores fixos de propósito, iguais nos dois temas.
-// - #06231b: tinta escura sobre fundo saturado (gradiente / esmeralda).
-// - rgba(255, 255, 255, .10): override local de --border em .ctaCard
-//   (LandingPage.module.css) — o card é escuro nos dois modos, então a borda
-//   não pode seguir o --border do tema claro (ver fix 3 do review de tema).
-const ALLOWED = new Set(["#06231b", "rgba(255, 255, 255, .10)"]);
+// Exceção sancionada: #06231b, tinta escura sobre fundo saturado (gradiente /
+// esmeralda), que é o mesmo nos dois temas. Qualquer outro valor fixo em ambos
+// os modos deve virar token em tokens.css (declarado só no bloco :root, sem
+// override no bloco claro — mesma ideia das cores de marca) em vez de entrar
+// aqui: uma exceção a mais é um furo permanente nesta invariante.
+const ALLOWED = new Set(["#06231b"]);
 
 const COLOR_RE = /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)/g;
 
@@ -55,7 +55,7 @@ function findViolations(): Violation[] {
 }
 
 describe("no-raw-colors invariant", () => {
-  it("não deixa hex/rgba cru entrar em *.module.css fora de #06231b", () => {
+  it("não deixa hex/rgba cru entrar em *.module.css fora das exceções", () => {
     const violations = findViolations();
 
     if (violations.length > 0) {

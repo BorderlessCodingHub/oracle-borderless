@@ -21,7 +21,7 @@
      precisa continuar clara-sobre-escuro nos dois temas, senão o modo claro desenha
      um anel quase branco. Como --border é herdado, isso também corrige o chip do
      Logo (Logo.module.css .chip) renderizado dentro do card. */
-  --border: rgba(255, 255, 255, .10);
+  --border: var(--on-indigo-border);
   text-align: center; background: var(--indigo-deep); color: var(--on-indigo); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-10); display: grid; justify-items: center; gap: var(--space-4);
 }
 .ctaCard h2 { font-size: clamp(1.6rem, 3.5vw, 2.6rem); max-width: 20ch; }
