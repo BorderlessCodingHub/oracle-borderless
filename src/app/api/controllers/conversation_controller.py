@@ -20,9 +20,11 @@ from src.domain.conversations.actions.get_conversation_action import GetConversa
 from src.domain.conversations.actions.list_conversations_action import ListConversationsAction
 from src.domain.documents.actions.search_knowledge_base_action import SearchKnowledgeBaseAction
 from src.domain.observability.actions.record_turn_trace_action import RecordTurnTraceAction
+from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
 from src.support.agent.oracle_engine import get_oracle_engine
 from src.support.agent.retrieval_gate import get_retrieval_gate
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
+from src.support.core.context import CurrentAsyncSessionContext
 from src.support.core.session_scope import run_in_async_session
 
 logger = logging.getLogger(__name__)
@@ -61,7 +63,12 @@ class ConversationController:
             try:
                 async for chunk in stream:
                     if chunk.type == "text":
-                        if draft.first_token_ms is None:
+                        # Só há "latência do motor" quando um motor de fato rodou
+                        # (draft.engine_metrics). No caminho de recusa, o "texto"
+                        # é uma string canônica emitida na hora — contá-lo aqui
+                        # misturaria as duas coisas na média que a página de ops
+                        # mostra (ver correção pós-revisão).
+                        if draft.engine_metrics is not None and draft.first_token_ms is None:
                             draft.first_token_ms = int(
                                 (time.monotonic() - engine_started) * 1000
                             )
@@ -74,14 +81,17 @@ class ConversationController:
                             "sources",
                             {"citations": [_citation_payload(c) for c in chunk.citations]},
                         )
-            except Exception:
+            except Exception as exc:
                 failed = True
                 logger.exception("stream falhou durante /conversations/ask")
                 draft.outcome = "error"
-                draft.error = "erro ao gerar a resposta"
+                # A mensagem ao usuário (evento SSE) continua genérica; só o
+                # trace fica informativo. Truncado em 512: é o tamanho da coluna.
+                draft.error = f"{type(exc).__name__}: {exc}"[:512]
                 yield _sse("error", {"message": "erro ao gerar a resposta"})
 
-            draft.engine_ms = int((time.monotonic() - engine_started) * 1000)
+            if draft.engine_metrics is not None:
+                draft.engine_ms = int((time.monotonic() - engine_started) * 1000)
             draft.citations_count = len(captured["citations"])
             _absorb_engine_metrics(draft)
             draft.record("turn_end", outcome=draft.outcome)
@@ -117,25 +127,43 @@ class ConversationController:
         return ConversationDetailResponse.from_entity(conversation, messages)
 
 
-def _absorb_engine_metrics(draft) -> None:
-    metrics = getattr(draft, "engine_metrics", None)
-    if metrics is None:
+def _absorb_engine_metrics(draft: TurnTraceDraft) -> None:
+    if draft.engine_metrics is None:
         return  # caminho de recusa: não houve engine
+    metrics = draft.engine_metrics
     draft.tool_calls = metrics.tool_calls
     draft.input_tokens = metrics.input_tokens
     draft.output_tokens = metrics.output_tokens
 
 
-async def _persist_turn(conversation_id: UUID, draft, content: str | None, citations: list) -> None:
-    """Uma sessão própria para as duas escritas pós-stream."""
+async def _persist_turn(
+    conversation_id: UUID, draft: TurnTraceDraft, content: str | None, citations: list
+) -> None:
+    """Uma sessão própria para as duas escritas pós-stream.
+
+    Cada escrita roda em savepoint próprio (`begin_nested`): um erro de banco
+    (ex.: overflow de coluna) aborta só o savepoint dela, não a transação
+    inteira — sem isso, a falha ao gravar o trace levaria embora a resposta
+    do assistente já persistida (e vice-versa), porque o Postgres marca a
+    transação inteira como abortada e o commit final vira ROLLBACK silencioso.
+    O trace vai primeiro: é o que mais interessa quando o turno deu errado.
+    """
 
     async def _work() -> None:
-        if content:
-            await AppendAssistantMessageAction().execute(conversation_id, content, citations)
         try:
-            await RecordTurnTraceAction().execute(conversation_id, draft)
+            async with CurrentAsyncSessionContext.get().begin_nested():
+                await RecordTurnTraceAction().execute(conversation_id, draft)
         except Exception:
             # Invariante da spec: observabilidade não pode custar a resposta.
             logger.exception("falha ao gravar o trace do turno")
+
+        if content:
+            try:
+                async with CurrentAsyncSessionContext.get().begin_nested():
+                    await AppendAssistantMessageAction().execute(
+                        conversation_id, content, citations
+                    )
+            except Exception:
+                logger.exception("falha ao persistir a resposta do oráculo")
 
     await run_in_async_session(_work)

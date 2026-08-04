@@ -60,7 +60,7 @@ def _fill_usage(metrics: TurnMetrics, result) -> None:
                 metrics.output_tokens = int(getattr(usage, attr))
                 break
     except Exception:  # pragma: no cover - observabilidade não derruba turno
-        logger.warning("não foi possível ler usage() do run", exc_info=True)
+        logger.warning("não foi possível ler o usage do run", exc_info=True)
 
 
 def _build_prompt(question: str, history: list[AgentMessage], knowledge: list[KnowledgeSnippet]) -> str:

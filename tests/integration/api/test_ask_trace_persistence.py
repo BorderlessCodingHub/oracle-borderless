@@ -41,6 +41,17 @@ class _FailingEngine:
         raise RuntimeError("boom: engine caiu no meio do stream")
 
 
+class _EmptySearchAction:
+    """Sempre volta vazia — aciona a recusa determinística (gate pede busca,
+    nada encontrado), o caminho em que nenhum motor roda."""
+
+    def __init__(self, *a, **kw):
+        pass
+
+    async def execute(self, query, top_k=None):
+        return []
+
+
 def _parse_conversation_id(body: str) -> str:
     import json
 
@@ -73,8 +84,8 @@ async def _fetch_trace(conversation_id: UUID) -> dict:
             await s.execute(
                 text(
                     "SELECT question, gate_retrieve, retrieval_kept, outcome, engine_ms, "
-                    "first_token_ms, events, error FROM agent_traces "
-                    "WHERE conversation_id = :cid"
+                    "first_token_ms, tool_calls, input_tokens, output_tokens, events, error "
+                    "FROM agent_traces WHERE conversation_id = :cid"
                 ),
                 {"cid": conversation_id},
             )
@@ -89,7 +100,18 @@ async def _fetch_trace(conversation_id: UUID) -> dict:
 
 @pytest.mark.asyncio
 async def test_trace_row_exists_after_a_successful_ask(monkeypatch):
-    _patch_controller(monkeypatch)
+    """A linha do trace carrega o que o motor de fato mediu — não só o
+    esqueleto da Action. `FakeOracleEngine` preenche `metrics` com valores
+    não-triviais (2, 123, 45) para que a asserção falhe se a cadeia
+    engine → `_absorb_engine_metrics` → coluna se romper em algum ponto
+    (ver correção pós-revisão: apagar `_absorb_engine_metrics(draft)` deixava
+    isso passar antes, porque nada distinguia "absorvido" de "default zero")."""
+    from tests.fakes.fake_oracle_engine import FakeOracleEngine
+
+    engine = FakeOracleEngine(
+        answer="resposta de teste", tool_calls=2, input_tokens=123, output_tokens=45
+    )
+    _patch_controller(monkeypatch, engine=engine)
     from main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -105,6 +127,9 @@ async def test_trace_row_exists_after_a_successful_ask(monkeypatch):
     assert trace["retrieval_kept"] == 1
     assert trace["engine_ms"] is not None
     assert trace["first_token_ms"] is not None
+    assert trace["tool_calls"] == 2
+    assert trace["input_tokens"] == 123
+    assert trace["output_tokens"] == 45
     assert trace["events"][0]["step"] == "turn_start"
     assert trace["events"][-1]["step"] == "turn_end"
 
@@ -131,8 +156,43 @@ async def test_failed_turn_is_traced_even_though_the_answer_is_not_persisted(mon
                 {"cid": conversation_id},
             )
         ).scalars().all()
-        assert "assistant" not in roles  # resposta parcial não é persistida (M2)
+        assert roles == ["user"]  # resposta parcial não é persistida (M2)
 
     trace = await _fetch_trace(conversation_id)
     assert trace["outcome"] == "error"
-    assert trace["error"]
+    # Coluna informativa (correção pós-revisão): tipo + mensagem da exceção
+    # real, não a string genérica devolvida ao usuário no evento SSE.
+    assert trace["error"] == "RuntimeError: boom: engine caiu no meio do stream"
+
+
+@pytest.mark.asyncio
+async def test_refusal_leaves_engine_ms_and_first_token_ms_null(monkeypatch):
+    """Correção pós-revisão: no caminho de recusa nenhum motor roda, então
+    `engine_ms`/`first_token_ms` não podem carregar o tempo de emitir uma
+    string canônica — isso envenenaria a média de latência do motor que a
+    página de ops mostra. Ambos devem ficar `None`."""
+    import src.app.api.controllers.conversation_controller as ctrl
+    from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
+    from tests.fakes.fake_oracle_engine import FakeOracleEngine
+    from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
+
+    monkeypatch.setattr(
+        ctrl, "get_oracle_engine", lambda: FakeOracleEngine(answer="nunca deveria aparecer")
+    )
+    monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
+    monkeypatch.setattr(ctrl, "get_retrieval_gate", lambda: FakeRetrievalGate(retrieve=True))
+    monkeypatch.setattr(ctrl, "SearchKnowledgeBaseAction", _EmptySearchAction)
+
+    from main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/conversations/ask", json={"question": "qual a capital da Austrália?"}
+        )
+        body = resp.text
+        assert "nunca deveria aparecer" not in body  # confirma que o engine não rodou
+
+    trace = await _fetch_trace(UUID(_parse_conversation_id(body)))
+    assert trace["outcome"] == "refusal"
+    assert trace["engine_ms"] is None
+    assert trace["first_token_ms"] is None

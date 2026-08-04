@@ -58,3 +58,31 @@ async def test_stream_answer_fills_token_counts_from_usage():
 
     assert isinstance(metrics.input_tokens, int) and metrics.input_tokens > 0
     assert isinstance(metrics.output_tokens, int) and metrics.output_tokens > 0
+
+
+@pytest.mark.asyncio
+async def test_stream_answer_counts_tool_calls_when_tools_are_invoked():
+    """Regressão: prende que `metrics.tool_calls` incrementa de verdade nos
+    dois closures de tool (`web_search`/`fetch_notion_page`), não só que o
+    contador fica em 0 quando nenhuma tool está registrada.
+
+    `TestModel(call_tools="all")` (default do pydantic-ai) chama toda tool
+    registrada no agent — aqui isso dispara as duas, contra Tavily/Notion
+    reais sem chave de API configurada nesses testes, e elas falham. Isso é
+    esperado e não quebra o teste: os closures do engine capturam a exceção
+    da tool e devolvem conteúdo de erro ao agente (comportamento existente,
+    não desta task) — o que importa é que `metrics.tool_calls` incrementou
+    ANTES da tentativa, então mesmo a tool falhando conta como chamada."""
+    from pydantic_ai.models.test import TestModel
+
+    from src.domain.shared.value_objects.citation import Citation
+    from src.support.agent.oracle_engine import OracleEngine
+    from src.support.agent.ports import KnowledgeSnippet
+
+    metrics = TurnMetrics()
+    engine = OracleEngine(model=TestModel(), enable_tools=True)
+    knowledge = [KnowledgeSnippet("trecho", Citation("notion", "Doc", "u", "s", "pid"))]
+
+    _ = [c async for c in engine.stream_answer("pergunta", [], knowledge, metrics=metrics)]
+
+    assert metrics.tool_calls == 2  # web_search + fetch_notion_page
