@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     OPENAI_SMALL_MODEL: str = "gpt-4o-mini"
     GATE_TIMEOUT_SECONDS: float = 5.0
     JUDGE_MODEL: str | None = None  # eval judge; defaults to the provider's main model
+    # Onde o harness de eval grava seus reports (lidos pela página de ops)
+    EVAL_REPORTS_DIR: str = "evals/reports"
 
     # --- Embeddings (desacoplado do provedor de chat; ver ADR-0008) ---
     EMBEDDING_PROVIDER: Literal["openai"] = "openai"
