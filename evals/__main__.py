@@ -33,11 +33,11 @@ async def _run() -> int:
     from src.support.core.settings import settings
     from evals.judge.judge import get_answer_judge
 
-    key = settings.OPENAI_API_KEY if settings.LLM_PROVIDER == "openai" else settings.ANTHROPIC_API_KEY
+    key = settings.OPENAI_API_KEY
     if not key:
         print(
-            f"SKIPPED — nenhuma avaliação executada (sem API key para o provedor "
-            f"'{settings.LLM_PROVIDER}')."
+            "SKIPPED — nenhuma avaliação executada (sem OPENAI_API_KEY; o juiz do "
+            "eval é OpenAI, independente de LLM_PROVIDER)"
         )
         return 2
 

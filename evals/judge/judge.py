@@ -3,9 +3,7 @@ Fora de src/ — pode importar pydantic_ai livremente."""
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
-from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from evals.judge.rubrics import JUDGE_SYSTEM_PROMPT, build_judge_prompt
@@ -32,11 +30,11 @@ class JudgeOutput(BaseModel):
 
 
 def _build_judge_model():
-    if settings.LLM_PROVIDER == "openai":
-        model_id = settings.JUDGE_MODEL or settings.OPENAI_MODEL
-        return OpenAIChatModel(model_id, provider=OpenAIProvider(api_key=settings.OPENAI_API_KEY))
-    model_id = settings.JUDGE_MODEL or settings.ANTHROPIC_MODEL
-    return AnthropicModel(model_id, provider=AnthropicProvider(api_key=settings.ANTHROPIC_API_KEY))
+    """Sempre OpenAI — ver spec de 2026-08-03, seção 7."""
+    return OpenAIChatModel(
+        settings.JUDGE_MODEL,
+        provider=OpenAIProvider(api_key=settings.OPENAI_API_KEY),
+    )
 
 
 def _build_judge_agent() -> Agent:
