@@ -62,5 +62,8 @@ async def test_eval_reports_no_runs_when_there_is_no_report(ops_client, tmp_path
     resp = await ops_client.get("/ops/eval")
     assert resp.status_code == 200
     body = resp.json()
+    # Envelope completo: as três chaves que o schema EvalReportResponse tranca.
+    assert set(body.keys()) == {"status", "report", "history"}
     assert body["status"] == "no_runs"
+    assert body["report"] is None
     assert body["history"] == []

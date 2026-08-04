@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from src.app.api.responses.ops_responses import (
+    EvalReportResponse,
     OpsOverviewResponse,
     TurnDetailResponse,
     TurnSummaryResponse,
@@ -27,5 +28,5 @@ class OpsController:
         return TurnDetailResponse.from_entity(await GetTurnTraceAction().execute(trace_id))
 
     @staticmethod
-    async def eval_report() -> dict:
-        return await ReadEvalReportAction().execute()
+    async def eval_report() -> EvalReportResponse:
+        return EvalReportResponse(**await ReadEvalReportAction().execute())

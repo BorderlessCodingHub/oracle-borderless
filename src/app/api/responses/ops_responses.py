@@ -59,6 +59,17 @@ class OpsOverviewResponse(BaseModel):
         )
 
 
+# TurnSummaryResponse/TurnDetailResponse omitem, de propósito, dois campos que
+# existem na Entity TurnTrace:
+#
+# - `user_email`: a página de ops está aberta hoje (require_admin é no-op, por
+#   decisão da dona do produto). Expor o e-mail de quem fez cada pergunta para
+#   qualquer um com a URL seria vazamento de dado pessoal. Quando a auth de
+#   admin existir, isso pode ser revisto — mas é decisão de então, não de agora.
+# - `message_id`: hoje nunca é preenchido (nem a Action nem o controller de
+#   conversations o atribuem — o retorno de AppendAssistantMessageAction é
+#   descartado), então a coluna é sempre NULL. Expor um campo sempre nulo só
+#   geraria dúvida na tela.
 class TurnSummaryResponse(BaseModel):
     id: str
     created_at: str
@@ -125,3 +136,19 @@ class TurnDetailResponse(TurnSummaryResponse):
             error=t.error,
             events=t.events,
         )
+
+
+class EvalReportResponse(BaseModel):
+    """Último run do judge eval, ou estado vazio quando nunca rodou.
+
+    `report`/`history` ficam como dict/list[dict] de propósito: a forma
+    interna do report é definida pelo harness em `evals/report.py`, e
+    espelhá-la campo a campo aqui criaria um segundo lugar para desatualizar.
+    Este schema tranca só o envelope (`status` e a presença das duas chaves) —
+    o que o frontend precisa para decidir entre estado vazio e painel
+    preenchido.
+    """
+
+    status: str  # "ok" | "no_runs"
+    report: dict | None
+    history: list[dict]
