@@ -47,7 +47,9 @@ class AnswerJudge:
 
     async def score(self, case: EvalCase, sources_text: str, answer: str) -> dict[str, MetricScore]:
         metrics = metrics_for_category(case.category)
-        prompt = build_judge_prompt(case.question, sources_text, answer, metrics)
+        prompt = build_judge_prompt(
+            case.question, sources_text, answer, metrics, category=case.category
+        )
         result = await self._agent.run(prompt)
         out = result.output
         field_map = {
