@@ -58,6 +58,7 @@ Três pilares definem esta arquitetura:
 │   │   │   └── enums/               # enums por subdomínio (status, etc.)
 │   │   │
 │   │   ├── conversations/           # perguntas/respostas do oráculo
+│   │   ├── observability/           # trace de cada turno (agent_traces) — ADR-0013
 │   │   └── shared/                  # entities e VOs compartilhados
 │   │       ├── entities/
 │   │       └── value_objects/
@@ -622,6 +623,14 @@ schedule.call(CleanupConversationsJob).daily(hour=3)
 ```
 
 `LifespanManager` carrega esse `schedule.py` no startup automaticamente.
+
+## Trace do turno
+
+Cada turno do oráculo acumula seu próprio rastro num coletor em memória — `TurnTraceDraft`, em `src/domain/observability/dtos/` — que a `AnswerQuestionAction` preenche com recência, gate, retrieval e recusa, e o gerador SSE do controller completa com a fase do engine (primeiro token, duração, tokens, tool calls).
+
+Terminado o stream, a **mesma** background task que persiste a resposta do assistente grava o trace numa linha de `agent_traces`, em sessão própria (`run_in_async_session`) — o trace primeiro, porque turno que quebrou é o que mais interessa. Nada disso pode derrubar um turno: o call site fica sob `try/except` que loga e engole.
+
+A leitura é agregada em SQL e servida pelos quatro endpoints só-leitura de `/ops`, consumidos pela página `/ops` do frontend. Racional completo em [ADR-0013](adr/0013-trace-por-turno-no-postgres.md).
 
 ## Interface web
 
