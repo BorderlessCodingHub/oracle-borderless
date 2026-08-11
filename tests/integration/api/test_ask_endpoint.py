@@ -16,7 +16,7 @@ async def _dispose_db_engine_between_tests():
 
 
 class FailingOracleEngine:
-    async def stream_answer(self, question, history, knowledge=None) -> AsyncIterator:
+    async def stream_answer(self, question, history, knowledge=None, metrics=None) -> AsyncIterator:
         from src.support.agent.ports import AgentStreamChunk
 
         yield AgentStreamChunk(type="text", text="ola ")

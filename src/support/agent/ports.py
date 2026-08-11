@@ -50,10 +50,24 @@ class RetrievalGatePort(Protocol):
     ) -> RetrievalDecision: ...
 
 
+@dataclass
+class TurnMetrics:
+    """Métricas do motor coletadas durante o streaming (preenchidas na Task 5).
+
+    Instanciada aqui pela Action e passada ao engine; quem escreve nos campos é
+    o motor conforme o turno progride.
+    """
+
+    tool_calls: int = 0
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
 class OracleEnginePort(Protocol):
     def stream_answer(
         self,
         question: str,
         history: list[AgentMessage],
         knowledge: list[KnowledgeSnippet],
+        metrics: TurnMetrics | None = None,
     ) -> AsyncIterator[AgentStreamChunk]: ...

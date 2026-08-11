@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from src.domain.documents.entities.document_chunk import DocumentChunk
 from src.domain.documents.mappers import DocumentChunkMapper
@@ -74,3 +74,53 @@ class DocumentChunkRepository:
             )
             for row in rows
         ]
+
+    async def nearest_distance(self, embedding: list[float]) -> float | None:
+        """Distância do chunk mais próximo **ignorando o limiar**.
+
+        Serve o trace no caminho de recusa: `search_similar` filtra pelo limiar
+        dentro do SQL, então quando ela devolve vazio não se sabe se faltou 0,01
+        ou 0,3. Uma query de índice, chamada só quando nada passou — turno que
+        recusa não chamou o LLM e tem folga de sobra.
+        """
+        root = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
+        if root is None:
+            return None  # mesma degradação fail-closed do search_similar
+
+        distance = DocumentChunkModel.embedding.cosine_distance(embedding)
+        stmt = (
+            select(distance)
+            .join(DocumentModel, DocumentChunkModel.document_id == DocumentModel.uuid)
+            .where(
+                DocumentModel.status == "approved",
+                DocumentModel.deleted_at.is_(None),
+                DocumentModel.kb_root_page_id == root,
+            )
+            .order_by(distance)
+            .limit(1)
+        )
+        value = (await self.session.execute(stmt)).scalar_one_or_none()
+        return float(value) if value is not None else None
+
+    async def count_in_scope(self) -> int:
+        """Chunks de documentos ativos e aprovados do root vigente.
+
+        Mesmo filtro de `search_similar`, sem o corte por distância — é a
+        contagem "quanto conhecimento o oráculo tem para servir", não uma
+        busca por uma pergunta específica. Sem root configurado, degrada
+        para zero (mesma convenção fail-closed das outras leituras).
+        """
+        root = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
+        if root is None:
+            return 0
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(DocumentChunkModel)
+            .join(DocumentModel, DocumentChunkModel.document_id == DocumentModel.uuid)
+            .where(
+                DocumentModel.status == "approved",
+                DocumentModel.deleted_at.is_(None),
+                DocumentModel.kb_root_page_id == root,
+            )
+        )
+        return result.scalar_one()

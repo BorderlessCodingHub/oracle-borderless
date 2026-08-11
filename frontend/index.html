@@ -4,6 +4,30 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Aplica o tema antes do primeiro paint, senão quem escolheu claro vê um
+      // lampejo preto a cada reload. Duplica src/lib/theme.ts de propósito:
+      // não dá para importar um módulo ES aqui sem bloquear o paint.
+      (function () {
+        try {
+          var saved = null;
+          try {
+            saved = localStorage.getItem("ob-theme");
+          } catch (e) {
+            /* storage bloqueado: segue para o matchMedia abaixo mesmo assim */
+          }
+          var theme =
+            saved === "light" || saved === "dark"
+              ? saved
+              : matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (e) {
+          /* matchMedia indisponível: fica no escuro do :root */
+        }
+      })();
+    </script>
     <title>Oracle Borderless</title>
   </head>
   <body>

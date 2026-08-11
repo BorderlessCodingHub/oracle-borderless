@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Logo } from "../../../components/Logo/Logo";
+import { ThemeToggle } from "../../../components/ThemeToggle/ThemeToggle";
 import type { ConversationSummary } from "../../../lib/types";
 import styles from "../ChatPage.module.css";
 
@@ -50,6 +51,7 @@ export function Sidebar({ conversations, activeId, onNew, onOpen, userEmail }: P
       <div className={styles.sidebarFoot}>
         <Link to="/about">Sobre &amp; Fontes</Link>
         <Link to="/knowledge">Base de conhecimento</Link>
+        <ThemeToggle />
         <div className={styles.userChip}>
           <span className={styles.avatar}>{userEmail[0]?.toUpperCase()}</span>
           <div><strong>{userEmail}</strong><span>autenticado na borda</span></div>

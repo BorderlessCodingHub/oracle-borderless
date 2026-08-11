@@ -404,6 +404,12 @@ alembic check
 
 Se a tarefa envolve **criar pastas novas, mover arquivos entre camadas, ou mudar wiring de dependências**, pare e confirme antes de executar. A estrutura é deliberada — mudanças ad-hoc erodem a arquitetura.
 
+Se a mudança altera o **pipeline do turno ou da ingestão** (etapa nova, etapa
+removida, arquivo renomeado), atualize `frontend/src/features/ops/architectureMap.ts`
+**no mesmo commit**. O teste `architectureMap.test.ts` falha se um arquivo
+declarado no mapa deixar de existir — é o que impede a página de ops de mentir
+sobre a arquitetura.
+
 ## Onde encontrar mais
 
 ### Documentação operacional (leia quando precisar fazer algo)

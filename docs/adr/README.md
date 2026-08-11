@@ -28,6 +28,7 @@ por `---`. Fluxo recomendado:
 | [0010](0010-transporte-mcp-notion.md) | Transporte do Notion: MCP server via cliente `mcp` (não SDK REST) | Aceito |
 | [0011](0011-kb-restrita-root-notion.md) | Base de conhecimento restrita ao subtree de um root configurável do Notion | Aceito |
 | [0012](0012-escopo-kb-aplicado-na-recuperacao.md) | Escopo da KB aplicado também na recuperação, não só na descoberta | Aceito |
+| [0013](0013-trace-por-turno-no-postgres.md) | Trace por turno persistido no Postgres, coletado num ponto único | Aceito |
 
 > ADR-0001–0006 são citados pelo `CLAUDE.md` mas ainda não foram escritos como arquivo.
 > As regras já estão em vigor (ver `CLAUDE.md` → "Regras inegociáveis"). Backfill quando

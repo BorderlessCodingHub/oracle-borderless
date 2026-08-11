@@ -1,3 +1,5 @@
+import logging
+import time
 from datetime import datetime, timezone
 from typing import AsyncIterator
 from uuid import UUID
@@ -14,8 +16,18 @@ from src.domain.documents.actions.list_knowledge_sections_action import (
     ListKnowledgeSectionsAction,
 )
 from src.domain.documents.actions.search_knowledge_base_action import SearchKnowledgeBaseAction
-from src.support.agent.ports import AgentStreamChunk, OracleEnginePort, RetrievalGatePort
+from src.domain.documents.repositories.document_chunk_repository import DocumentChunkRepository
+from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
+from src.support.agent.ports import (
+    AgentStreamChunk,
+    OracleEnginePort,
+    RetrievalGatePort,
+    TurnMetrics,
+)
 from src.support.core.exceptions import NotFoundError
+from src.support.core.settings import settings
+
+logger = logging.getLogger(__name__)
 
 _TITLE_MAX = 80
 
@@ -37,18 +49,22 @@ class AnswerQuestionAction:
         search: SearchKnowledgeBaseAction,
         gate: RetrievalGatePort,
         sections=None,
+        chunks=None,
     ) -> None:
         self.engine = engine
         self.search = search
         self.gate = gate
         self.sections = sections or ListKnowledgeSectionsAction()
+        self.chunks = chunks or DocumentChunkRepository()
         self.conversations = ConversationRepository()
         self.messages = MessageRepository()
 
     async def execute(
         self, question: str, conversation_id: UUID | None, user_email: str | None
-    ) -> tuple[UUID, AsyncIterator[AgentStreamChunk]]:
+    ) -> tuple[UUID, AsyncIterator[AgentStreamChunk], TurnTraceDraft]:
         now = datetime.now(timezone.utc)
+        draft = TurnTraceDraft(question=question, user_email=user_email)
+        draft.record("turn_start", question_chars=len(question))
 
         if conversation_id is None:
             conversation = await self.conversations.create(
@@ -70,8 +86,27 @@ class AnswerQuestionAction:
         # Recência = turnos ANTERIORES (antes de gravar a pergunta atual, que já
         # vai ao engine como `question`).
         history = await self.messages.load_recent(conversation.uuid)
+        draft.history_messages = len(history)
+        draft.history_tokens_est = sum(max(1, len(m.content) // 4) for m in history)
+        draft.record(
+            "recency",
+            messages=draft.history_messages,
+            tokens_est=draft.history_tokens_est,
+        )
 
+        gate_started = time.monotonic()
         decision = await self.gate.decide(question, history)
+        draft.gate_ms = int((time.monotonic() - gate_started) * 1000)
+        draft.gate_retrieve = decision.retrieve
+        draft.gate_search_query = decision.search_query or None
+        draft.gate_degraded = decision.degraded
+        draft.record(
+            "gate",
+            retrieve=decision.retrieve,
+            search_query=decision.search_query,
+            degraded=decision.degraded,
+            ms=draft.gate_ms,
+        )
 
         await self.messages.append(
             Message(
@@ -84,7 +119,21 @@ class AnswerQuestionAction:
         )
 
         if decision.retrieve:
+            draft.retrieval_ran = True
+            draft.retrieval_top_k = settings.RAG_TOP_K
+            draft.retrieval_threshold = settings.RAG_MAX_DISTANCE
+            retrieval_started = time.monotonic()
             knowledge = await self.search.execute(decision.search_query)  # query reescrita
+            draft.retrieval_ms = int((time.monotonic() - retrieval_started) * 1000)
+            draft.retrieval_kept = len(knowledge)
+            draft.record(
+                "retrieval",
+                top_k=draft.retrieval_top_k,
+                kept=draft.retrieval_kept,
+                threshold=draft.retrieval_threshold,
+                ms=draft.retrieval_ms,
+            )
+
             if not knowledge and not decision.degraded:
                 # Nada passou do limiar: recusa determinística, sem chamar o LLM.
                 # Só vale quando o gate PEDIU busca de verdade — `retrieve=False`
@@ -95,9 +144,26 @@ class AnswerQuestionAction:
                 # injustificado (ex.: "oi" durante um timeout do gate). Cai no
                 # motor com o knowledge que houver (possivelmente vazio), que é o
                 # comportamento seguro pré-existente.
+                draft.retrieval_best_distance = await self._nearest_or_none(
+                    decision.search_query
+                )
+                draft.outcome = "refusal"
+                draft.record("refusal", best_distance=draft.retrieval_best_distance)
                 reply = build_out_of_scope_reply(await self.sections.execute(), question)
-                return conversation.uuid, _refusal_stream(reply)
+                return conversation.uuid, _refusal_stream(reply), draft
         else:
             knowledge = []  # nada injetado — sem poluição de contexto
 
-        return conversation.uuid, self.engine.stream_answer(question, history, knowledge)
+        metrics = TurnMetrics()
+        draft.engine_metrics = metrics
+        stream = self.engine.stream_answer(question, history, knowledge, metrics=metrics)
+        return conversation.uuid, stream, draft
+
+    async def _nearest_or_none(self, query: str) -> float | None:
+        """Só no caminho de recusa. Falha aqui não pode custar a recusa ao usuário."""
+        try:
+            vector = await self.search.embeddings.embed_query(query)
+            return await self.chunks.nearest_distance(vector)
+        except Exception:
+            logger.warning("falha ao medir a distância do vizinho mais próximo", exc_info=True)
+            return None

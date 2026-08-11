@@ -48,7 +48,7 @@ class _FakeEngine:
         self.received_question = None
         self.received_knowledge = None
 
-    async def stream_answer(self, question, history, knowledge):
+    async def stream_answer(self, question, history, knowledge, metrics=None):
         self.received_history = history
         self.received_question = question
         self.received_knowledge = knowledge
@@ -103,7 +103,7 @@ async def test_new_conversation_persists_user_and_sets_title():
     engine, conv_repo, msg_repo = _FakeEngine(), _FakeConvRepo(), _FakeMsgRepo()
     action = _make(engine, _FakeSearch(), conv_repo, msg_repo)
 
-    conversation_id, stream = await action.execute("qual o onboarding?", None, "a@x.com")
+    conversation_id, stream, _ = await action.execute("qual o onboarding?", None, "a@x.com")
 
     assert conv_repo.created is not None
     assert conv_repo.created.title == "qual o onboarding?"
@@ -132,7 +132,7 @@ async def test_recency_loaded_before_appending_current_message():
     msg_repo.appended.append(_msg("turno anterior", conversation_id=existing.uuid))
     action = _make(engine, _FakeSearch(), _FakeConvRepo(existing=existing), msg_repo)
 
-    _, stream = await action.execute("nova pergunta", existing.uuid, "a@x.com")
+    _, stream, _ = await action.execute("nova pergunta", existing.uuid, "a@x.com")
     [c async for c in stream]
 
     # histórico passado ao engine = turnos anteriores, sem a pergunta atual.
@@ -159,7 +159,7 @@ async def test_long_question_title_is_truncated_to_80_chars():
     action = _make(engine, _FakeSearch(), conv_repo, msg_repo)
 
     long_question = "x" * 200
-    _, stream = await action.execute(long_question, None, "a@x.com")
+    _, stream, _ = await action.execute(long_question, None, "a@x.com")
     [c async for c in stream]
 
     assert len(conv_repo.created.title) == 80
@@ -185,7 +185,7 @@ async def test_gate_skip_injects_no_knowledge_and_skips_search():
     search = _RecordingSearch()
     action = _make(engine, search, conv_repo, msg_repo, gate=FakeRetrievalGate(retrieve=False))
 
-    _cid, stream = await action.execute("valeu!", None, "a@x.com")
+    _cid, stream, _ = await action.execute("valeu!", None, "a@x.com")
     async for _ in stream:  # drena o stream
         pass
 
@@ -205,7 +205,7 @@ async def test_degraded_decision_with_empty_knowledge_falls_through_to_engine():
     gate = FakeRetrievalGate(retrieve=True, degraded=True)
     action = _make(engine, search, conv_repo, msg_repo, gate=gate)
 
-    _cid, stream = await action.execute("oi", None, "a@x.com")
+    _cid, stream, _ = await action.execute("oi", None, "a@x.com")
     chunks = [c async for c in stream]
 
     # engine foi chamado (não a recusa determinística)
@@ -224,7 +224,7 @@ async def test_gate_retrieve_uses_rewritten_query():
     gate = FakeRetrievalGate(retrieve=True, search_query="renovação de PSP")
     action = _make(engine, search, conv_repo, msg_repo, gate=gate)
 
-    _cid, stream = await action.execute("e as renovações?", None, "a@x.com")
+    _cid, stream, _ = await action.execute("e as renovações?", None, "a@x.com")
     async for _ in stream:
         pass
 
