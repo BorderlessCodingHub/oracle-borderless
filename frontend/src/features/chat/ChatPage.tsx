@@ -12,8 +12,6 @@ import { ErrorState } from "./components/ErrorState";
 import { Logo } from "../../components/Logo/Logo";
 import styles from "./ChatPage.module.css";
 
-const USER_EMAIL = "duanne@mail.com"; // demo placeholder; real identity is a fast-follow
-
 let turnIdSeq = 0;
 function nextTurnId(): string {
   turnIdSeq += 1;
@@ -156,7 +154,6 @@ export default function ChatPage() {
         activeId={conversationId ?? null}
         onNew={newConversation}
         onOpen={(id) => navigate(`/c/${id}`)}
-        userEmail={USER_EMAIL}
       />
       <div className={styles.main}>
         <header className={styles.topbar}>
@@ -164,7 +161,7 @@ export default function ChatPage() {
             <strong>{turns.length ? "Conversa" : "Nova conversa"}</strong>
             <span className={styles.topSub}>● Respondendo só com fontes aprovadas do Notion</span>
           </div>
-          <span className={styles.emailChip}>{USER_EMAIL}</span>
+          {/* Identidade volta aqui quando /me existir (fase de autenticação). */}
         </header>
         <div className={styles.thread} ref={scrollRef}>
           {turns.length === 0 && stream.status === "idle" ? (

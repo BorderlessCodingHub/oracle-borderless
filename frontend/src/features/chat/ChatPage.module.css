@@ -9,13 +9,9 @@
 .convActive { background: var(--violet-soft); }
 .convMeta { display: block; margin-top: 2px; font-size: .72rem; color: var(--text-muted); }
 .sidebarFoot { display: grid; gap: 10px; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: var(--space-3); }
-.userChip { display: flex; align-items: center; gap: 10px; background: var(--surface-2); border-radius: var(--radius); padding: 10px; }
-.userChip span:last-child { color: var(--text-muted); font-size: .78rem; display: block; }
-.avatar { display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; border-radius: 50%; background: var(--violet); color: var(--on-violet); }
 .main { display: flex; flex-direction: column; min-width: 0; }
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: var(--space-4) var(--space-6); border-bottom: 1px solid var(--border); }
 .topSub { display: block; color: var(--emerald-ink); font-size: .82rem; }
-.emailChip { background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 8px 14px; font-size: .85rem; }
 .thread { flex: 1; overflow-y: auto; padding: var(--space-6); }
 .threadInner { max-width: 820px; margin: 0 auto; display: grid; gap: var(--space-5); }
 .empty { max-width: 760px; margin: 8vh auto 0; text-align: center; display: grid; justify-items: center; gap: var(--space-4); }

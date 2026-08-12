@@ -9,7 +9,6 @@ type Props = {
   activeId: string | null;
   onNew: () => void;
   onOpen: (id: string) => void;
-  userEmail: string;
 };
 
 const MONTHS_PT = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
@@ -29,7 +28,7 @@ function formatConversationDate(iso: string): string {
   return `${dd} ${MONTHS_PT[date.getMonth()]}`;
 }
 
-export function Sidebar({ conversations, activeId, onNew, onOpen, userEmail }: Props) {
+export function Sidebar({ conversations, activeId, onNew, onOpen }: Props) {
   return (
     <aside className={styles.sidebar}>
       <Link to="/" className={styles.sidebarBrand}><Logo size={34} /> Oracle Borderless</Link>
@@ -50,10 +49,7 @@ export function Sidebar({ conversations, activeId, onNew, onOpen, userEmail }: P
       </ul>
       <div className={styles.sidebarFoot}>
         <ThemeToggle />
-        <div className={styles.userChip}>
-          <span className={styles.avatar}>{userEmail[0]?.toUpperCase()}</span>
-          <div><strong>{userEmail}</strong><span>autenticado na borda</span></div>
-        </div>
+        {/* Identidade volta aqui quando /me existir (fase de autenticação). */}
       </div>
     </aside>
   );
