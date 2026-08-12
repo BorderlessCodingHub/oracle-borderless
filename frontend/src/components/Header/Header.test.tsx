@@ -27,4 +27,20 @@ describe("Header", () => {
     // (`.sidebarFoot > [role="group"]`) para o layout da sidebar.
     expect(screen.getByRole("group", { name: "Tema da interface" })).toBeInTheDocument();
   });
+
+  it("não navega para nenhuma página removida", () => {
+    stubMatchMedia(true);
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Header />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+    expect(screen.queryByRole("link", { name: /sobre/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /base de conhecimento/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /abrir o oráculo/i })).not.toBeInTheDocument();
+    // A marca continua levando à raiz — agora, o próprio chat.
+    expect(screen.getByRole("link", { name: /oracle borderless/i })).toHaveAttribute("href", "/");
+  });
 });

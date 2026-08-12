@@ -49,8 +49,6 @@ export function Sidebar({ conversations, activeId, onNew, onOpen, userEmail }: P
         ))}
       </ul>
       <div className={styles.sidebarFoot}>
-        <Link to="/about">Sobre &amp; Fontes</Link>
-        <Link to="/knowledge">Base de conhecimento</Link>
         <ThemeToggle />
         <div className={styles.userChip}>
           <span className={styles.avatar}>{userEmail[0]?.toUpperCase()}</span>
