@@ -86,7 +86,6 @@ class SyncKnowledgeBaseAction:
                     async with self._atomic():
                         full = await self.notion.get_page(page.id)
                         full.section = page.section
-                        full.kb_root_page_id = page.kb_root_page_id
                         await self.ingest.execute(
                             NotionPageMapper.to_document(full, page.kb_root_page_id or "")
                         )
@@ -101,15 +100,22 @@ class SyncKnowledgeBaseAction:
 
         if not partial:
             now = datetime.now(timezone.utc)
+            # Procedência atual por página: para quem apareceu nesta travessia, o
+            # root recém-descoberto (não o snapshot de `existing`) — senão a
+            # auto-cura acima conserta a procedência e a reconciliação abaixo
+            # desfaz no mesmo `execute()`, soft-deletando quem viemos de curar.
+            discovered_roots = {p.id: p.kb_root_page_id for p in approved}
             for page_id, doc in existing.items():
                 if doc.deleted_at is not None:
                     continue
                 # Dois motivos para sair do escopo: a página não apareceu em
-                # nenhuma travessia, ou o root sob o qual ela foi ingerida não
-                # está mais na allowlist. O segundo caso não é observável pela
-                # lista de aprovados — só pela procedência gravada.
+                # nenhuma travessia, ou o root sob o qual ela foi descoberta
+                # (agora, ou na procedência gravada se não foi descoberta desta
+                # vez) não está mais na allowlist. O segundo caso não é
+                # observável pela lista de aprovados — só pela procedência.
                 left_scope = page_id not in approved_ids or (
-                    normalize_page_id(doc.kb_root_page_id) not in roots
+                    normalize_page_id(discovered_roots.get(page_id, doc.kb_root_page_id))
+                    not in roots
                 )
                 if left_scope:
                     await self.documents.soft_delete_by_page_id(page_id, now)

@@ -203,17 +203,26 @@ async def test_stale_provenance_root_triggers_reingest_without_force():
     `kb_root_page_id` divergente do root sob o qual a página foi descoberta agora
     (ex.: `NULL` pré-migração 0004) precisa ser reingerido mesmo sem `--force` —
     senão a base fica presa com provenência velha para sempre após uma migração
-    ou troca de root."""
+    ou troca de root.
+
+    Também trava a regressão em que a reconciliação (que roda no mesmo
+    `execute()`, já que este não é um run parcial) desfazia a auto-cura:
+    lendo a procedência do snapshot velho de `existing` em vez do root
+    recém-descoberto, ela via `kb_root_page_id=None` e soft-deletava a página
+    que acabara de ser corrigida."""
     notion = FakeNotion([_approved("a", _dt(5))])
     ingest = FakeIngest()
     stale_doc = _existing("a", _dt(5))  # last_edited_time igual — não é stale por timestamp
     stale_doc.kb_root_page_id = None  # provenência pré-migração 0004
-    action = _action(notion, ingest, FakeDocRepo([stale_doc]), FakeChunkRepo())
+    docs = FakeDocRepo([stale_doc])
+    action = _action(notion, ingest, docs, FakeChunkRepo())
 
     report = await action.execute()  # sem force
 
     assert ingest.executed == ["a"]
     assert report.ingested == 1 and report.skipped == 0
+    assert report.removed == 0
+    assert docs.soft_deleted == []
 
 
 @pytest.mark.asyncio
