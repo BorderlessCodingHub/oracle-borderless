@@ -40,6 +40,17 @@ def _make_call(tree: dict[str, list[dict]], requested: list[str]):
     return call
 
 
+def _fake_session(call):
+    """Substitui `notion_mcp_session` por um contexto que devolve `call`."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def session():
+        yield call
+
+    return session
+
+
 @pytest.mark.asyncio
 async def test_collect_scope_returns_only_descendant_pages():
     # root → [A (ok), Backlog (denylist), DB (banco)] ; A → [A1 (ok)]
@@ -59,15 +70,6 @@ async def test_collect_scope_returns_only_descendant_pages():
     assert all(p.is_approved for p in pages)
     assert "BL" not in requested                 # subárvore de página rejeitada não é descida
     assert "DB" not in requested                 # child_database nunca é descido
-
-
-@pytest.mark.asyncio
-async def test_list_approved_pages_raises_when_root_not_configured(monkeypatch):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", None, raising=False)
-    client = NotionClient()
-
-    with pytest.raises(KnowledgeBaseConfigError):
-        await client.list_approved_pages()
 
 
 @pytest.mark.asyncio
@@ -94,3 +96,76 @@ async def test_collect_scope_strips_section_title():
     tree = {"root": [_child_page("CF", "Conferences ")], "CF": []}
     pages = await NotionClient()._collect_scope(_make_call(tree, []), "root")
     assert pages[0].section == "Conferences"
+
+
+def _make_multiroot_call(tree: dict[str, list[dict]], requested: list[str]):
+    """Igual a `_make_call`, mas aceita ser chamado para vários roots."""
+
+    async def call(tool: str, args: dict):
+        assert tool == "API-get-block-children"
+        block_id = args["block_id"]
+        requested.append(block_id)
+        return {"results": tree.get(block_id, []), "has_more": False}
+
+    return call
+
+
+@pytest.mark.asyncio
+async def test_collect_scope_stamps_the_root_it_was_found_under():
+    tree = {"rootA": [_child_page("A", "Programs")], "A": []}
+    client = NotionClient()
+
+    pages = await client._collect_scope(_make_call(tree, []), "rootA")
+
+    assert [p.kb_root_page_id for p in pages] == ["roota"]
+
+
+@pytest.mark.asyncio
+async def test_list_approved_pages_unions_every_root(monkeypatch):
+    tree = {
+        "roota": [_child_page("A", "Programs")],
+        "A": [],
+        "rootb": [_child_page("B", "Código de Cultura")],
+        "B": [],
+    }
+    requested: list[str] = []
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", "rootA,rootB", raising=False)
+    client = NotionClient()
+    monkeypatch.setattr(
+        "src.support.clients.notion.notion_client.notion_mcp_session",
+        _fake_session(_make_multiroot_call(tree, requested)),
+    )
+
+    pages = await client.list_approved_pages()
+
+    assert {p.id for p in pages} == {"A", "B"}
+    assert {p.id: p.kb_root_page_id for p in pages} == {"A": "roota", "B": "rootb"}
+
+
+@pytest.mark.asyncio
+async def test_page_reachable_from_two_roots_keeps_the_first_declared(monkeypatch):
+    # "SHARED" é filha dos dois roots; vence o primeiro da ordem de declaração.
+    tree = {
+        "roota": [_child_page("SHARED", "Compartilhada")],
+        "rootb": [_child_page("SHARED", "Compartilhada")],
+        "SHARED": [],
+    }
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", "rootA,rootB", raising=False)
+    client = NotionClient()
+    monkeypatch.setattr(
+        "src.support.clients.notion.notion_client.notion_mcp_session",
+        _fake_session(_make_multiroot_call(tree, [])),
+    )
+
+    pages = await client.list_approved_pages()
+
+    assert len(pages) == 1
+    assert pages[0].kb_root_page_id == "roota"
+
+
+@pytest.mark.asyncio
+async def test_list_approved_pages_raises_when_no_root_configured(monkeypatch):
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", None, raising=False)
+
+    with pytest.raises(KnowledgeBaseConfigError):
+        await NotionClient().list_approved_pages()

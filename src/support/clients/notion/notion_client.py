@@ -36,6 +36,7 @@ class NotionPage:
     is_approved: bool
     last_edited_time: datetime | None = None
     section: str | None = None  # ancestral de 1º nível abaixo do root (ADR-0012)
+    kb_root_page_id: str | None = None  # root normalizado sob o qual foi achada
 
 
 def _parse_ts(value: Any) -> datetime | None:
@@ -91,7 +92,7 @@ class NotionClient:
         descoberta, então precisa checar ancestralidade — do contrário qualquer
         página do workspace visível à integração viraria contexto de resposta.
         """
-        root_id = self._require_root()
+        root_id = self._require_roots()[0]  # TODO(task-3): checar contra todos os roots
         async with notion_mcp_session() as call:
             if not await self._is_in_scope(call, page_id, root_id):
                 return None
@@ -111,25 +112,39 @@ class NotionClient:
         )
 
     async def list_approved_pages(self) -> list[NotionPage]:
-        """Páginas-documento aprovadas — só o subtree do folder raiz configurado.
+        """Páginas-documento aprovadas — a união dos subtrees dos roots configurados.
 
-        A KB é EXCLUSIVAMENTE a subárvore de `NOTION_KB_ROOT_PAGE_ID` (folder
-        "Products"). Sem root configurado, **aborta** em vez de devolver ``[]``:
-        o sync completo removeria (soft-delete) toda a base ao reconciliar.
+        A KB é EXCLUSIVAMENTE a união das subárvores de `NOTION_KB_ROOT_PAGE_IDS`.
+        Sem nenhum root configurado, **aborta** em vez de devolver ``[]``: o sync
+        completo removeria (soft-delete) toda a base ao reconciliar.
+
+        Uma página alcançável a partir de dois roots fica registrada sob o
+        primeiro root da ordem de declaração — `kb_root_page_id` é um valor só
+        por documento, então a atribuição precisa ser determinística.
         """
-        root_id = self._require_root()
+        roots = self._require_roots()
+        collected: list[NotionPage] = []
+        seen: set[str | None] = set()
         async with notion_mcp_session() as call:
-            return await self._collect_scope(call, root_id)
+            for root_id in roots:
+                for page in await self._collect_scope(call, root_id):
+                    key = normalize_page_id(page.id)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    collected.append(page)
+        return collected
 
     @staticmethod
-    def _require_root() -> str:
-        root_id = settings.NOTION_KB_ROOT_PAGE_ID
-        if not root_id or root_id.lstrip().startswith("#"):
+    def _require_roots() -> tuple[str, ...]:
+        roots = settings.kb_root_page_ids
+        if not roots:
             raise KnowledgeBaseConfigError(
-                "NOTION_KB_ROOT_PAGE_ID não configurado — a KB é o subtree do folder "
-                "Products; sem root, o sync abortaria e apagaria toda a base."
+                "NOTION_KB_ROOT_PAGE_IDS não configurado — a KB é a união dos "
+                "subtrees dos roots liberados; sem root, o sync abortaria e "
+                "apagaria toda a base."
             )
-        return root_id
+        return roots
 
     async def _is_in_scope(
         self, call: ToolCall, page_id: str, root_id: str | None = None
@@ -139,7 +154,7 @@ class NotionClient:
         Para em `workspace` (topo) ou `database_id` (linha de banco): nenhum dos
         dois pode ser descendente do root. `seen` protege de ciclo/repetição.
         """
-        target = normalize_page_id(root_id or self._require_root())
+        target = normalize_page_id(root_id or self._require_roots()[0])
         current = page_id
         seen: set[str] = set()
         while True:
@@ -186,6 +201,7 @@ class NotionClient:
                         is_approved=True,
                         last_edited_time=_parse_ts(block.get("last_edited_time")),
                         section=section,
+                        kb_root_page_id=normalize_page_id(root_id),
                     )
                 )
                 stack.append((block["id"], section))
