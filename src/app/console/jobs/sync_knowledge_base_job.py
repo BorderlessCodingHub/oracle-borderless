@@ -1,5 +1,8 @@
 import logging
 
+from src.domain.documents.actions.detect_kb_root_drift_action import (
+    DetectKbRootDriftAction,
+)
 from src.domain.documents.actions.ingest_document_action import IngestDocumentAction
 from src.domain.documents.actions.sync_knowledge_base_action import SyncKnowledgeBaseAction
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
@@ -22,3 +25,23 @@ class SyncKnowledgeBaseJob(Job):
             ingest=IngestDocumentAction(embeddings=get_embeddings_client()),
         ).execute()
         logger.info("SyncKnowledgeBaseJob: %s", result)
+        await self._warn_on_drift(DetectKbRootDriftAction())
+
+    @staticmethod
+    async def _warn_on_drift(action) -> None:
+        """Avisa quando existe root liberado no Notion fora da allowlist.
+
+        É o sinal que substitui o aviso humano. Falha aqui nunca derruba o
+        sync: o refresh da base já aconteceu e vale mais que o diagnóstico.
+        """
+        try:
+            drift = await action.execute()
+        except Exception:  # observabilidade não derruba o job
+            logger.warning("não foi possível checar drift de roots", exc_info=True)
+            return
+        for page in drift.unlisted:
+            logger.warning(
+                "root liberado no Notion e fora de NOTION_KB_ROOT_PAGE_IDS: %s (%s)",
+                page.title,
+                page.id,
+            )
