@@ -1,11 +1,13 @@
 import { Logo } from "../../../components/Logo/Logo";
 import styles from "../ChatPage.module.css";
 
+// Perguntas dos roots que a base realmente cobre. Exemplo fora do escopo cai na
+// recusa padrão e ensina a pessoa errado logo no primeiro contato.
 const EXAMPLES = [
-  { tag: "GROWTH", text: "Qual a nomenclatura de campanhas no Meta Ads?" },
-  { tag: "CULTURA", text: "Como funciona a Review Mensal (1:1)?" },
-  { tag: "OPERAÇÃO", text: "Como é o upload semanal de vídeo no YouTube?" },
-  { tag: "DEMO", text: "Ver o estado de erro (falha ao gerar)", value: "[demo-error]" },
+  { tag: "PRODUTOS", text: "Como funciona o Web3 Global Developer?" },
+  { tag: "CULTURA", text: "O que diz o Código de Cultura sobre feedback?" },
+  { tag: "PAPÉIS", text: "Quais são os papéis do Mapa Global?" },
+  { tag: "DOMÍNIOS", text: "Quais domínios e subdomínios existem no ecossistema?" },
 ];
 
 export function EmptyState({ onPick }: { onPick: (q: string) => void }) {
@@ -16,7 +18,7 @@ export function EmptyState({ onPick }: { onPick: (q: string) => void }) {
       <p>Eu respondo sobre as regras e a operação do ecossistema — sempre com base nos documentos aprovados, e sempre citando as fontes.</p>
       <div className={styles.exampleGrid}>
         {EXAMPLES.map((e) => (
-          <button key={e.tag} className={styles.exampleCard} onClick={() => onPick(e.value ?? e.text)}>
+          <button key={e.tag} className={styles.exampleCard} onClick={() => onPick(e.text)}>
             <span className={styles.exampleTag}>{e.tag}</span>
             <span>{e.text}</span>
           </button>
