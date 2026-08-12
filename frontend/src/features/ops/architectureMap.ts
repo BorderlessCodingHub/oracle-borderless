@@ -32,7 +32,7 @@ export const ARCHITECTURE_MAP: MapBand[] = [
       {
         id: "notion-mcp",
         label: "Notion MCP",
-        description: "Lê o subtree do folder Products via MCP. Fora do root, nada é visitado.",
+        description: "Lê o subtree de cada root liberado via MCP. Fora dos roots, nada é visitado.",
         files: ["src/support/clients/notion/notion_client.py", "src/support/clients/notion/mcp_session.py"],
       },
       {
@@ -105,7 +105,7 @@ export const ARCHITECTURE_MAP: MapBand[] = [
       {
         id: "retrieval",
         label: "Retrieval + limiar",
-        description: "Top-k no pgvector, escopado ao root, cortado pela distância máxima.",
+        description: "Top-k no pgvector, escopado aos roots, cortado pela distância máxima.",
         files: [
           "src/domain/documents/actions/search_knowledge_base_action.py",
           "src/domain/documents/repositories/document_chunk_repository.py",
