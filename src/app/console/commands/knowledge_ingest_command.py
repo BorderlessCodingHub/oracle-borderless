@@ -29,7 +29,7 @@ class KnowledgeIngestCommand(Command):
         if page is None:
             raise ValidationError(
                 f"Página {page_id} está fora do escopo da base de conhecimento "
-                "(fora da subárvore do root configurado) — ingestão abortada."
+                "(fora das subárvores dos roots configurados) — ingestão abortada."
             )
         async with AsyncSessionLocal() as session:
             CurrentAsyncSessionContext.set(session)

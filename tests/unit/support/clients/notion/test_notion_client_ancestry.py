@@ -70,3 +70,43 @@ async def test_get_page_in_scope_raises_without_roots(monkeypatch):
 
     with pytest.raises(KnowledgeBaseConfigError):
         await NotionClient().get_page_in_scope("qualquer")
+
+
+@pytest.mark.asyncio
+async def test_get_page_in_scope_stamps_the_root_that_matched(monkeypatch):
+    """`kb_root_page_id=matched_root` (o retorno de `_find_root`) é a única linha
+    nova do caminho de escopo sem cobertura direta. Se ela se perder, o comando
+    `knowledge:ingest` grava `""` -> `None` de procedência, e a página fica
+    invisível à recuperação, removida em silêncio no próximo sync full."""
+    from contextlib import asynccontextmanager
+
+    pages = {
+        "leaf": {
+            "parent": {"type": "page_id", "page_id": "roota"},
+            "properties": {"title": {"type": "title", "title": [{"plain_text": "Leaf Page"}]}},
+            "url": "https://notion.so/leaf",
+        },
+    }
+
+    async def call(tool: str, args: dict):
+        if tool == "API-retrieve-a-page":
+            return pages[args["page_id"]]
+        if tool == "API-retrieve-page-markdown":
+            return {"markdown": "conteúdo", "truncated": False}
+        raise AssertionError(f"tool inesperada: {tool}")
+
+    @asynccontextmanager
+    async def fake_session():
+        yield call
+
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", "rootA,rootB", raising=False)
+    monkeypatch.setattr(
+        "src.support.clients.notion.notion_client.notion_mcp_session",
+        lambda: fake_session(),
+    )
+
+    page = await NotionClient().get_page_in_scope("leaf")
+
+    assert page is not None
+    assert page.kb_root_page_id == "roota"
+    assert page.title == "Leaf Page"

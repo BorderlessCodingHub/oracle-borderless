@@ -28,6 +28,30 @@ async def test_warns_when_a_liberated_root_is_outside_the_allowlist(caplog):
 
 
 @pytest.mark.asyncio
+async def test_warns_when_an_allowlisted_root_is_no_longer_visible(caplog):
+    drift = KbRootDrift(missing=["ghi789"])
+
+    with caplog.at_level(logging.WARNING):
+        await SyncKnowledgeBaseJob()._warn_on_drift(_FakeDriftAction(drift))
+
+    assert "ghi789" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_warns_on_both_directions_when_both_exist(caplog):
+    drift = KbRootDrift(
+        unlisted=[WorkspaceRootPage(id="def456", title="Borderless Copy Bible")],
+        missing=["ghi789"],
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await SyncKnowledgeBaseJob()._warn_on_drift(_FakeDriftAction(drift))
+
+    assert "Borderless Copy Bible" in caplog.text
+    assert "ghi789" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_stays_quiet_without_drift(caplog):
     with caplog.at_level(logging.WARNING):
         await SyncKnowledgeBaseJob()._warn_on_drift(_FakeDriftAction(KbRootDrift()))

@@ -171,7 +171,12 @@ class NotionClient:
                         pages.append(
                             WorkspaceRootPage(id=page_id, title=_extract_title(page))
                         )
-                if not data.get("has_more"):
+                # `has_more=True` sem `next_cursor` deixaria `cursor` voltando a
+                # `None` — args idênticos ao primeiro loop, `while True` nunca
+                # sairia. Isso penduraria o SyncKnowledgeBaseJob (que chama este
+                # método após um sync bem-sucedido) segurando o advisory lock;
+                # `_warn_on_drift` só captura exceção, não travamento.
+                if not data.get("has_more") or not data.get("next_cursor"):
                     return pages
                 cursor = data.get("next_cursor")
 

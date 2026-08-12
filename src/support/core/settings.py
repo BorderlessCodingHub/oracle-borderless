@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     # Notion, separados por vírgula. Eles são irmãos no nível do workspace — não
     # existe ancestral comum. Sem nenhum root, o sync aborta (ver NotionClient).
     NOTION_KB_ROOT_PAGE_IDS: str | None = None
+    # Nome antigo (ADR-0011, pré-multi-root). NINGUÉM lê este campo para
+    # escopo — ele existe só como DETECTOR: se estiver preenchido e
+    # `NOTION_KB_ROOT_PAGE_IDS` estiver vazio, é sinal de deploy com a env var
+    # velha (ou erro de digitação `_ID` por `_IDS`), e o `LifespanManager`
+    # levanta no startup em vez de deixar o oráculo subir mudo (ver ADR-0014).
+    NOTION_KB_ROOT_PAGE_ID: str | None = None
 
     # --- LLM do oráculo (Claude ou GPT, selecionável) ---
     LLM_PROVIDER: Literal["anthropic", "openai"] = "anthropic"

@@ -258,8 +258,9 @@ async def test_ingests_each_page_under_its_own_root():
     await _action(notion, ingest, FakeDocRepo([]), FakeChunkRepo()).execute()
 
     # FakeNotion.get_page devolve um NotionPage novo, sem procedência — é
-    # exatamente por isso que a action precisa copiar o root da página
-    # descoberta para a página completa antes de mapear.
+    # exatamente por isso que a action passa `page.kb_root_page_id` (da página
+    # descoberta) como segundo argumento posicional a `NotionPageMapper.to_document`,
+    # em vez de ler a procedência de `full` (a página completa).
     assert {d.notion_page_id: d.kb_root_page_id for d in ingest.documents} == {
         "a": "roota",
         "b": "rootb",
@@ -268,8 +269,13 @@ async def test_ingests_each_page_under_its_own_root():
 
 @pytest.mark.asyncio
 async def test_soft_deletes_documents_whose_root_left_the_allowlist():
-    # A página nem aparece mais na descoberta, e sua procedência é de um root
-    # que saiu da allowlist — os dois motivos de saída de escopo.
+    # Um root removido de NOTION_KB_ROOT_PAGE_IDS deixa de ser percorrido por
+    # `list_approved_pages` (que só varre `settings.kb_root_page_ids`) — a
+    # página some por AUSÊNCIA da travessia, não por comparação de procedência.
+    # O NotionClient real não tem como devolver uma página aprovada etiquetada
+    # com um root fora da allowlist vigente (`_collect_scope` só etiqueta com
+    # roots que ele próprio está percorrendo), então este é o único cenário de
+    # saída de escopo que a action precisa (e consegue) detectar.
     docs = FakeDocRepo([_existing("z", _dt(5), kb_root_page_id="rootremovido")])
     chunks = FakeChunkRepo()
 
@@ -278,16 +284,3 @@ async def test_soft_deletes_documents_whose_root_left_the_allowlist():
     assert report.removed == 1
     assert docs.soft_deleted == ["z"]
     assert chunks.cleared != []
-
-
-@pytest.mark.asyncio
-async def test_soft_deletes_a_still_approved_page_whose_root_was_dropped():
-    # Caso que a lista de aprovados NÃO revela: a página continua sendo
-    # descoberta, mas sob um root fora da allowlist vigente.
-    notion = FakeNotion([_approved("y", _dt(5), kb_root_page_id="rootfora")])
-    docs = FakeDocRepo([_existing("y", _dt(5), kb_root_page_id="rootfora")])
-
-    report = await _action(notion, FakeIngest(), docs, FakeChunkRepo()).execute()
-
-    assert docs.soft_deleted == ["y"]
-    assert report.removed == 1

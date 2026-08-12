@@ -40,7 +40,7 @@ class WebSearchTool:
 
 
 class FetchNotionTool:
-    """Busca uma página do Notion por id — **restrita ao escopo da KB** (ADR-0011).
+    """Busca uma página do Notion por id — **restrita ao escopo da KB** (ADR-0014).
 
     O id chega do modelo (via citação ou inferência), não da travessia de
     descoberta, então o escopo tem de ser checado aqui: sem isso a tool leria

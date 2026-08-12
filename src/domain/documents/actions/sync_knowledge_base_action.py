@@ -7,7 +7,6 @@ from src.domain.documents.mappers.notion_page_mapper import NotionPageMapper
 from src.domain.documents.repositories.document_chunk_repository import DocumentChunkRepository
 from src.domain.documents.repositories.document_repository import DocumentRepository
 from src.support.core.context import CurrentAsyncSessionContext
-from src.support.core.settings import settings
 from src.support.utils.notion_ids import normalize_page_id
 
 logger = logging.getLogger(__name__)
@@ -49,7 +48,6 @@ class SyncKnowledgeBaseAction:
 
     async def execute(self, force: bool = False, limit: int | None = None) -> SyncReport:
         approved = await self.notion.list_approved_pages()
-        roots = set(settings.kb_root_page_ids)
         existing = {doc.notion_page_id: doc for doc in await self.documents.list_all()}
         report = SyncReport(total_approved=len(approved))
 
@@ -100,23 +98,21 @@ class SyncKnowledgeBaseAction:
 
         if not partial:
             now = datetime.now(timezone.utc)
-            # Procedência atual por página: para quem apareceu nesta travessia, o
-            # root recém-descoberto (não o snapshot de `existing`) — senão a
-            # auto-cura acima conserta a procedência e a reconciliação abaixo
-            # desfaz no mesmo `execute()`, soft-deletando quem viemos de curar.
-            discovered_roots = {p.id: p.kb_root_page_id for p in approved}
             for page_id, doc in existing.items():
                 if doc.deleted_at is not None:
                     continue
-                # Dois motivos para sair do escopo: a página não apareceu em
-                # nenhuma travessia, ou o root sob o qual ela foi descoberta
-                # (agora, ou na procedência gravada se não foi descoberta desta
-                # vez) não está mais na allowlist. O segundo caso não é
-                # observável pela lista de aprovados — só pela procedência.
-                left_scope = page_id not in approved_ids or (
-                    normalize_page_id(discovered_roots.get(page_id, doc.kb_root_page_id))
-                    not in roots
-                )
+                # Único motivo de saída de escopo observável aqui: a página não
+                # apareceu em nenhuma travessia desta rodada. Um root que saiu
+                # da allowlist não é mais percorrido por `list_approved_pages`
+                # (que só varre `settings.kb_root_page_ids`), então suas páginas
+                # somem de `approved_ids` por AUSÊNCIA da travessia — não porque
+                # comparamos a procedência gravada contra `roots`. Essa segunda
+                # comparação já existiu aqui e era sempre inalcançável: se
+                # `page_id` está em `approved_ids`, a procedência descoberta
+                # agora sempre bate com `roots` (foi `_collect_scope` que a
+                # etiquetou); se não está, o `or` de cima já decidiu. Não
+                # reintroduza — o mecanismo real é só este.
+                left_scope = page_id not in approved_ids
                 if left_scope:
                     await self.documents.soft_delete_by_page_id(page_id, now)
                     await self.chunks.replace_for_document(doc.uuid, [])

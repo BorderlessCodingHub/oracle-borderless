@@ -21,8 +21,30 @@ class LifespanManager:
         configure_logging()
         logger.info("Iniciando %s (env=%s)", settings.APP_NAME, settings.ENVIRONMENT)
 
+        self._validate_kb_root_env()
+
         if settings.ENABLE_SCHEDULER:
             self._boot_scheduler()
+
+    @staticmethod
+    def _validate_kb_root_env() -> None:
+        """Detecta deploy com a env var antiga (ou um `_ID`/`_IDS` digitado errado).
+
+        `NOTION_KB_ROOT_PAGE_ID` (singular, ADR-0011) foi substituído por
+        `NOTION_KB_ROOT_PAGE_IDS` (CSV, ADR-0014). Como o pydantic-settings
+        ignora chave desconhecida (`extra="ignore"`), um deploy que ainda
+        exporta só o nome antigo sobe normal, com `kb_root_page_ids` vazio —
+        e daí o oráculo responde "não encontrei informações" para TODA
+        pergunta, sem nada que ligue o sintoma à causa. Falhar aqui, no boot,
+        é melhor que esse silêncio.
+        """
+        if settings.NOTION_KB_ROOT_PAGE_ID and not settings.kb_root_page_ids:
+            raise RuntimeError(
+                "NOTION_KB_ROOT_PAGE_ID está definido, mas foi substituído por "
+                "NOTION_KB_ROOT_PAGE_IDS (lista separada por vírgula) — ver "
+                "ADR-0014. Atualize a env var; a aplicação não sobe sem escopo "
+                "de KB configurado."
+            )
 
     def _boot_scheduler(self) -> None:
         # Import tardio: só carrega o scheduler/registro quando habilitado.

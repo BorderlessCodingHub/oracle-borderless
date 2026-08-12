@@ -29,7 +29,7 @@ class SyncKnowledgeBaseJob(Job):
 
     @staticmethod
     async def _warn_on_drift(action) -> None:
-        """Avisa quando existe root liberado no Notion fora da allowlist.
+        """Avisa quando a allowlist de roots diverge do que o Notion enxerga.
 
         É o sinal que substitui o aviso humano. Falha aqui nunca derruba o
         sync: o refresh da base já aconteceu e vale mais que o diagnóstico.
@@ -44,4 +44,14 @@ class SyncKnowledgeBaseJob(Job):
                 "root liberado no Notion e fora de NOTION_KB_ROOT_PAGE_IDS: %s (%s)",
                 page.title,
                 page.id,
+            )
+        # Direção mais perigosa: root que ESTÁ na allowlist e a integração não
+        # alcança mais — permissão revogada, página movida, ou id errado na
+        # env var. Ao contrário de `unlisted` (o oráculo lê menos do que
+        # podia), esta é a que precede perda de conteúdo servível.
+        for root_id in drift.missing:
+            logger.warning(
+                "root em NOTION_KB_ROOT_PAGE_IDS que o Notion não enxerga mais: %s "
+                "— verifique permissão revogada, página movida, ou id errado na env var",
+                root_id,
             )
