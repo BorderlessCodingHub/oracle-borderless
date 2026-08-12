@@ -2,29 +2,12 @@
 .inner { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); height: 76px; }
 .brand { display: flex; align-items: center; gap: 12px; font-weight: 800; font-size: 1.15rem; flex-shrink: 0; }
 .nav { display: flex; align-items: center; gap: 20px; min-width: 0; color: var(--text-muted); }
-.nav a:hover { color: var(--text); }
-/* Libera ~160px: mantém o símbolo do logo (Logo tem <img alt> próprio, então o
-   <Link> continua com nome acessível) e esconde só o texto. Vale já a partir de
-   1080px porque com marca escrita + 3 links + ThemeToggle + CTA o header precisa
-   de ~1025px, ou seja, estoura em qualquer viewport abaixo de ~1085px. */
 @media (max-width: 1080px) {
   .brandText { display: none; }
 }
 @media (max-width: 720px) {
-  .nav a:not([class]) { display: none; }
-  /* Só sobram o ThemeToggle e o CTA visíveis — o gap de 28px do desktop
-     é espaço de sobra que não cabe em telas de telefone (390/360px). */
   .nav { gap: var(--space-2); }
-  /* CTA do header precisa encolher em telas pequenas; o .btn/.gradient
-     compartilhado (Button.module.css) fica intacto para o hero e outros
-     usos — aqui a seleção é estrutural (último filho de .nav, que é
-     sempre o <Link> do Button renderizado pelo react-router-dom) em vez
-     de mexer no componente Button ou passar uma className extra. */
-  .nav > a:last-child { padding: 8px 12px; font-size: .85rem; gap: 4px; }
 }
-/* Telefones estreitos (<=400px, ex. iPhone SE): último aperto no CTA e no
-   espaço entre a marca e o nav. */
 @media (max-width: 400px) {
   .inner { gap: var(--space-3); }
-  .nav > a:last-child { padding: 8px 10px; font-size: .8rem; }
 }
