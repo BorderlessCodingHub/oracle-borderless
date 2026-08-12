@@ -104,7 +104,7 @@ export default function ChatPage() {
     if (streamRunTokenRef.current !== runTokenRef.current) return;
     if (stream.conversationId && stream.conversationId !== conversationId) {
       liveConversationIdRef.current = stream.conversationId;
-      navigate(`/oracle/${stream.conversationId}`, { replace: true });
+      navigate(`/c/${stream.conversationId}`, { replace: true });
     }
   }, [stream.status, stream.conversationId, conversationId, navigate]);
 
@@ -137,7 +137,7 @@ export default function ChatPage() {
     liveConversationIdRef.current = null;
     setTurns([]);
     stream.reset();
-    navigate("/oracle");
+    navigate("/");
   }
 
   const showThinking = stream.status === "thinking";
@@ -155,7 +155,7 @@ export default function ChatPage() {
         conversations={conversations}
         activeId={conversationId ?? null}
         onNew={newConversation}
-        onOpen={(id) => navigate(`/oracle/${id}`)}
+        onOpen={(id) => navigate(`/c/${id}`)}
         userEmail={USER_EMAIL}
       />
       <div className={styles.main}>

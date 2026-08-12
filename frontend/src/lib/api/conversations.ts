@@ -22,7 +22,7 @@ export async function getConversation(id: string): Promise<ConversationDetail> {
   return {
     id: dto.id,
     title: dto.title,
-    messages: dto.messages.map((m) => ({
+    messages: (dto.messages ?? []).map((m) => ({
       role: m.role,
       content: m.content,
       sources: m.sources ?? undefined,

@@ -1,20 +1,22 @@
-import { Routes, Route } from "react-router-dom";
-import LandingPage from "./features/landing/LandingPage";
-import AboutPage from "./features/about/AboutPage";
-import KnowledgePage from "./features/knowledge/KnowledgePage";
+import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import ChatPage from "./features/chat/ChatPage";
 import OpsPage from "./features/ops/OpsPage";
 import { useCurrentUser } from "./hooks/useCurrentUser";
+
+/** Links de /oracle/:id já foram compartilhados; preservam a conversa. */
+function LegacyConversationRedirect() {
+  const { conversationId } = useParams();
+  return <Navigate to={`/c/${conversationId}`} replace />;
+}
 
 export default function App() {
   const { isAdmin } = useCurrentUser();
   return (
     <Routes>
-      <Route path="/" element={<LandingPage />} />
-      <Route path="/about" element={<AboutPage />} />
-      <Route path="/knowledge" element={<KnowledgePage />} />
-      <Route path="/oracle" element={<ChatPage />} />
-      <Route path="/oracle/:conversationId" element={<ChatPage />} />
+      <Route path="/" element={<ChatPage />} />
+      <Route path="/c/:conversationId" element={<ChatPage />} />
+      <Route path="/oracle" element={<Navigate to="/" replace />} />
+      <Route path="/oracle/:conversationId" element={<LegacyConversationRedirect />} />
       {/* Sem admin, a rota nem existe — ver useCurrentUser. */}
       {isAdmin && <Route path="/ops" element={<OpsPage />} />}
     </Routes>
