@@ -13,7 +13,6 @@ from src.support.core.console.command import Command
 from src.support.core.context import CurrentAsyncSessionContext
 from src.support.core.database import AsyncSessionLocal
 from src.support.core.settings import settings
-from src.support.utils.notion_ids import normalize_page_id
 
 DENTRO = [
     "o que é o Web3 Bootcamp?",
@@ -51,9 +50,8 @@ class KnowledgeCalibrateCommand(Command):
 
     async def handle(self) -> None:
         limiar = settings.RAG_MAX_DISTANCE
-        root = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
-        if root is None:
-            print("NOTION_KB_ROOT_PAGE_ID não configurado — nada a calibrar.")
+        if not settings.kb_root_page_ids:
+            print("NOTION_KB_ROOT_PAGE_IDS não configurado — nada a calibrar.")
             return
         embeddings = get_embeddings_client()
         print(f"RAG_MAX_DISTANCE atual: {limiar}\n")
@@ -75,7 +73,7 @@ class KnowledgeCalibrateCommand(Command):
                             .where(
                                 DocumentModel.status == "approved",
                                 DocumentModel.deleted_at.is_(None),
-                                DocumentModel.kb_root_page_id == root,
+                                DocumentModel.kb_root_page_id.in_(settings.kb_root_page_ids),
                             )
                             .order_by(distancia)
                             .limit(1)

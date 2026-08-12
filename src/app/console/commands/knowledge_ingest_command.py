@@ -6,7 +6,6 @@ from src.support.core.console.command import Command
 from src.support.core.context import CurrentAsyncSessionContext
 from src.support.core.database import AsyncSessionLocal
 from src.support.core.exceptions import ValidationError
-from src.support.core.settings import settings
 
 
 class KnowledgeIngestCommand(Command):
@@ -35,7 +34,10 @@ class KnowledgeIngestCommand(Command):
         async with AsyncSessionLocal() as session:
             CurrentAsyncSessionContext.set(session)
             try:
-                root_page_id = settings.NOTION_KB_ROOT_PAGE_ID or ""
+                # A procedência vem da página (o root que a contém, resolvido por
+                # `get_page_in_scope`), não da env var: com vários roots, a env
+                # var não diz sob qual deles esta página está.
+                root_page_id = page.kb_root_page_id or ""
                 document = NotionPageMapper.to_document(page, root_page_id)
                 action = IngestDocumentAction(embeddings=get_embeddings_client())
                 result = await action.execute(document)

@@ -6,7 +6,6 @@ from src.domain.documents.actions.ingest_document_action import IngestDocumentAc
 from src.domain.documents.entities.document import Document
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
 from src.support.core.settings import settings
-from src.support.utils.notion_ids import normalize_page_id
 
 _KNOWLEDGE_DIR = Path(__file__).parent / "knowledge"
 
@@ -33,6 +32,8 @@ class DevDocumentsSeed:
                 deleted_at=None,
                 # Escopo (ADR-0012): conteúdo de dev/test é tratado como pertencente
                 # ao root configurado, para permanecer recuperável pelo oráculo.
-                kb_root_page_id=normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID),
+                # Primeiro root da allowlist: o seed de dev só precisa de uma
+                # procedência válida para o documento ser recuperável.
+                kb_root_page_id=next(iter(settings.kb_root_page_ids), None),
             )
             await action.execute(document)
