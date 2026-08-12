@@ -24,8 +24,14 @@ describe("Sidebar", () => {
 
     expect(screen.queryByText(/@/)).not.toBeInTheDocument();
     expect(screen.queryByText(/autenticado na borda/i)).not.toBeInTheDocument();
-    // O toggle continua no rodapé: ChatPage.module.css depende de
-    // `.sidebarFoot > [role="group"]` para o layout.
-    expect(screen.getByRole("group", { name: "Tema da interface" })).toBeInTheDocument();
+    // ChatPage.module.css depende de `.sidebarFoot > [role="group"]` (filho
+    // DIRETO) para o layout do rodapé. Checar só a presença do role="group"
+    // em algum lugar da árvore não provaria isso — mover o ThemeToggle para
+    // fora do .sidebarFoot manteria essa asserção verde. CSS Modules hasheia
+    // a classe, então usamos data-testid no container em vez de className
+    // para identificar o pai de forma estável.
+    const foot = screen.getByTestId("sidebar-foot");
+    const group = screen.getByRole("group", { name: "Tema da interface" });
+    expect(group.parentElement).toBe(foot);
   });
 });

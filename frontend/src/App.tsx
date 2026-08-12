@@ -19,6 +19,9 @@ export default function App() {
       <Route path="/oracle/:conversationId" element={<LegacyConversationRedirect />} />
       {/* Sem admin, a rota nem existe — ver useCurrentUser. */}
       {isAdmin && <Route path="/ops" element={<OpsPage />} />}
+      {/* URL desconhecida (favorito de /about, /knowledge; erro de digitação;
+          ou /ops sem isAdmin) — sem isto, <Routes> renderiza null: tela branca. */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

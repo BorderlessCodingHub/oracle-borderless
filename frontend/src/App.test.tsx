@@ -78,12 +78,14 @@ describe("roteamento", () => {
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/c\/abc-123$/);
   });
 
-  it("não serve mais /about nem /knowledge", () => {
+  it("redireciona /about e /knowledge para a raiz (catch-all)", async () => {
     const about = renderAt("/about");
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    await screen.findByRole("textbox");
+    expect(screen.getByTestId("location")).toHaveTextContent(/^\/$/);
     about.unmount();
 
     renderAt("/knowledge");
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    await screen.findByRole("textbox");
+    expect(screen.getByTestId("location")).toHaveTextContent(/^\/$/);
   });
 });

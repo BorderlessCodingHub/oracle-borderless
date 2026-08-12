@@ -47,7 +47,7 @@ export function Sidebar({ conversations, activeId, onNew, onOpen }: Props) {
           </li>
         ))}
       </ul>
-      <div className={styles.sidebarFoot}>
+      <div className={styles.sidebarFoot} data-testid="sidebar-foot">
         <ThemeToggle />
         {/* Identidade volta aqui quando /me existir (fase de autenticação). */}
       </div>

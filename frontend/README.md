@@ -22,8 +22,8 @@ The app detects demo mode via `import.meta.env.VITE_DEMO_MODE === "true"` and ro
 - `src/lib/` — types, API client, SSE parser, demo data/stream, utils
 - `src/data/` — data-source abstraction (api vs demo)
 - `src/hooks/` — streaming + data hooks (`useAskStream`, custom hooks)
-- `src/components/` — shared UI (Logo, Button, Header, Footer, Container, …)
-- `src/features/` — landing, about, knowledge, chat
+- `src/components/` — shared UI (Logo, Header, Footer, ThemeToggle)
+- `src/features/` — chat (home), ops
 
 ## Logo
 
@@ -35,7 +35,7 @@ The app detects demo mode via `import.meta.env.VITE_DEMO_MODE === "true"` and ro
 
 ## Auth / user identity
 
-The header email is a demo placeholder (`duanne@oracle.local`). In production, user identity comes from the Cloudflare `cf-access-authenticated-user-email` header at the edge. Wiring a real `getCurrentUser()` endpoint backend is a fast-follow.
+No identity is displayed in the UI today. Authentication is a later phase of the project, and the mechanism is not decided yet — see the "pontos ainda em aberto" note in the root `CLAUDE.md`. Do not assume or hardcode a specific mechanism (e.g. a Cloudflare Access header) until that decision is made.
 
 ## Development
 
