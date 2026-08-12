@@ -55,25 +55,27 @@ describe("roteamento", () => {
   it("serve o chat na raiz", async () => {
     renderAt("/");
     expect(await screen.findByRole("textbox")).toBeInTheDocument();
-    expect(screen.getByTestId("location")).toHaveTextContent("/");
+    // toHaveTextContent(string) faz substring — todo pathname contém "/", o
+    // que tornaria esta asserção vacuamente verdadeira. Ancorado com regex.
+    expect(screen.getByTestId("location")).toHaveTextContent(/^\/$/);
   });
 
   it("serve o chat em /c/:id", async () => {
     renderAt("/c/abc-123");
     expect(await screen.findByRole("textbox")).toBeInTheDocument();
-    expect(screen.getByTestId("location")).toHaveTextContent("/c/abc-123");
+    expect(screen.getByTestId("location")).toHaveTextContent(/^\/c\/abc-123$/);
   });
 
   it("redireciona /oracle para a raiz", async () => {
     renderAt("/oracle");
     await screen.findByRole("textbox");
-    expect(screen.getByTestId("location")).toHaveTextContent("/");
+    expect(screen.getByTestId("location")).toHaveTextContent(/^\/$/);
   });
 
   it("redireciona /oracle/:id preservando a conversa", async () => {
     renderAt("/oracle/abc-123");
     await screen.findByRole("textbox");
-    expect(screen.getByTestId("location")).toHaveTextContent("/c/abc-123");
+    expect(screen.getByTestId("location")).toHaveTextContent(/^\/c\/abc-123$/);
   });
 
   it("não serve mais /about nem /knowledge", () => {
