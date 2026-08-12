@@ -86,15 +86,16 @@ class NotionClient:
             return await self._assemble(call, page_id)
 
     async def get_page_in_scope(self, page_id: str) -> NotionPage | None:
-        """Página **só se** dentro da subárvore do root (ADR-0011); senão ``None``.
+        """Página **só se** dentro da subárvore de algum root; senão ``None``.
 
         Acesso avulso por id (ex.: tool do agente) não passa pela travessia de
         descoberta, então precisa checar ancestralidade — do contrário qualquer
         página do workspace visível à integração viraria contexto de resposta.
         """
-        root_id = self._require_roots()[0]  # TODO(task-3): checar contra todos os roots
+        roots = self._require_roots()
         async with notion_mcp_session() as call:
-            if not await self._is_in_scope(call, page_id, root_id):
+            matched_root = await self._find_root(call, page_id, roots)
+            if matched_root is None:
                 return None
             page = await call("API-retrieve-a-page", {"page_id": page_id})
             markdown = await self._assemble(call, page_id)
@@ -109,6 +110,7 @@ class NotionClient:
             url=page.get("url", ""),
             is_approved=self._policy.should_ingest(ref),
             last_edited_time=_parse_ts(page.get("last_edited_time")),
+            kb_root_page_id=matched_root,
         )
 
     async def list_approved_pages(self) -> list[NotionPage]:
@@ -146,28 +148,33 @@ class NotionClient:
             )
         return roots
 
-    async def _is_in_scope(
-        self, call: ToolCall, page_id: str, root_id: str | None = None
-    ) -> bool:
-        """A página é o root ou descende dele? Sobe a cadeia de `parent`.
+    async def _find_root(
+        self, call: ToolCall, page_id: str, roots: tuple[str, ...] | None = None
+    ) -> str | None:
+        """Qual root contém esta página? Sobe a cadeia de `parent`.
 
-        Para em `workspace` (topo) ou `database_id` (linha de banco): nenhum dos
-        dois pode ser descendente do root. `seen` protege de ciclo/repetição.
+        Devolve o root normalizado que casou, ou ``None`` se a página não
+        descende de nenhum. Para em `workspace` (topo) ou `database_id` (linha
+        de banco): nenhum dos dois pode ser descendente de um root. `seen`
+        protege de ciclo/repetição.
+
+        Devolver o root — e não um booleano — é o que permite ao chamador
+        gravar a procedência correta quando há vários roots possíveis.
         """
-        target = normalize_page_id(root_id or self._require_roots()[0])
+        targets = set(roots if roots is not None else self._require_roots())
         current = page_id
-        seen: set[str] = set()
+        seen: set[str | None] = set()
         while True:
             key = normalize_page_id(current)
-            if key == target:
-                return True
+            if key in targets:
+                return key
             if key in seen:
-                return False
+                return None
             seen.add(key)
             page = await call("API-retrieve-a-page", {"page_id": current})
             parent = page.get("parent", {})
             if parent.get("type") != "page_id":
-                return False  # workspace ou database_id — fora da subárvore
+                return None  # workspace ou database_id — fora de toda subárvore
             current = parent["page_id"]
 
     async def _collect_scope(self, call: ToolCall, root_id: str) -> list[NotionPage]:
