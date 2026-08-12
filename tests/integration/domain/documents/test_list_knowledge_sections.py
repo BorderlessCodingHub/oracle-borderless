@@ -9,7 +9,7 @@ ROOT = "23d8d655-c889-806d-8828-d527ce6a1529"
 
 @pytest.mark.asyncio
 async def test_lists_distinct_sections_sorted(monkeypatch, seed_document_with_chunk):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
     from src.domain.documents.actions.list_knowledge_sections_action import (
         ListKnowledgeSectionsAction,
     )
@@ -25,7 +25,7 @@ async def test_lists_distinct_sections_sorted(monkeypatch, seed_document_with_ch
 async def test_ignores_soft_deleted_and_null_sections(
     monkeypatch, seed_document_with_chunk
 ):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
     from src.domain.documents.actions.list_knowledge_sections_action import (
         ListKnowledgeSectionsAction,
     )
@@ -50,7 +50,7 @@ async def test_list_sections_returns_empty_when_root_unconfigured(
     `list_sections` existe para que a ausência de configuração nunca vire um
     "libera tudo sem procedência" por acidente.
     """
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", None, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", None, raising=False)
     from src.domain.documents.actions.list_knowledge_sections_action import (
         ListKnowledgeSectionsAction,
     )
@@ -66,7 +66,7 @@ async def test_list_sections_returns_empty_when_root_unconfigured(
 async def test_sections_differing_only_by_whitespace_collapse(
     monkeypatch, seed_document_with_chunk
 ):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
     from src.domain.documents.actions.list_knowledge_sections_action import (
         ListKnowledgeSectionsAction,
     )

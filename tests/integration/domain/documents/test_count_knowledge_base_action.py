@@ -17,7 +17,7 @@ OUTRO_ROOT = "99998d655-c889-81cb-aa18-c2a7701"
 async def test_documents_active_counts_only_the_current_root(
     monkeypatch, seed_document_with_chunk
 ):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
     await seed_document_with_chunk(title="Do root atual", kb_root_page_id=ROOT)
     await seed_document_with_chunk(title="De outro root", kb_root_page_id=OUTRO_ROOT)
 
@@ -33,7 +33,7 @@ async def test_documents_archived_counts_soft_deleted_of_the_current_root(
     """`documents_archived` é escopado ao root vigente, simétrico a
     `documents_active` — ver a justificativa completa no docstring de
     `DocumentRepository.count_archived`."""
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
     await seed_document_with_chunk(title="Viva", kb_root_page_id=ROOT)
     await seed_document_with_chunk(title="Morta do root atual", kb_root_page_id=ROOT, soft_deleted=True)
     await seed_document_with_chunk(
@@ -48,7 +48,7 @@ async def test_documents_archived_counts_soft_deleted_of_the_current_root(
 
 @pytest.mark.asyncio
 async def test_chunks_counts_only_chunks_in_scope(monkeypatch, seed_document_with_chunk):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
     await seed_document_with_chunk(title="Do root atual", kb_root_page_id=ROOT)
     await seed_document_with_chunk(title="De outro root", kb_root_page_id=OUTRO_ROOT)
     await seed_document_with_chunk(title="Removida", kb_root_page_id=ROOT, soft_deleted=True)
@@ -64,7 +64,7 @@ async def test_counts_degrade_to_zero_when_root_is_unconfigured(
 ):
     """Mesma convenção fail-closed de `list_sections`/`search_similar`: sem
     root configurado, zero — nunca o total do banco sem procedência."""
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", None, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", None, raising=False)
     await seed_document_with_chunk(title="Sem procedência", kb_root_page_id=None)
 
     counts = await CountKnowledgeBaseAction().execute()

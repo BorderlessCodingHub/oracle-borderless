@@ -11,7 +11,7 @@ from src.support.core.settings import settings
 from src.support.utils.notion_ids import normalize_page_id
 
 DIM = 1536
-# Literal fixo (não lido de settings ao vivo): se NOTION_KB_ROOT_PAGE_ID nunca
+# Literal fixo (não lido de settings ao vivo): se NOTION_KB_ROOT_PAGE_IDS nunca
 # estivesse setado em ambiente algum, `normalize_page_id(settings...)` viraria
 # None e — via o guard-clause do repository — o teste continuaria passando
 # sem de fato exercitar o filtro de escopo.
@@ -25,7 +25,7 @@ def _vec(seed: float):
 
 @pytest.mark.asyncio
 async def test_search_similar_returns_nearest_approved(db_session, monkeypatch):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
     # Neutralize RAG_MAX_DISTANCE at its bound (cosine distance is capped at
     # 2.0) so this test doesn't break if someone lowers the threshold in
     # `.env` — it's testing top-k ordering, not the distance filter.
@@ -58,7 +58,7 @@ async def test_search_similar_returns_nearest_approved(db_session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_similar_excludes_non_approved_and_deleted(db_session, monkeypatch):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
     # This test isolates status/soft-delete filtering from distance filtering:
     # the only approved chunk is deliberately placed at the far vector so the
     # assertion can't pass by distance alone. Neutralize RAG_MAX_DISTANCE at

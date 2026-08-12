@@ -8,7 +8,6 @@ from src.domain.documents.mappers import DocumentMapper
 from src.domain.documents.models.document import DocumentModel
 from src.support.core.context import CurrentAsyncSessionContext
 from src.support.core.settings import settings
-from src.support.utils.notion_ids import normalize_page_id
 
 
 class DocumentRepository:
@@ -70,15 +69,16 @@ class DocumentRepository:
             await self.session.flush()
 
     async def list_sections(self) -> list[str]:
-        """Seções distintas dos documentos ativos do root vigente, ordenadas."""
-        root = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
-        if root is None:
+        """Seções distintas dos documentos ativos do conjunto de roots vigente, ordenadas."""
+        roots = settings.kb_root_page_ids
+        if not roots:
             # Guarda deliberada, não simplificar: `DocumentModel.kb_root_page_id
-            # == None` compila para `WHERE kb_root_page_id IS NULL`, que
-            # combina exatamente com os documentos sem procedência — o
-            # conjunto que este filtro existe para excluir. Sem root
-            # configurado, a lista de seções degrada para vazia em vez de
-            # expor tudo que não tem procedência.
+            # == None` compila para `WHERE kb_root_page_id IS NULL`, que combina
+            # exatamente com os documentos sem procedência — o conjunto que este
+            # filtro existe para excluir. `IN` já exclui NULL naturalmente, mas a
+            # guarda continua necessária: `IN ()` sem roots seria SQL inválido, e
+            # sem roots a leitura precisa degradar para "sem conhecimento" em vez
+            # de expor tudo.
             return []
         result = await self.session.execute(
             select(DocumentModel.kb_section)
@@ -86,24 +86,24 @@ class DocumentRepository:
                 DocumentModel.status == "approved",
                 DocumentModel.deleted_at.is_(None),
                 DocumentModel.kb_section.is_not(None),
-                DocumentModel.kb_root_page_id == root,
+                DocumentModel.kb_root_page_id.in_(roots),
             )
             .distinct()
         )
         return sorted({(s or "").strip() for s in result.scalars().all() if (s or "").strip()})
 
     async def count_active(self) -> int:
-        """Documentos aprovados e não removidos, dentro do root vigente.
+        """Documentos aprovados e não removidos, dentro do conjunto de roots vigente.
 
         Escopo como invariante de leitura (ADR-0012): mesma guarda fail-closed
-        de `list_sections` — sem root configurado, zero em vez do total do
+        de `list_sections` — sem roots configurados, zero em vez do total do
         banco. Um documento com `status="approved"` e sem `deleted_at` que
-        ficou de outro root (ex.: sobra de uma reconciliação de escopo) não
-        conta aqui — ele é invisível para a recuperação, e este número
+        ficou de fora do conjunto (ex.: sobra de uma reconciliação de escopo)
+        não conta aqui — ele é invisível para a recuperação, e este número
         precisa refletir exatamente o que o oráculo consegue servir.
         """
-        root = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
-        if root is None:
+        roots = settings.kb_root_page_ids
+        if not roots:
             return 0
         result = await self.session.execute(
             select(func.count())
@@ -111,36 +111,36 @@ class DocumentRepository:
             .where(
                 DocumentModel.status == "approved",
                 DocumentModel.deleted_at.is_(None),
-                DocumentModel.kb_root_page_id == root,
+                DocumentModel.kb_root_page_id.in_(roots),
             )
         )
         return result.scalar_one()
 
     async def count_archived(self) -> int:
-        """Documentos removidos (soft-delete) do root vigente.
+        """Documentos removidos (soft-delete) do conjunto de roots vigente.
 
         Decisão de desenho (review da Task 6): este contador é escopado ao
-        root, simétrico a `count_active` — não o total de soft-deleted do
-        banco inteiro. Um documento que saiu de escopo por troca de root
-        (`kb_root_page_id != root`, mas `deleted_at IS NULL`) não é nem ativo
-        nem arquivado por este contador: ele simplesmente não pertence ao
-        root vigente. Misturar época de root diferente neste número contaria
-        uma história que não é sobre a base atual — o par
-        `documents_active`/`documents_archived` descreve a saúde do escopo
-        vigente (quanto está publicado vs. quanto foi removido dele), não um
-        censo histórico de tudo que já passou pelo banco. Sem root
-        configurado, degrada para zero — mesma convenção fail-closed das
-        outras leituras do subdomínio.
+        conjunto de roots, simétrico a `count_active` — não o total de
+        soft-deleted do banco inteiro. Um documento que saiu de escopo por
+        troca de root (`kb_root_page_id` fora do conjunto, mas `deleted_at
+        IS NULL`) não é nem ativo nem arquivado por este contador: ele
+        simplesmente não pertence ao conjunto vigente. Misturar época de
+        root diferente neste número contaria uma história que não é sobre a
+        base atual — o par `documents_active`/`documents_archived` descreve
+        a saúde do escopo vigente (quanto está publicado vs. quanto foi
+        removido dele), não um censo histórico de tudo que já passou pelo
+        banco. Sem roots configurados, degrada para zero — mesma convenção
+        fail-closed das outras leituras do subdomínio.
         """
-        root = normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID)
-        if root is None:
+        roots = settings.kb_root_page_ids
+        if not roots:
             return 0
         result = await self.session.execute(
             select(func.count())
             .select_from(DocumentModel)
             .where(
                 DocumentModel.deleted_at.is_not(None),
-                DocumentModel.kb_root_page_id == root,
+                DocumentModel.kb_root_page_id.in_(roots),
             )
         )
         return result.scalar_one()

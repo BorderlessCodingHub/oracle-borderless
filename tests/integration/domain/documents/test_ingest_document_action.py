@@ -15,7 +15,7 @@ from src.support.core.settings import settings
 from src.support.utils.notion_ids import normalize_page_id
 from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
 
-# Literal fixo (não lido de settings ao vivo): se NOTION_KB_ROOT_PAGE_ID nunca
+# Literal fixo (não lido de settings ao vivo): se NOTION_KB_ROOT_PAGE_IDS nunca
 # estivesse setado em ambiente algum, `normalize_page_id(settings...)` viraria
 # None e — via o guard-clause do repository — o teste continuaria passando
 # sem de fato exercitar o filtro de escopo.
@@ -25,7 +25,7 @@ NORMALIZED_ROOT = normalize_page_id(ROOT)
 
 @pytest.mark.asyncio
 async def test_ingest_persists_document_and_chunks(db_session, monkeypatch):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
     # Neutralize RAG_MAX_DISTANCE at its bound (cosine distance is capped at
     # 2.0) so this test doesn't break if someone lowers the threshold in
     # `.env` — it's testing persistence + retrievability, not the distance
@@ -92,7 +92,7 @@ async def test_ingest_rejects_non_approved_document(db_session):
 @pytest.mark.asyncio
 async def test_ingest_is_idempotent_and_replaces_chunks(db_session, monkeypatch):
     """Re-ingerir a mesma notion_page_id deve atualizar o documento in place e substituir os chunks, sem acumular."""
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
     now = datetime(2026, 1, 1)
     page_id = f"pid-{uuid4()}"
     old_content = "conteúdo antigo sobre regras antigas. " * 400

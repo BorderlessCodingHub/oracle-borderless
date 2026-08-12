@@ -15,7 +15,7 @@ _QUERY = [1.0] + [0.0] * 1535
 @pytest.mark.asyncio
 async def test_chunk_of_another_root_is_not_retrieved(monkeypatch, seed_document_with_chunk):
     """`seed_document_with_chunk(kb_root_page_id=...)` insere doc + 1 chunk."""
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
     from src.domain.documents.repositories.document_chunk_repository import (
         DocumentChunkRepository,
     )
@@ -34,7 +34,7 @@ async def test_chunk_of_another_root_is_not_retrieved(monkeypatch, seed_document
 async def test_document_without_provenance_is_not_retrieved(
     monkeypatch, seed_document_with_chunk
 ):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
     from src.domain.documents.repositories.document_chunk_repository import (
         DocumentChunkRepository,
     )
@@ -56,7 +56,7 @@ async def test_search_similar_returns_empty_when_root_unconfigured(
     `search_similar` existe para que a ausência de configuração nunca vire um
     "libera tudo sem procedência" por acidente.
     """
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", None, raising=False)
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", None, raising=False)
     from src.domain.documents.repositories.document_chunk_repository import (
         DocumentChunkRepository,
     )
@@ -65,3 +65,39 @@ async def test_search_similar_returns_empty_when_root_unconfigured(
 
     hits = await DocumentChunkRepository().search_similar(_QUERY, top_k=10)
     assert hits == []
+
+
+@pytest.mark.asyncio
+async def test_search_similar_returns_documents_from_every_configured_root(
+    monkeypatch, seed_document_with_chunk
+):
+    monkeypatch.setattr(
+        settings, "NOTION_KB_ROOT_PAGE_IDS", f"{ROOT},{OUTRO_ROOT}", raising=False
+    )
+    from src.domain.documents.repositories.document_chunk_repository import (
+        DocumentChunkRepository,
+    )
+
+    await seed_document_with_chunk(title="Do root A", kb_root_page_id=ROOT)
+    await seed_document_with_chunk(title="Do root B", kb_root_page_id=OUTRO_ROOT)
+
+    results = await DocumentChunkRepository().search_similar(_QUERY, top_k=10)
+
+    assert {r.citation.title for r in results} == {"Do root A", "Do root B"}
+
+
+@pytest.mark.asyncio
+async def test_search_similar_excludes_root_outside_the_allowlist(
+    monkeypatch, seed_document_with_chunk
+):
+    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
+    from src.domain.documents.repositories.document_chunk_repository import (
+        DocumentChunkRepository,
+    )
+
+    await seed_document_with_chunk(title="Dentro", kb_root_page_id=ROOT)
+    await seed_document_with_chunk(title="Fora", kb_root_page_id=OUTRO_ROOT)
+
+    results = await DocumentChunkRepository().search_similar(_QUERY, top_k=10)
+
+    assert {r.citation.title for r in results} == {"Dentro"}
