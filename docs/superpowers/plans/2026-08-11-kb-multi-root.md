@@ -1427,6 +1427,8 @@ pytest && grep -rn "NOTION_KB_ROOT_PAGE_ID\b" . \
 
 Expected: `pytest` PASS, e o `grep` **sem nenhuma saída**. Os ADRs 0011 e 0012 são imutáveis e mantêm a env var singular no texto histórico — por isso ficam de fora da varredura.
 
+> **Atualização pós-review.** O review final do branch mostrou que um deploy que ainda tivesse a env var antiga no ambiente degradaria em silêncio: o pydantic ignora a chave desconhecida, o escopo fica vazio e o oráculo passa a responder "não encontrei" para tudo, sem nada apontar a causa. A correção reintroduz `NOTION_KB_ROOT_PAGE_ID` em `src/support/core/settings.py` **apenas como detector**, com validação no startup do `LifespanManager` que falha o boot explicando a substituição. A partir daí, o grep acima passa a ter duas ocorrências legítimas — em `settings.py` e `lifespan.py` — e nenhuma outra.
+
 Run: `cd frontend && npm test && npx tsc --noEmit`
 Expected: PASS. `architectureMap.test.ts` continua passando — nenhum arquivo declarado no mapa foi renomeado ou removido.
 
