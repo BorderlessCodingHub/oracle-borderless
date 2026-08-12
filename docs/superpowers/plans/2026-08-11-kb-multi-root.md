@@ -651,31 +651,46 @@ Dentro do laço, substitua a cláusula de auto-cura (linhas 72-81) por:
 Substitua a chamada ao mapper (linhas 88-90) por:
 
 ```python
-                        full.kb_root_page_id = page.kb_root_page_id
                         await self.ingest.execute(
                             NotionPageMapper.to_document(full, page.kb_root_page_id or "")
                         )
 ```
+
+Note que **não** se copia `page.kb_root_page_id` para `full`: `NotionPageMapper.to_document(page, root_page_id)` grava a procedência a partir do segundo argumento posicional, nunca do objeto. (`full.section = page.section`, logo acima, é diferente — esse o mapper lê mesmo do objeto.)
 
 E substitua a reconciliação (linhas 100-106) por:
 
 ```python
         if not partial:
             now = datetime.now(timezone.utc)
+            # Procedência vista NESTA travessia. A reconciliação não pode usar
+            # `existing`, que foi carregado antes do laço de ingestão: um
+            # documento que a auto-cura acabou de re-stampar ainda apareceria
+            # ali com o root velho e seria soft-deletado logo depois de ser
+            # consertado, no mesmo run.
+            discovered_roots = {p.id: p.kb_root_page_id for p in approved}
             for page_id, doc in existing.items():
                 if doc.deleted_at is not None:
                     continue
                 # Dois motivos para sair do escopo: a página não apareceu em
-                # nenhuma travessia, ou o root sob o qual ela foi ingerida não
-                # está mais na allowlist. O segundo caso não é observável pela
-                # lista de aprovados — só pela procedência gravada.
+                # nenhuma travessia, ou o root sob o qual ela vive não está
+                # mais na allowlist. O segundo caso não é observável pela lista
+                # de aprovados — só pela procedência.
                 left_scope = page_id not in approved_ids or (
-                    normalize_page_id(doc.kb_root_page_id) not in roots
+                    normalize_page_id(discovered_roots.get(page_id, doc.kb_root_page_id))
+                    not in roots
                 )
                 if left_scope:
                     await self.documents.soft_delete_by_page_id(page_id, now)
                     await self.chunks.replace_for_document(doc.uuid, [])
                     report.removed += 1
+```
+
+O teste `test_stale_provenance_root_triggers_reingest_without_force`, que já existe no arquivo, exercita exatamente o cenário da auto-cura mas só afirma `ingest.executed`, `report.ingested` e `report.skipped`. Acrescente a ele as asserções que travam a regressão:
+
+```python
+    assert report.removed == 0
+    assert docs.soft_deleted == []
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
