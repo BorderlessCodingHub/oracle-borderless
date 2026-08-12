@@ -39,6 +39,14 @@ class NotionPage:
     kb_root_page_id: str | None = None  # root normalizado sob o qual foi achada
 
 
+@dataclass
+class WorkspaceRootPage:
+    """Página no nível do workspace visível à integração. Id já normalizado."""
+
+    id: str
+    title: str
+
+
 def _parse_ts(value: Any) -> datetime | None:
     if not value:
         return None
@@ -136,6 +144,36 @@ class NotionClient:
                     seen.add(key)
                     collected.append(page)
         return collected
+
+    async def list_workspace_root_pages(self) -> list[WorkspaceRootPage]:
+        """Páginas de nível de workspace que a integração enxerga.
+
+        É a superfície de permissão do lado do Notion — o que a dona do produto
+        liberou. Comparar com a allowlist é o que revela drift; este método não
+        aplica escopo nenhum, de propósito.
+        """
+        pages: list[WorkspaceRootPage] = []
+        async with notion_mcp_session() as call:
+            cursor: str | None = None
+            while True:
+                args: dict[str, Any] = {
+                    "filter": {"property": "object", "value": "page"},
+                    "page_size": 100,
+                }
+                if cursor:
+                    args["start_cursor"] = cursor
+                data = await call("API-post-search", args)
+                for page in data.get("results", []):
+                    if page.get("parent", {}).get("type") != "workspace":
+                        continue
+                    page_id = normalize_page_id(page.get("id"))
+                    if page_id:
+                        pages.append(
+                            WorkspaceRootPage(id=page_id, title=_extract_title(page))
+                        )
+                if not data.get("has_more"):
+                    return pages
+                cursor = data.get("next_cursor")
 
     @staticmethod
     def _require_roots() -> tuple[str, ...]:
