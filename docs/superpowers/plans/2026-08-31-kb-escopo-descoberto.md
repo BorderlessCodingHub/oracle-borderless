@@ -1449,12 +1449,12 @@ Não é passo de CI — é o runbook do deploy, executado por uma pessoa, nesta 
 # 1. Remover as env vars de root do ambiente de produção (senão o boot falha).
 # 2. Deploy.
 # 3. Imediatamente após o deploy subir:
-python cli.py knowledge:sync --force
+python cli.py knowledge:sync
 # 4. Conferir o que passou a ser consumido:
 python cli.py knowledge:roots
 ```
 
-O `--force` é necessário: a ingestão incremental pula páginas cujo `last_edited_time` não mudou, e o objetivo do corte é justamente trazer as páginas que **passam** a estar no escopo. Entre os passos 2 e 3 existe uma janela real em que documentos de escopos anteriores ainda não reconciliados ficam recuperáveis — era o filtro de leitura que os escondia. Sem usuários no produto, é aceitável; não descreva essa janela como zero.
+O sync incremental (sem `--force`) já basta: página nunca vista entra por `current is None`, documento soft-deletado que volta ao escopo entra por `deleted_at`, página que trocou de root entra pela auto-cura de divergência de procedência, e a reconciliação de saída de escopo roda em qualquer sync não parcial, independente de `--force`. Usar `--force` aqui reingeriria a base inteira, inclusive as páginas inalteradas — custo de embeddings proporcional ao tamanho da base inteira, sem ganho correspondente. Entre os passos 2 e 3 existe uma janela real em que documentos de escopos anteriores ainda não reconciliados ficam recuperáveis — era o filtro de leitura que os escondia. Sem usuários no produto, é aceitável; não descreva essa janela como zero.
 
 - [ ] **Step 7: Avisar o Yuri**
 

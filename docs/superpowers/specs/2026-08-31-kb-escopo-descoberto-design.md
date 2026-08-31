@@ -255,16 +255,20 @@ que o §3 fecha, e sem cobertura ela volta silenciosa.
 ## 10. Corte em produção
 
 1. Deploy com a descoberta e sem o filtro de leitura.
-2. Imediatamente: `python cli.py knowledge:sync --force`.
+2. Imediatamente: `python cli.py knowledge:sync`.
 
 Entre os dois passos, documentos ingeridos sob escopos anteriores e ainda não
 soft-deletados ficam recuperáveis — era o filtro de leitura que os escondia. Sem
 usuários no produto, a janela é aceitável; ela não é zero e não deve ser
 descrita como tal.
 
-O `--force` é necessário: a ingestão incremental pula páginas cujo
-`last_edited_time` não mudou, e o objetivo do corte é justamente trazer as
-páginas que passam a estar no escopo.
+O sync incremental (sem `--force`) já basta: página nunca vista entra por
+`current is None`, documento soft-deletado que volta ao escopo entra por
+`deleted_at`, página que trocou de root entra pela auto-cura de divergência de
+procedência, e a reconciliação de saída de escopo roda em qualquer sync não
+parcial, independente de `--force`. O `--force` reingeriria a base inteira,
+inclusive as páginas inalteradas — custo de embeddings proporcional ao
+tamanho da base inteira, sem ganho correspondente.
 
 ## 11. Critérios de aceite
 
