@@ -32,7 +32,7 @@ export const ARCHITECTURE_MAP: MapBand[] = [
       {
         id: "notion-mcp",
         label: "Notion MCP",
-        description: "Lê o subtree de cada root liberado via MCP. Fora dos roots, nada é visitado.",
+        description: "Descobre as páginas de topo que a integração enxerga e lê o subtree de cada uma. O que não é compartilhado não é visitado.",
         files: ["src/support/clients/notion/notion_client.py", "src/support/clients/notion/mcp_session.py"],
       },
       {

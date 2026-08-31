@@ -122,22 +122,33 @@ class NotionClient:
         )
 
     async def list_approved_pages(self) -> list[NotionPage]:
-        """Páginas-documento aprovadas — a união dos subtrees dos roots configurados.
+        """Páginas-documento aprovadas — a união dos subtrees dos roots descobertos.
 
-        A KB é EXCLUSIVAMENTE a união das subárvores de `NOTION_KB_ROOT_PAGE_IDS`.
-        Sem nenhum root configurado, **aborta** em vez de devolver ``[]``: o sync
-        completo removeria (soft-delete) toda a base ao reconciliar.
+        Os roots são as páginas de nível de workspace que a integração enxerga
+        (ADR-0015): o que a dona do produto compartilha é o escopo, sem segunda
+        lista para manter em sincronia.
+
+        Descoberta vazia **aborta** em vez de devolver ``[]``: nenhum root
+        visível significa token revogado ou MCP fora do ar, e a reconciliação
+        do sync soft-deletaria a base inteira numa única rodada.
 
         Uma página alcançável a partir de dois roots fica registrada sob o
-        primeiro root da ordem de declaração — `kb_root_page_id` é um valor só
-        por documento, então a atribuição precisa ser determinística.
+        primeiro descoberto — `kb_root_page_id` é um valor só por documento,
+        então a atribuição precisa ser determinística.
         """
-        roots = self._require_roots()
         collected: list[NotionPage] = []
         seen: set[str | None] = set()
         async with notion_mcp_session() as call:
-            for root_id in roots:
-                for page in await self._collect_scope(call, root_id):
+            roots = await self._workspace_root_pages(call)
+            if not roots:
+                raise KnowledgeBaseConfigError(
+                    "a integração do Notion não enxerga nenhuma página de nível "
+                    "de workspace — token revogado, MCP fora do ar, ou busca "
+                    "vazia por erro. Sync abortado: reconciliar com descoberta "
+                    "vazia apagaria toda a base."
+                )
+            for root in roots:
+                for page in await self._collect_scope(call, root.id):
                     key = normalize_page_id(page.id)
                     if key in seen:
                         continue
@@ -146,39 +157,40 @@ class NotionClient:
         return collected
 
     async def list_workspace_root_pages(self) -> list[WorkspaceRootPage]:
-        """Páginas de nível de workspace que a integração enxerga.
+        """Páginas de nível de workspace que a integração enxerga — o escopo da KB.
 
-        É a superfície de permissão do lado do Notion — o que a dona do produto
-        liberou. Comparar com a allowlist é o que revela drift; este método não
-        aplica escopo nenhum, de propósito.
+        É a superfície de permissão do lado do Notion: o que a dona do produto
+        liberou é o que o oráculo lê (ADR-0015). Não aplica escopo nenhum por
+        cima disso, de propósito.
         """
-        pages: list[WorkspaceRootPage] = []
         async with notion_mcp_session() as call:
-            cursor: str | None = None
-            while True:
-                args: dict[str, Any] = {
-                    "filter": {"property": "object", "value": "page"},
-                    "page_size": 100,
-                }
-                if cursor:
-                    args["start_cursor"] = cursor
-                data = await call("API-post-search", args)
-                for page in data.get("results", []):
-                    if page.get("parent", {}).get("type") != "workspace":
-                        continue
-                    page_id = normalize_page_id(page.get("id"))
-                    if page_id:
-                        pages.append(
-                            WorkspaceRootPage(id=page_id, title=_extract_title(page))
-                        )
-                # `has_more=True` sem `next_cursor` deixaria `cursor` voltando a
-                # `None` — args idênticos ao primeiro loop, `while True` nunca
-                # sairia. Isso penduraria o SyncKnowledgeBaseJob (que chama este
-                # método após um sync bem-sucedido) segurando o advisory lock;
-                # `_warn_on_drift` só captura exceção, não travamento.
-                if not data.get("has_more") or not data.get("next_cursor"):
-                    return pages
-                cursor = data.get("next_cursor")
+            return await self._workspace_root_pages(call)
+
+    @staticmethod
+    async def _workspace_root_pages(call: ToolCall) -> list[WorkspaceRootPage]:
+        pages: list[WorkspaceRootPage] = []
+        cursor: str | None = None
+        while True:
+            args: dict[str, Any] = {
+                "filter": {"property": "object", "value": "page"},
+                "page_size": 100,
+            }
+            if cursor:
+                args["start_cursor"] = cursor
+            data = await call("API-post-search", args)
+            for page in data.get("results", []):
+                if page.get("parent", {}).get("type") != "workspace":
+                    continue
+                page_id = normalize_page_id(page.get("id"))
+                if page_id:
+                    pages.append(WorkspaceRootPage(id=page_id, title=_extract_title(page)))
+            # `has_more=True` sem `next_cursor` deixaria `cursor` voltando a
+            # `None` — args idênticos ao primeiro loop, `while True` nunca
+            # sairia, e o SyncKnowledgeBaseJob penduraria segurando o advisory
+            # lock. Sair também quando o cursor falta é o que evita isso.
+            if not data.get("has_more") or not data.get("next_cursor"):
+                return pages
+            cursor = data.get("next_cursor")
 
     @staticmethod
     def _require_roots() -> tuple[str, ...]:
