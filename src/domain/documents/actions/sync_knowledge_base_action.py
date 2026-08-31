@@ -102,16 +102,13 @@ class SyncKnowledgeBaseAction:
                 if doc.deleted_at is not None:
                     continue
                 # Único motivo de saída de escopo observável aqui: a página não
-                # apareceu em nenhuma travessia desta rodada. Um root que saiu
-                # da allowlist não é mais percorrido por `list_approved_pages`
-                # (que só varre `settings.kb_root_page_ids`), então suas páginas
-                # somem de `approved_ids` por AUSÊNCIA da travessia — não porque
-                # comparamos a procedência gravada contra `roots`. Essa segunda
-                # comparação já existiu aqui e era sempre inalcançável: se
-                # `page_id` está em `approved_ids`, a procedência descoberta
-                # agora sempre bate com `roots` (foi `_collect_scope` que a
-                # etiquetou); se não está, o `or` de cima já decidiu. Não
-                # reintroduza — o mecanismo real é só este.
+                # apareceu em nenhuma travessia desta rodada. Um root que o Yuri
+                # despublicou não é mais descoberto por `list_approved_pages`,
+                # então suas páginas somem de `approved_ids` por AUSÊNCIA da
+                # travessia — não porque comparamos a procedência gravada contra
+                # uma lista. Essa segunda comparação já existiu aqui e era sempre
+                # inalcançável; não reintroduza. Descoberta vazia não chega até
+                # aqui: `list_approved_pages` aborta antes (ADR-0015).
                 left_scope = page_id not in approved_ids
                 if left_scope:
                     await self.documents.soft_delete_by_page_id(page_id, now)

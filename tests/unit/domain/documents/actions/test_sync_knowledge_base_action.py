@@ -7,16 +7,10 @@ import pytest
 from src.domain.documents.actions.sync_knowledge_base_action import SyncKnowledgeBaseAction
 from src.domain.documents.entities.document import Document
 from src.support.clients.notion.notion_client import NotionPage
-from src.support.core.settings import settings
 
 
 def _dt(day: int) -> datetime:
     return datetime(2026, 7, day, tzinfo=timezone.utc)
-
-
-@pytest.fixture(autouse=True)
-def _roots(monkeypatch):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", "rootA,rootB", raising=False)
 
 
 def _approved(
@@ -268,14 +262,14 @@ async def test_ingests_each_page_under_its_own_root():
 
 
 @pytest.mark.asyncio
-async def test_soft_deletes_documents_whose_root_left_the_allowlist():
-    # Um root removido de NOTION_KB_ROOT_PAGE_IDS deixa de ser percorrido por
-    # `list_approved_pages` (que só varre `settings.kb_root_page_ids`) — a
-    # página some por AUSÊNCIA da travessia, não por comparação de procedência.
-    # O NotionClient real não tem como devolver uma página aprovada etiquetada
-    # com um root fora da allowlist vigente (`_collect_scope` só etiqueta com
-    # roots que ele próprio está percorrendo), então este é o único cenário de
-    # saída de escopo que a action precisa (e consegue) detectar.
+async def test_soft_deletes_documents_whose_root_is_no_longer_shared():
+    # Um root que o Yuri despublicou deixa de ser descoberto por
+    # `list_approved_pages` — a página some por AUSÊNCIA da travessia, não por
+    # comparação de procedência. O NotionClient real não tem como devolver uma
+    # página aprovada etiquetada com um root que ele não está percorrendo
+    # (`_collect_scope` só etiqueta com os roots descobertos), então este é o
+    # único cenário de saída de escopo que a action precisa (e consegue)
+    # detectar.
     docs = FakeDocRepo([_existing("z", _dt(5), kb_root_page_id="rootremovido")])
     chunks = FakeChunkRepo()
 

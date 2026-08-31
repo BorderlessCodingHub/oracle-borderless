@@ -50,9 +50,6 @@ class KnowledgeCalibrateCommand(Command):
 
     async def handle(self) -> None:
         limiar = settings.RAG_MAX_DISTANCE
-        if not settings.kb_root_page_ids:
-            print("NOTION_KB_ROOT_PAGE_IDS não configurado — nada a calibrar.")
-            return
         embeddings = get_embeddings_client()
         print(f"RAG_MAX_DISTANCE atual: {limiar}\n")
 
@@ -73,7 +70,6 @@ class KnowledgeCalibrateCommand(Command):
                             .where(
                                 DocumentModel.status == "approved",
                                 DocumentModel.deleted_at.is_(None),
-                                DocumentModel.kb_root_page_id.in_(settings.kb_root_page_ids),
                             )
                             .order_by(distancia)
                             .limit(1)

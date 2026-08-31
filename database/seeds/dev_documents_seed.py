@@ -5,7 +5,6 @@ from uuid import uuid4
 from src.domain.documents.actions.ingest_document_action import IngestDocumentAction
 from src.domain.documents.entities.document import Document
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
-from src.support.core.settings import settings
 
 _KNOWLEDGE_DIR = Path(__file__).parent / "knowledge"
 
@@ -30,10 +29,9 @@ class DevDocumentsSeed:
                 created_at=now,
                 updated_at=now,
                 deleted_at=None,
-                # Escopo (ADR-0012): conteúdo de dev/test é tratado como pertencente
-                # ao root configurado, para permanecer recuperável pelo oráculo.
-                # Primeiro root da allowlist: o seed de dev só precisa de uma
-                # procedência válida para o documento ser recuperável.
-                kb_root_page_id=next(iter(settings.kb_root_page_ids), None),
+                # Procedência de dev: constante estável, sem fingir uma página do
+                # Notion. Desde o ADR-0015 a procedência não afeta recuperação —
+                # ela é só diagnóstico.
+                kb_root_page_id="seed",
             )
             await action.execute(document)
