@@ -1,10 +1,21 @@
 """Client da base de conhecimento — Notion via MCP (Model Context Protocol).
 
-Fronteira com o Notion. **Só expõe conteúdo aprovado**: a curadoria
-(`KnowledgeCurationPolicy`) barra linhas de banco (trackers/PII), deixando
-passar só páginas-documento. Transporte via `@notionhq/notion-mcp-server`
-(ADR-0010); truncagem de páginas grandes é contornada pelo
-`PageMarkdownAssembler`.
+Fronteira com o Notion. **Não filtra sozinho** — devolve o veredito da
+curadoria (`KnowledgeCurationPolicy`) em `is_approved` e cabe ao **chamador**
+aplicá-lo. Os dois caminhos têm garantias diferentes:
+
+- `list_approved_pages` (travessia de descoberta) **já** filtra pela policy —
+  só páginas-documento aprovadas voltam, e a subárvore de uma página rejeitada
+  nem é visitada.
+- `get_page`/`get_page_with_provenance` (leitura por id avulso) devolvem a
+  página **completa** — título, url e markdown, inclusive de linha de banco —
+  com `is_approved=False` quando reprovada. Quem chama por id precisa checar
+  o veredito antes de usar o conteúdo: `FetchNotionTool`
+  (`src/support/agent/tools.py`) e `KnowledgeIngestCommand`
+  (`src/app/console/commands/knowledge_ingest_command.py`) já fazem isso.
+
+Transporte via `@notionhq/notion-mcp-server` (ADR-0010); truncagem de páginas
+grandes é contornada pelo `PageMarkdownAssembler`.
 """
 
 from dataclasses import dataclass
@@ -21,7 +32,9 @@ from src.support.utils.notion_ids import normalize_page_id
 
 
 class KnowledgeBaseConfigError(RuntimeError):
-    """Configuração da base de conhecimento ausente/inválida (ex.: root não definido)."""
+    """Configuração/descoberta da base de conhecimento ausente/inválida (ex.:
+    nenhuma página de nível de workspace visível, ou paginação do `search`
+    malformada)."""
 
 
 @dataclass
@@ -64,7 +77,12 @@ def _extract_title(page: dict[str, Any]) -> str:
 
 
 class NotionClient:
-    """Fronteira com o Notion via MCP. Só páginas aprovadas."""
+    """Fronteira com o Notion via MCP.
+
+    Devolve o veredito de curadoria em `is_approved`; aplicá-lo é
+    responsabilidade do chamador (ver docstring do módulo). A travessia de
+    descoberta (`list_approved_pages`) é a exceção — ela já filtra.
+    """
 
     def __init__(self) -> None:
         self._policy = KnowledgeCurationPolicy()
@@ -133,6 +151,10 @@ class NotionClient:
         Uma página alcançável a partir de dois roots fica registrada sob o
         primeiro descoberto — `kb_root_page_id` é um valor só por documento,
         então a atribuição precisa ser determinística.
+
+        O próprio root passa pela `KnowledgeCurationPolicy` antes de ser
+        percorrido — a denylist de títulos vale em todos os níveis, não só
+        dentro da subárvore.
         """
         collected: list[NotionPage] = []
         seen: set[str | None] = set()
@@ -146,6 +168,18 @@ class NotionClient:
                     "vazia apagaria toda a base."
                 )
             for root in roots:
+                # A denylist de títulos é defesa em profundidade em TODOS os
+                # níveis (ver ADR-0015, "Por que topo + subárvore, e não busca
+                # plana") — inclusive o próprio root. Sem esta checagem, uma
+                # página de topo com título de tracker (ex.: "Sprints 2026")
+                # nunca entraria ela mesma, mas cada filho seu entraria por
+                # conta própria em `_collect_scope`, porque `_collect_scope`
+                # só poda a partir dos blocos que visita — nunca do root que
+                # recebe. Compartilhar a página com a integração bastaria
+                # para ingerir a subárvore inteira.
+                ref = NotionPageRef(object_type="page", parent_type="workspace", title=root.title)
+                if not self._policy.should_ingest(ref):
+                    continue
                 for page in await self._collect_scope(call, root.id):
                     key = normalize_page_id(page.id)
                     if key in seen:
@@ -182,12 +216,24 @@ class NotionClient:
                 page_id = normalize_page_id(page.get("id"))
                 if page_id:
                     pages.append(WorkspaceRootPage(id=page_id, title=_extract_title(page)))
-            # `has_more=True` sem `next_cursor` deixaria `cursor` voltando a
-            # `None` — args idênticos ao primeiro loop, `while True` nunca
-            # sairia, e o SyncKnowledgeBaseJob penduraria segurando o advisory
-            # lock. Sair também quando o cursor falta é o que evita isso.
-            if not data.get("has_more") or not data.get("next_cursor"):
-                return pages
+            if not data.get("has_more"):
+                return pages  # fim normal de paginação
+            if not data.get("next_cursor"):
+                # `has_more=True` sem `next_cursor` não é fim de paginação —
+                # é o `search` respondendo de forma malformada. Continuar o
+                # laço penduraria (`cursor` voltaria a `None`, args idênticos
+                # ao primeiro loop, `while True` nunca sairia, e o
+                # SyncKnowledgeBaseJob seguraria o advisory lock para sempre).
+                # Devolver a lista parcial em silêncio seria pior: o sync
+                # rodaria normalmente e a reconciliação soft-deletaria todo
+                # documento sob os roots que ficaram de fora — sem nada
+                # ligando o sintoma à causa. Levanta alto, na mesma família de
+                # "token revogado / MCP fora do ar".
+                raise KnowledgeBaseConfigError(
+                    "a paginação do `search` do Notion veio malformada "
+                    "(has_more=True sem next_cursor) — o escopo descoberto "
+                    "seria parcial. Sync abortado."
+                )
             cursor = data.get("next_cursor")
 
     @staticmethod

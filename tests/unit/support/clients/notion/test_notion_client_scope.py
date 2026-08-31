@@ -97,18 +97,6 @@ async def test_collect_scope_strips_section_title():
     assert pages[0].section == "Conferences"
 
 
-def _make_multiroot_call(tree: dict[str, list[dict]], requested: list[str]):
-    """Igual a `_make_call`, mas aceita ser chamado para vários roots."""
-
-    async def call(tool: str, args: dict):
-        assert tool == "API-get-block-children"
-        block_id = args["block_id"]
-        requested.append(block_id)
-        return {"results": tree.get(block_id, []), "has_more": False}
-
-    return call
-
-
 @pytest.mark.asyncio
 async def test_collect_scope_stamps_the_root_it_was_found_under():
     tree = {"rootA": [_child_page("A", "Programs")], "A": []}
@@ -211,3 +199,34 @@ async def test_empty_discovery_aborts_instead_of_wiping_the_base(monkeypatch):
 
     with pytest.raises(KnowledgeBaseConfigError):
         await NotionClient().list_approved_pages()
+
+
+@pytest.mark.asyncio
+async def test_a_root_with_a_denylisted_title_is_never_visited(monkeypatch):
+    # Regressão do Achado 1: um root de nível de workspace cujo título bate a
+    # denylist ("Sprints 2026") não pode ter a subárvore percorrida — mesmo
+    # que o corpo do root em si nunca entre na lista de aprovados. Antes desta
+    # checagem, cada filho do root entrava por conta própria em
+    # `_collect_scope`, porque a poda por denylist só valia a partir dos
+    # blocos visitados dentro da travessia, nunca no próprio root recebido.
+    tree = {
+        "sprints": [_child_page("S1", "Sprint 42")],
+        "S1": [],
+        "labs": [_child_page("L1", "Coding Labs — guia")],
+        "L1": [],
+    }
+    roots = [
+        _workspace_page("sprints", "Sprints 2026"),
+        _workspace_page("labs", "Borderless Coding Labs"),
+    ]
+    requested: list[str] = []
+    monkeypatch.setattr(
+        "src.support.clients.notion.notion_client.notion_mcp_session",
+        _fake_session(_make_discovery_call(tree, roots, requested)),
+    )
+
+    pages = await NotionClient().list_approved_pages()
+
+    assert {p.id for p in pages} == {"L1"}
+    assert "sprints" not in requested  # subárvore do root barrado não é visitada
+    assert "S1" not in requested
