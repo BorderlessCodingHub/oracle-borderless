@@ -34,7 +34,7 @@ O `CLAUDE.md` exige ADR **antes** da implementação para decisão que contraria
 - Consumes: nada.
 - Produces: o número `ADR-0015`, citado nos docstrings e comentários das Tasks 2–7.
 
-- [ ] **Step 1: Escrever o ADR**
+- [x] **Step 1: Escrever o ADR**
 
 Criar `docs/adr/0015-kb-escopo-descoberto-pela-permissao.md` seguindo o template do `docs/adr/README.md` (`## Status`, `## Resumo` com três blocos, `---`, corpo):
 
@@ -133,7 +133,7 @@ isoladamente, com o pai não compartilhado) que não corresponde ao modelo de
 curadoria em uso.
 ```
 
-- [ ] **Step 2: Atualizar o índice do README de ADRs**
+- [x] **Step 2: Atualizar o índice do README de ADRs**
 
 Em `docs/adr/README.md`, na tabela "Índice de ADRs": trocar o status do 0012 e do 0014 e acrescentar a linha do 0015.
 
@@ -145,12 +145,12 @@ Em `docs/adr/README.md`, na tabela "Índice de ADRs": trocar o status do 0012 e 
 | [0015](0015-kb-escopo-descoberto-pela-permissao.md) | Escopo da KB descoberto pela permissão do Notion | Aceito |
 ```
 
-- [ ] **Step 3: Conferir que os links do ADR resolvem**
+- [x] **Step 3: Conferir que os links do ADR resolvem**
 
 Run: `ls docs/adr/0011-kb-restrita-root-notion.md docs/adr/0012-escopo-kb-aplicado-na-recuperacao.md docs/adr/0014-kb-multi-root.md docs/superpowers/specs/2026-08-11-mvp-lancamento-fase1-design.md`
 Expected: os quatro caminhos existem (os links relativos do ADR apontam para eles).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/adr/0015-kb-escopo-descoberto-pela-permissao.md docs/adr/README.md
@@ -170,7 +170,7 @@ git commit -m "docs(adr): ADR-0015 — escopo da KB vem da permissão do Notion"
 - Consumes: `WorkspaceRootPage(id, title)` e `_collect_scope(call, root_id) -> list[NotionPage]`, ambos já existentes e inalterados.
 - Produces: `NotionClient.list_approved_pages() -> list[NotionPage]` sem leitura de settings; `NotionClient._workspace_root_pages(call) -> list[WorkspaceRootPage]` (privado, recebe o `call` de uma sessão já aberta). `KnowledgeBaseConfigError` continua sendo a exceção de descoberta vazia.
 
-- [ ] **Step 1: Escrever os testes que falham**
+- [x] **Step 1: Escrever os testes que falham**
 
 Substituir os três últimos testes de `tests/unit/support/clients/notion/test_notion_client_scope.py` (os que hoje monkeypatcham `NOTION_KB_ROOT_PAGE_IDS`: `test_list_approved_pages_walks_every_root`, `test_page_reachable_from_two_roots_keeps_the_first_declared`, `test_list_approved_pages_raises_when_no_root_configured`) por estes. Os helpers `_child_page`, `_child_database`, `_paragraph` e `_fake_session` no topo do arquivo ficam como estão.
 
@@ -271,12 +271,12 @@ async def test_empty_discovery_aborts_instead_of_wiping_the_base(monkeypatch):
 
 Remover também o import agora não usado de `settings` no topo do arquivo, se nenhum outro teste dele usar (`grep -n "settings" tests/unit/support/clients/notion/test_notion_client_scope.py`).
 
-- [ ] **Step 2: Rodar os testes e ver falhar pelo motivo certo**
+- [x] **Step 2: Rodar os testes e ver falhar pelo motivo certo**
 
 Run: `pytest tests/unit/support/clients/notion/test_notion_client_scope.py -v`
 Expected: os quatro testes novos FALHAM. `test_roots_come_from_what_the_integration_sees` falha com `KnowledgeBaseConfigError` (`list_approved_pages` ainda lê a env var vazia), não com `AttributeError` ou erro de import — se falhar por outro motivo, o teste está errado, não o código.
 
-- [ ] **Step 3: Extrair `_workspace_root_pages` recebendo o `call`**
+- [x] **Step 3: Extrair `_workspace_root_pages` recebendo o `call`**
 
 Em `src/support/clients/notion/notion_client.py`, dividir `list_workspace_root_pages` em duas: a pública abre a sessão, a privada recebe o `call`. Isso é o que permite à `list_approved_pages` descobrir os roots e percorrê-los numa sessão MCP só.
 
@@ -318,7 +318,7 @@ Em `src/support/clients/notion/notion_client.py`, dividir `list_workspace_root_p
             cursor = data.get("next_cursor")
 ```
 
-- [ ] **Step 4: Trocar a fonte dos roots em `list_approved_pages`**
+- [x] **Step 4: Trocar a fonte dos roots em `list_approved_pages`**
 
 Substituir **apenas o corpo** de `list_approved_pages`. **Não apague `_require_roots` nesta task** — `get_page_in_scope` e `_find_root` ainda o chamam, e removê-lo agora quebraria os dois. A Task 3 o apaga junto com o último chamador.
 
@@ -359,12 +359,12 @@ Substituir **apenas o corpo** de `list_approved_pages`. **Não apague `_require_
         return collected
 ```
 
-- [ ] **Step 5: Rodar os testes**
+- [x] **Step 5: Rodar os testes**
 
 Run: `pytest tests/unit/support/clients/notion/ -v`
 Expected: PASS — o diretório inteiro, inclusive `test_notion_client_ancestry.py`, que ainda exercita `_require_roots` e por isso não pode ser quebrado aqui. Os testes de `_collect_scope` (denylist, `child_database`, `section`) continuam verdes sem alteração: a travessia não mudou.
 
-- [ ] **Step 6: Atualizar a descrição da caixa no mapa de arquitetura**
+- [x] **Step 6: Atualizar a descrição da caixa no mapa de arquitetura**
 
 Em `frontend/src/features/ops/architectureMap.ts`, na caixa `notion-mcp`:
 
@@ -372,12 +372,12 @@ Em `frontend/src/features/ops/architectureMap.ts`, na caixa `notion-mcp`:
         description: "Descobre as páginas de topo que a integração enxerga e lê o subtree de cada uma. O que não é compartilhado não é visitado.",
 ```
 
-- [ ] **Step 7: Rodar o teste do mapa**
+- [x] **Step 7: Rodar o teste do mapa**
 
 Run: `cd frontend && npx vitest run src/features/ops/architectureMap.test.ts`
 Expected: PASS (nenhum arquivo declarado no mapa mudou de caminho; só a descrição).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/support/clients/notion/notion_client.py tests/unit/support/clients/notion/test_notion_client_scope.py frontend/src/features/ops/architectureMap.ts
@@ -396,7 +396,7 @@ git commit -m "feat(kb): roots vêm do que a integração do Notion enxerga"
 - Consumes: `NotionPage` (inalterada), `KnowledgeCurationPolicy.should_ingest`.
 - Produces: `NotionClient.get_page_with_provenance(page_id: str) -> NotionPage` — **nunca devolve `None`**; `is_approved` carrega o veredito da curadoria e `kb_root_page_id` a página de topo de onde a página descende (ou `None`). `NotionClient._find_top_level_page(call, page_id) -> str | None`. As Tasks 4 e 6 consomem exatamente essa assinatura.
 
-- [ ] **Step 1: Reescrever o teste de ancestralidade**
+- [x] **Step 1: Reescrever o teste de ancestralidade**
 
 Substituir `tests/unit/support/clients/notion/test_notion_client_ancestry.py` inteiro. O arquivo hoje testa `_find_root` contra uma allowlist; passa a testar a derivação de procedência, que não recusa nada.
 
@@ -462,12 +462,12 @@ async def test_cycle_does_not_hang():
     assert await NotionClient()._find_top_level_page(_make_call(pages), "a") is None
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `pytest tests/unit/support/clients/notion/test_notion_client_ancestry.py -v`
 Expected: FAIL — `AttributeError: 'NotionClient' object has no attribute '_find_top_level_page'`.
 
-- [ ] **Step 3: Trocar `_find_root` por `_find_top_level_page`**
+- [x] **Step 3: Trocar `_find_root` por `_find_top_level_page`**
 
 Em `src/support/clients/notion/notion_client.py`, substituir o método `_find_root` inteiro por:
 
@@ -502,7 +502,7 @@ Em `src/support/clients/notion/notion_client.py`, substituir o método `_find_ro
             current = parent["page_id"]
 ```
 
-- [ ] **Step 4: Trocar `get_page_in_scope` por `get_page_with_provenance`**
+- [x] **Step 4: Trocar `get_page_in_scope` por `get_page_with_provenance`**
 
 Substituir o método `get_page_in_scope` inteiro por:
 
@@ -535,19 +535,19 @@ Substituir o método `get_page_in_scope` inteiro por:
         )
 ```
 
-- [ ] **Step 5: Rodar os testes**
+- [x] **Step 5: Rodar os testes**
 
 Run: `pytest tests/unit/support/clients/notion/test_notion_client_ancestry.py -v`
 Expected: PASS (5 testes).
 
-- [ ] **Step 5b: Apagar `_require_roots`**
+- [x] **Step 5b: Apagar `_require_roots`**
 
 Agora que `get_page_in_scope` e `_find_root` — seus dois últimos chamadores — deixaram de existir, apagar o método `_require_roots` inteiro de `notion_client.py`. A Task 2 deliberadamente o deixou de pé para não quebrar esses dois.
 
 Run: `grep -n "_require_roots" src/support/clients/notion/notion_client.py`
 Expected: nenhuma linha.
 
-- [ ] **Step 6: Renomear as duas chamadas, sem mudar comportamento**
+- [x] **Step 6: Renomear as duas chamadas, sem mudar comportamento**
 
 O método mudou de nome; os dois chamadores precisam acompanhar **nesta task**, senão o commit fica vermelho até a Task 4. É rename puro — a checagem de `is_approved` é da Task 4, não daqui.
 
@@ -565,17 +565,17 @@ Em `src/app/console/commands/knowledge_ingest_command.py`, dentro de `handle`, o
 
 Nos fakes dos testes desses dois arquivos (`tests/unit/support/agent/test_tools_scope.py` e `tests/unit/app/console/test_knowledge_ingest_command.py`), renomear o método `get_page_in_scope` para `get_page_with_provenance`. **Não mexa nas asserções** — os fakes que devolvem `None` continuam devolvendo `None`, e o `if page is None` dos chamadores continua funcionando. A Task 4 reescreve esses dois arquivos por inteiro.
 
-- [ ] **Step 7: Rodar a suíte de unit inteira**
+- [x] **Step 7: Rodar a suíte de unit inteira**
 
 Run: `pytest tests/unit -q`
 Expected: PASS. Nenhum commit deste plano pode deixar a suíte vermelha — se falhar aqui, o rename ficou incompleto.
 
-- [ ] **Step 8: Confirmar que o nome antigo sumiu**
+- [x] **Step 8: Confirmar que o nome antigo sumiu**
 
 Run: `grep -rn "get_page_in_scope\|_find_root\b" src/ tests/ --include=*.py | grep -v __pycache__`
 Expected: nenhuma linha.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/support/clients/notion/notion_client.py src/support/agent/tools.py src/app/console/commands/knowledge_ingest_command.py tests/unit/
@@ -598,7 +598,7 @@ Esta é a task crítica de segurança do plano: sem ela, a Task 3 deixa o agente
 - Consumes: `NotionClient.get_page_with_provenance(page_id) -> NotionPage` (Task 3).
 - Produces: nenhuma assinatura nova. A mensagem de recusa da tool continua contendo a substring `"fora do escopo"`, da qual os testes dependem.
 
-- [ ] **Step 1: Reescrever o teste da tool**
+- [x] **Step 1: Reescrever o teste da tool**
 
 Substituir `tests/unit/support/agent/test_tools_scope.py` inteiro:
 
@@ -653,12 +653,12 @@ async def test_content_rejected_by_curation_never_reaches_the_model():
     assert "fora do escopo" in out.lower()
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `pytest tests/unit/support/agent/test_tools_scope.py -v`
 Expected: FAIL em `test_content_rejected_by_curation_never_reaches_the_model` — a tool devolve o conteúdo da página reprovada, porque ainda não checa `is_approved`. O outro teste passa. Se o primeiro também falhar, o rename da Task 3 ficou incompleto.
 
-- [ ] **Step 3: Trocar a checagem na tool**
+- [x] **Step 3: Trocar a checagem na tool**
 
 Em `src/support/agent/tools.py`, substituir a docstring da classe e o método `run`:
 
@@ -684,12 +684,12 @@ class FetchNotionTool:
         return wrap_tool_content(f"[{page.title} — {page.url}]\n{page.content}")
 ```
 
-- [ ] **Step 4: Rodar o teste da tool**
+- [x] **Step 4: Rodar o teste da tool**
 
 Run: `pytest tests/unit/support/agent/test_tools_scope.py -v`
 Expected: PASS (2 testes).
 
-- [ ] **Step 5: Reescrever o teste do comando de ingestão**
+- [x] **Step 5: Reescrever o teste do comando de ingestão**
 
 Substituir os dois primeiros blocos de `tests/unit/app/console/test_knowledge_ingest_command.py` — o docstring do módulo, a classe `_FakeNotionOutOfScope` e o teste `test_refuses_an_out_of_scope_page_and_does_not_persist` — por:
 
@@ -756,12 +756,12 @@ async def test_persists_the_top_level_page_that_contains_the_page(monkeypatch):
             )
 ```
 
-- [ ] **Step 6: Rodar e ver falhar**
+- [x] **Step 6: Rodar e ver falhar**
 
 Run: `pytest tests/unit/app/console/test_knowledge_ingest_command.py -v`
 Expected: FAIL em `test_refuses_a_page_rejected_by_curation_and_does_not_persist` — o comando ainda recusa só quando a página é `None`, e o fake novo devolve uma `NotionPage` reprovada. O comando segue em frente e a sentinela `_boom` dispara.
 
-- [ ] **Step 7: Trocar a checagem no comando**
+- [x] **Step 7: Trocar a checagem no comando**
 
 Em `src/app/console/commands/knowledge_ingest_command.py`, substituir o bloco de checagem no início de `handle` (o comentário longo + a chamada + o `raise`) por:
 
@@ -787,17 +787,17 @@ E, no bloco de sessão, ajustar o comentário da procedência:
                 root_page_id = page.kb_root_page_id or ""
 ```
 
-- [ ] **Step 8: Rodar os dois arquivos de teste**
+- [x] **Step 8: Rodar os dois arquivos de teste**
 
 Run: `pytest tests/unit/support/agent/test_tools_scope.py tests/unit/app/console/test_knowledge_ingest_command.py -v`
 Expected: PASS.
 
-- [ ] **Step 9: Confirmar que a curadoria é checada nos dois caminhos**
+- [x] **Step 9: Confirmar que a curadoria é checada nos dois caminhos**
 
 Run: `grep -rn "is_approved" src/support/agent/tools.py src/app/console/commands/knowledge_ingest_command.py`
 Expected: uma linha em cada arquivo. É a garantia que substitui a recusa por ancestralidade — sem ela, linha de banco (PII) entra no contexto.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add src/support/agent/tools.py src/app/console/commands/knowledge_ingest_command.py tests/unit/support/agent/test_tools_scope.py tests/unit/app/console/test_knowledge_ingest_command.py
@@ -818,7 +818,7 @@ git commit -m "fix(kb): curadoria barra linha de banco na leitura por id"
 - Consumes: nada das tasks anteriores.
 - Produces: `DocumentRepository.count_by_root() -> dict[str, int]` — chaves são `kb_root_page_id` (string vazia para documentos sem procedência), valores são contagens de documentos aprovados e não removidos. A Task 6 consome exatamente isso.
 
-- [ ] **Step 1: Reescrever o teste de integração do filtro**
+- [x] **Step 1: Reescrever o teste de integração do filtro**
 
 Substituir `tests/integration/domain/documents/test_chunk_repository_scope_filter.py` inteiro. O fixture `seed_document_with_chunk(title, kb_root_page_id, kb_section, embedding, soft_deleted)` já existe em `tests/integration/conftest.py` e não muda.
 
@@ -884,12 +884,12 @@ async def test_nearest_distance_ignores_provenance_too(seed_document_with_chunk)
     assert await DocumentChunkRepository().nearest_distance(_QUERY) is not None
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `pytest tests/integration/domain/documents/test_chunk_repository_scope_filter.py -v`
 Expected: FAIL — sem `NOTION_KB_ROOT_PAGE_IDS` no ambiente de teste, `search_similar` cai na guarda `if not roots: return []` e devolve lista vazia. Se o banco não estiver de pé: `docker compose -f docker/docker-compose.yml up -d` com `DB_PORT=5434`.
 
-- [ ] **Step 3: Tirar o filtro das três consultas do `DocumentChunkRepository`**
+- [x] **Step 3: Tirar o filtro das três consultas do `DocumentChunkRepository`**
 
 Em `src/domain/documents/repositories/document_chunk_repository.py`, nos métodos `search_similar`, `nearest_distance` e `count_in_scope`: apagar as linhas `roots = settings.kb_root_page_ids`, o bloco `if not roots: ...` (com o comentário longo da guarda) e o predicado `DocumentModel.kb_root_page_id.in_(roots)` de cada `where`. Manter `status == "approved"`, `deleted_at.is_(None)` e o corte por distância. **Manter** o import de `settings` — `RAG_TOP_K` e `RAG_MAX_DISTANCE` continuam vindo dele.
 
@@ -905,7 +905,7 @@ Renomear `count_in_scope` não é necessário; ajustar sua docstring é:
         """
 ```
 
-- [ ] **Step 4: Tirar o filtro das três consultas do `DocumentRepository`**
+- [x] **Step 4: Tirar o filtro das três consultas do `DocumentRepository`**
 
 Em `src/domain/documents/repositories/document_repository.py`, o mesmo em `list_sections`, `count_active` e `count_archived`. Aqui o import `from src.support.core.settings import settings` fica **sem uso** — remova-o. Ajustar as docstrings, que hoje falam em "conjunto de roots vigente":
 
@@ -924,7 +924,7 @@ Em `src/domain/documents/repositories/document_repository.py`, o mesmo em `list_
         """Documentos removidos por soft-delete na reconciliação do sync."""
 ```
 
-- [ ] **Step 5: Acrescentar `count_by_root`**
+- [x] **Step 5: Acrescentar `count_by_root`**
 
 No mesmo arquivo, depois de `count_archived`:
 
@@ -947,17 +947,17 @@ No mesmo arquivo, depois de `count_archived`:
         return {(root or ""): count for root, count in result.all()}
 ```
 
-- [ ] **Step 6: Verificar que `settings` sumiu do repositório de documentos**
+- [x] **Step 6: Verificar que `settings` sumiu do repositório de documentos**
 
 Run: `grep -n "settings" src/domain/documents/repositories/document_repository.py`
 Expected: nenhuma linha.
 
-- [ ] **Step 7: Rodar os testes**
+- [x] **Step 7: Rodar os testes**
 
 Run: `pytest tests/integration/domain/documents/ tests/unit/domain/documents/ -v`
 Expected: PASS. Testes que monkeypatcham `NOTION_KB_ROOT_PAGE_IDS` e ainda passarem, passam por inércia — o `monkeypatch` vira inócuo; remova esses `monkeypatch` onde encontrá-los.
 
-- [ ] **Step 8: Atualizar a descrição da caixa de retrieval no mapa**
+- [x] **Step 8: Atualizar a descrição da caixa de retrieval no mapa**
 
 Em `frontend/src/features/ops/architectureMap.ts`, na caixa `retrieval`:
 
@@ -965,7 +965,7 @@ Em `frontend/src/features/ops/architectureMap.ts`, na caixa `retrieval`:
         description: "Top-k no pgvector sobre os documentos ativos, cortado pela distância máxima.",
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/domain/documents/repositories/ tests/integration/domain/documents/test_chunk_repository_scope_filter.py frontend/src/features/ops/architectureMap.ts
@@ -992,7 +992,7 @@ git commit -m "feat(kb): recuperação deixa de filtrar por procedência"
 - Consumes: `DocumentRepository.count_by_root() -> dict[str, int]` (Task 5); `NotionClient.list_workspace_root_pages() -> list[WorkspaceRootPage]` (Task 2).
 - Produces: nenhuma assinatura consumida por tasks posteriores. Depois desta task, o único leitor restante de `settings.kb_root_page_ids` deve ser zero — é o que destrava a Task 7.
 
-- [ ] **Step 1: Escrever o teste do comando novo**
+- [x] **Step 1: Escrever o teste do comando novo**
 
 Criar (ou substituir) `tests/unit/app/console/test_knowledge_roots_command.py`:
 
@@ -1043,12 +1043,12 @@ async def test_reports_when_the_integration_sees_nothing(capsys):
     assert "nenhuma página" in capsys.readouterr().out.lower()
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `pytest tests/unit/app/console/test_knowledge_roots_command.py -v`
 Expected: FAIL — `TypeError`, porque o `__init__` atual aceita `action`, não `notion`/`documents`.
 
-- [ ] **Step 3: Reescrever o comando**
+- [x] **Step 3: Reescrever o comando**
 
 Substituir `src/app/console/commands/knowledge_roots_command.py` inteiro:
 
@@ -1107,12 +1107,12 @@ class KnowledgeRootsCommand(Command):
                 CurrentAsyncSessionContext.clear()
 ```
 
-- [ ] **Step 4: Rodar o teste do comando**
+- [x] **Step 4: Rodar o teste do comando**
 
 Run: `pytest tests/unit/app/console/test_knowledge_roots_command.py -v`
 Expected: PASS (2 testes).
 
-- [ ] **Step 5: Apagar a Action de drift, o DTO e o teste dela**
+- [x] **Step 5: Apagar a Action de drift, o DTO e o teste dela**
 
 ```bash
 git rm src/domain/documents/actions/detect_kb_root_drift_action.py \
@@ -1138,7 +1138,7 @@ __all__ = [
 ]
 ```
 
-- [ ] **Step 6: Tirar o aviso de drift do job**
+- [x] **Step 6: Tirar o aviso de drift do job**
 
 Em `src/app/console/jobs/sync_knowledge_base_job.py`, remover o import de `DetectKbRootDriftAction`, a chamada `await self._warn_on_drift(...)` e o método `_warn_on_drift` inteiro. O arquivo fica:
 
@@ -1169,7 +1169,7 @@ class SyncKnowledgeBaseJob(Job):
         logger.info("SyncKnowledgeBaseJob: %s", result)
 ```
 
-- [ ] **Step 7: Tirar o filtro do `knowledge:calibrate`**
+- [x] **Step 7: Tirar o filtro do `knowledge:calibrate`**
 
 Em `src/app/console/commands/knowledge_calibrate_command.py`: remover o bloco
 
@@ -1181,7 +1181,7 @@ Em `src/app/console/commands/knowledge_calibrate_command.py`: remover o bloco
 
 e o predicado `DocumentModel.kb_root_page_id.in_(settings.kb_root_page_ids),` do `where`. O import de `settings` fica: `RAG_MAX_DISTANCE` continua sendo lido.
 
-- [ ] **Step 8: Trocar a procedência do seed de dev**
+- [x] **Step 8: Trocar a procedência do seed de dev**
 
 Em `database/seeds/dev_documents_seed.py`, substituir o comentário e o valor:
 
@@ -1194,7 +1194,7 @@ Em `database/seeds/dev_documents_seed.py`, substituir o comentário e o valor:
 
 Se `settings` ficar sem uso no arquivo, remova o import (`grep -n "settings" database/seeds/dev_documents_seed.py`).
 
-- [ ] **Step 9: Atualizar o comentário de `left_scope` no sync**
+- [x] **Step 9: Atualizar o comentário de `left_scope` no sync**
 
 Em `src/domain/documents/actions/sync_knowledge_base_action.py`, o comentário longo acima de `left_scope` cita `settings.kb_root_page_ids` e "allowlist". Substituir por:
 
@@ -1209,7 +1209,7 @@ Em `src/domain/documents/actions/sync_knowledge_base_action.py`, o comentário l
                 # aqui: `list_approved_pages` aborta antes (ADR-0015).
 ```
 
-- [ ] **Step 10: Limpar o resíduo de allowlist no teste do sync**
+- [x] **Step 10: Limpar o resíduo de allowlist no teste do sync**
 
 `tests/unit/domain/documents/actions/test_sync_knowledge_base_action.py` usa um
 `FakeNotion`, então nunca leu a env var de verdade — a fixture abaixo é resíduo e
@@ -1238,17 +1238,17 @@ async def test_soft_deletes_documents_whose_root_is_no_longer_shared():
     docs = FakeDocRepo([_existing("z", _dt(5), kb_root_page_id="rootremovido")])
 ```
 
-- [ ] **Step 11: Confirmar que não sobrou leitor da propriedade**
+- [x] **Step 11: Confirmar que não sobrou leitor da propriedade**
 
 Run: `grep -rn "kb_root_page_ids" src/ database/ evals/ tests/ --include=*.py | grep -v __pycache__`
 Expected: **nenhuma linha** fora de `src/support/core/settings.py` (a definição, que a Task 7 remove). Se sobrar alguma, conserte antes de commitar — a Task 7 quebra o import.
 
-- [ ] **Step 12: Rodar a suíte de unit**
+- [x] **Step 12: Rodar a suíte de unit**
 
 Run: `pytest tests/unit -q`
 Expected: PASS.
 
-- [ ] **Step 13: Commit**
+- [x] **Step 13: Commit**
 
 ```bash
 git add -A src/domain/documents/actions/ src/domain/documents/dtos/ src/app/console/ database/seeds/dev_documents_seed.py tests/unit/
@@ -1270,7 +1270,7 @@ git commit -m "refactor(kb): drift some — knowledge:roots vira relatório de c
 - Consumes: nada (a Task 6 removeu o último leitor).
 - Produces: nenhuma. `Settings.NOTION_KB_ROOT_PAGE_IDS` e `NOTION_KB_ROOT_PAGE_ID` permanecem como `str | None` crus, lidos só pelo detector.
 
-- [ ] **Step 1: Reescrever o teste do detector**
+- [x] **Step 1: Reescrever o teste do detector**
 
 Substituir `tests/unit/support/core/test_lifespan.py` inteiro:
 
@@ -1316,12 +1316,12 @@ def test_blank_value_is_not_treated_as_set(monkeypatch):
     LifespanManager._validate_kb_root_env()  # não levanta
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `pytest tests/unit/support/core/test_lifespan.py -v`
 Expected: FAIL nos dois primeiros — o detector atual só levanta quando o nome antigo está setado **e** o novo está vazio, e a mensagem cita ADR-0014.
 
-- [ ] **Step 3: Reescrever o detector**
+- [x] **Step 3: Reescrever o detector**
 
 Em `src/support/core/lifespan.py`, substituir `_validate_kb_root_env` inteiro:
 
@@ -1351,7 +1351,7 @@ Em `src/support/core/lifespan.py`, substituir `_validate_kb_root_env` inteiro:
             )
 ```
 
-- [ ] **Step 4: Remover a propriedade das settings**
+- [x] **Step 4: Remover a propriedade das settings**
 
 Em `src/support/core/settings.py`, apagar a propriedade `kb_root_page_ids` inteira (incluindo o decorator `@property` e a docstring) e substituir o bloco de comentários dos dois campos por:
 
@@ -1368,7 +1368,7 @@ Em `src/support/core/settings.py`, apagar a propriedade `kb_root_page_ids` intei
 
 Se `normalize_page_id` ficar sem uso no arquivo, remova o import (`grep -n "normalize_page_id" src/support/core/settings.py`).
 
-- [ ] **Step 5: Apagar o teste da propriedade**
+- [x] **Step 5: Apagar o teste da propriedade**
 
 ```bash
 git rm tests/unit/support/core/test_settings_kb_root.py
@@ -1376,7 +1376,7 @@ git rm tests/unit/support/core/test_settings_kb_root.py
 
 Segundo e último caso autorizado de teste deletado sem substituto: a propriedade que ele exercitava não existe mais, e o comportamento que sobra (detector) está coberto pelo `test_lifespan.py`.
 
-- [ ] **Step 6: Atualizar o `.env.example`**
+- [x] **Step 6: Atualizar o `.env.example`**
 
 Substituir o bloco de roots por:
 
@@ -1387,17 +1387,17 @@ Substituir o bloco de roots por:
 # NOTION_KB_ROOT_PAGE_IDS e NOTION_KB_ROOT_PAGE_ID derrubam o boot se definidas.
 ```
 
-- [ ] **Step 7: Tirar as variáveis do `.env` local**
+- [x] **Step 7: Tirar as variáveis do `.env` local**
 
 Run: `grep -n "NOTION_KB_ROOT" .env`
 Se aparecer, comente ou remova as linhas — senão a aplicação não sobe localmente.
 
-- [ ] **Step 8: Rodar os testes e o boot**
+- [x] **Step 8: Rodar os testes e o boot**
 
 Run: `pytest tests/unit/support/core/ -v && python -c "from main import app; print('OK')"`
 Expected: PASS e `OK`.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add -A src/support/core/settings.py src/support/core/lifespan.py .env.example tests/unit/support/core/
@@ -1416,27 +1416,27 @@ git commit -m "feat(kb): env var de root vira detector de deploy defasado"
 - Consumes: tudo das Tasks 1–7.
 - Produces: nada.
 
-- [ ] **Step 1: Suíte completa**
+- [x] **Step 1: Suíte completa**
 
 Run: `pytest -q`
 Expected: PASS, zero falhas, zero erros de coleta. Falha de coleta por import quebrado é o sintoma típico de Task 7 rodada fora de ordem.
 
-- [ ] **Step 2: Lint**
+- [x] **Step 2: Lint**
 
 Run: `prospector`
 Expected: sem achados novos. Import não usado (`settings`, `normalize_page_id`) é o achado esperado se algum passo de limpeza foi pulado.
 
-- [ ] **Step 3: Migrations intactas**
+- [x] **Step 3: Migrations intactas**
 
 Run: `alembic check`
 Expected: limpo, sem revisão pendente. Este plano não tem migration; qualquer diferença aqui é efeito colateral e precisa ser investigado, não commitado.
 
-- [ ] **Step 4: Frontend**
+- [x] **Step 4: Frontend**
 
 Run: `cd frontend && npm run build && npx vitest run`
 Expected: build passa e testes verdes, incluindo `architectureMap.test.ts`.
 
-- [ ] **Step 5: Grep final das garantias removidas**
+- [x] **Step 5: Grep final das garantias removidas**
 
 Run: `grep -rn "kb_root_page_ids\|get_page_in_scope\|DetectKbRootDrift\|_find_root\b" src/ database/ tests/ frontend/src --include=*.py --include=*.ts | grep -v __pycache__`
 Expected: nenhuma linha. Qualquer sobra é código morto que ainda promete a garantia antiga.
@@ -1463,7 +1463,7 @@ quando liberar mais coisa". Isso deixa de ser necessário — compartilhar com a
 integração passa a bastar, e o efeito aparece no sync seguinte. Sem esse aviso,
 ele continua esperando um passo que ninguém precisa mais dar.
 
-- [ ] **Step 8: Commit final**
+- [x] **Step 8: Commit final**
 
 ```bash
 git add docs/superpowers/plans/2026-08-31-kb-escopo-descoberto.md
