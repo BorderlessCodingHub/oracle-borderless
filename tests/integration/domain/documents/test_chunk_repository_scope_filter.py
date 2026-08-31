@@ -1,103 +1,59 @@
-"""Escopo na recuperação: documento de outro root não é recuperado (ADR-0012)."""
+"""Recuperação sem filtro de procedência (ADR-0015): o escopo é a permissão do
+Notion, aplicada na descoberta e na reconciliação — não uma comparação de
+`kb_root_page_id` no SQL de leitura. O que sobrevive aqui é `deleted_at`."""
 
 import pytest
 
-from src.support.core.settings import settings
+from src.domain.documents.repositories.document_chunk_repository import (
+    DocumentChunkRepository,
+)
 
-ROOT = "23d8d655-c889-806d-8828-d527ce6a1529"
+UM_ROOT = "23d8d655-c889-806d-8828-d527ce6a1529"
 OUTRO_ROOT = "99998d655-c889-81cb-aa18-c2a7701"
 
 # Vetor NÃO-nulo: cosine_distance contra vetor zero é indefinida (NaN no pgvector)
-# e tornaria a ordenação — e o limiar da Task 5 — imprevisíveis.
+# e tornaria a ordenação — e o limiar — imprevisíveis.
 _QUERY = [1.0] + [0.0] * 1535
 
 
 @pytest.mark.asyncio
-async def test_chunk_of_another_root_is_not_retrieved(monkeypatch, seed_document_with_chunk):
-    """`seed_document_with_chunk(kb_root_page_id=...)` insere doc + 1 chunk."""
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
-    from src.domain.documents.repositories.document_chunk_repository import (
-        DocumentChunkRepository,
-    )
-
-    await seed_document_with_chunk(title="Do root atual", kb_root_page_id=ROOT)
+async def test_provenance_no_longer_filters_retrieval(seed_document_with_chunk):
+    await seed_document_with_chunk(title="De um root", kb_root_page_id=UM_ROOT)
     await seed_document_with_chunk(title="De outro root", kb_root_page_id=OUTRO_ROOT)
 
     hits = await DocumentChunkRepository().search_similar(_QUERY, top_k=10)
-    titles = {h.citation.title for h in hits}
 
-    assert "Do root atual" in titles
-    assert "De outro root" not in titles
+    assert {"De um root", "De outro root"} <= {h.citation.title for h in hits}
 
 
 @pytest.mark.asyncio
-async def test_document_without_provenance_is_not_retrieved(
-    monkeypatch, seed_document_with_chunk
-):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
-    from src.domain.documents.repositories.document_chunk_repository import (
-        DocumentChunkRepository,
-    )
-
+async def test_document_without_provenance_is_retrievable(seed_document_with_chunk):
+    # Antes: `IN (roots)` excluía NULL, e sem roots a guarda fail-closed
+    # devolvia [] para tudo. Sem filtro, o documento entra normalmente.
     await seed_document_with_chunk(title="Sem procedência", kb_root_page_id=None)
 
     hits = await DocumentChunkRepository().search_similar(_QUERY, top_k=10)
-    assert "Sem procedência" not in {h.citation.title for h in hits}
+
+    assert "Sem procedência" in {h.citation.title for h in hits}
 
 
 @pytest.mark.asyncio
-async def test_search_similar_returns_empty_when_root_unconfigured(
-    monkeypatch, seed_document_with_chunk
-):
-    """Sem root configurado, a busca degrada para 'sem conhecimento' (lista vazia).
-
-    `DocumentModel.kb_root_page_id == None` compilaria para `IS NULL`, que
-    combina exatamente com os documentos sem procedência — o guard-clause em
-    `search_similar` existe para que a ausência de configuração nunca vire um
-    "libera tudo sem procedência" por acidente.
-    """
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", None, raising=False)
-    from src.domain.documents.repositories.document_chunk_repository import (
-        DocumentChunkRepository,
+async def test_soft_deleted_document_is_still_excluded(seed_document_with_chunk):
+    # A garantia que SOBREVIVE: a reconciliação do sync continua sendo o que
+    # tira documento de circulação.
+    await seed_document_with_chunk(
+        title="Despublicada", kb_root_page_id=UM_ROOT, soft_deleted=True
     )
-
-    await seed_document_with_chunk(title="Sem procedência", kb_root_page_id=None)
 
     hits = await DocumentChunkRepository().search_similar(_QUERY, top_k=10)
-    assert hits == []
+
+    assert "Despublicada" not in {h.citation.title for h in hits}
 
 
 @pytest.mark.asyncio
-async def test_search_similar_returns_documents_from_every_configured_root(
-    monkeypatch, seed_document_with_chunk
-):
-    monkeypatch.setattr(
-        settings, "NOTION_KB_ROOT_PAGE_IDS", f"{ROOT},{OUTRO_ROOT}", raising=False
-    )
-    from src.domain.documents.repositories.document_chunk_repository import (
-        DocumentChunkRepository,
-    )
+async def test_nearest_distance_ignores_provenance_too(seed_document_with_chunk):
+    # `nearest_distance` serve o trace do caminho de recusa e tinha a mesma
+    # guarda fail-closed: sem roots, devolvia None.
+    await seed_document_with_chunk(title="Qualquer", kb_root_page_id=OUTRO_ROOT)
 
-    await seed_document_with_chunk(title="Do root A", kb_root_page_id=ROOT)
-    await seed_document_with_chunk(title="Do root B", kb_root_page_id=OUTRO_ROOT)
-
-    results = await DocumentChunkRepository().search_similar(_QUERY, top_k=10)
-
-    assert {r.citation.title for r in results} == {"Do root A", "Do root B"}
-
-
-@pytest.mark.asyncio
-async def test_search_similar_excludes_root_outside_the_allowlist(
-    monkeypatch, seed_document_with_chunk
-):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_IDS", ROOT, raising=False)
-    from src.domain.documents.repositories.document_chunk_repository import (
-        DocumentChunkRepository,
-    )
-
-    await seed_document_with_chunk(title="Dentro", kb_root_page_id=ROOT)
-    await seed_document_with_chunk(title="Fora", kb_root_page_id=OUTRO_ROOT)
-
-    results = await DocumentChunkRepository().search_similar(_QUERY, top_k=10)
-
-    assert {r.citation.title for r in results} == {"Dentro"}
+    assert await DocumentChunkRepository().nearest_distance(_QUERY) is not None

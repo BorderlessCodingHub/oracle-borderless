@@ -105,7 +105,7 @@ export const ARCHITECTURE_MAP: MapBand[] = [
       {
         id: "retrieval",
         label: "Retrieval + limiar",
-        description: "Top-k no pgvector, escopado aos roots, cortado pela distância máxima.",
+        description: "Top-k no pgvector sobre os documentos ativos, cortado pela distância máxima.",
         files: [
           "src/domain/documents/actions/search_knowledge_base_action.py",
           "src/domain/documents/repositories/document_chunk_repository.py",

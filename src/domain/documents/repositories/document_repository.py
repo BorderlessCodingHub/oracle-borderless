@@ -7,7 +7,6 @@ from src.domain.documents.entities.document import Document
 from src.domain.documents.mappers import DocumentMapper
 from src.domain.documents.models.document import DocumentModel
 from src.support.core.context import CurrentAsyncSessionContext
-from src.support.core.settings import settings
 
 
 class DocumentRepository:
@@ -69,78 +68,54 @@ class DocumentRepository:
             await self.session.flush()
 
     async def list_sections(self) -> list[str]:
-        """Seções distintas dos documentos ativos do conjunto de roots vigente, ordenadas."""
-        roots = settings.kb_root_page_ids
-        if not roots:
-            # Guarda deliberada, não simplificar: `DocumentModel.kb_root_page_id
-            # == None` compila para `WHERE kb_root_page_id IS NULL`, que combina
-            # exatamente com os documentos sem procedência — o conjunto que este
-            # filtro existe para excluir. `IN` já exclui NULL naturalmente, mas a
-            # guarda continua necessária: `IN ()` sem roots seria SQL inválido, e
-            # sem roots a leitura precisa degradar para "sem conhecimento" em vez
-            # de expor tudo.
-            return []
+        """Seções distintas dos documentos ativos, ordenadas."""
         result = await self.session.execute(
             select(DocumentModel.kb_section)
             .where(
                 DocumentModel.status == "approved",
                 DocumentModel.deleted_at.is_(None),
                 DocumentModel.kb_section.is_not(None),
-                DocumentModel.kb_root_page_id.in_(roots),
             )
             .distinct()
         )
         return sorted({(s or "").strip() for s in result.scalars().all() if (s or "").strip()})
 
     async def count_active(self) -> int:
-        """Documentos aprovados e não removidos, dentro do conjunto de roots vigente.
-
-        Escopo como invariante de leitura (ADR-0012): mesma guarda fail-closed
-        de `list_sections` — sem roots configurados, zero em vez do total do
-        banco. Um documento com `status="approved"` e sem `deleted_at` que
-        ficou de fora do conjunto (ex.: sobra de uma reconciliação de escopo)
-        não conta aqui — ele é invisível para a recuperação, e este número
-        precisa refletir exatamente o que o oráculo consegue servir.
-        """
-        roots = settings.kb_root_page_ids
-        if not roots:
-            return 0
+        """Documentos aprovados e não removidos — exatamente o que o oráculo serve."""
         result = await self.session.execute(
             select(func.count())
             .select_from(DocumentModel)
             .where(
                 DocumentModel.status == "approved",
                 DocumentModel.deleted_at.is_(None),
-                DocumentModel.kb_root_page_id.in_(roots),
             )
         )
         return result.scalar_one()
 
     async def count_archived(self) -> int:
-        """Documentos removidos (soft-delete) do conjunto de roots vigente.
-
-        Decisão de desenho (review da Task 6): este contador é escopado ao
-        conjunto de roots, simétrico a `count_active` — não o total de
-        soft-deleted do banco inteiro. Um documento que saiu de escopo por
-        troca de root (`kb_root_page_id` fora do conjunto, mas `deleted_at
-        IS NULL`) não é nem ativo nem arquivado por este contador: ele
-        simplesmente não pertence ao conjunto vigente. Misturar época de
-        root diferente neste número contaria uma história que não é sobre a
-        base atual — o par `documents_active`/`documents_archived` descreve
-        a saúde do escopo vigente (quanto está publicado vs. quanto foi
-        removido dele), não um censo histórico de tudo que já passou pelo
-        banco. Sem roots configurados, degrada para zero — mesma convenção
-        fail-closed das outras leituras do subdomínio.
-        """
-        roots = settings.kb_root_page_ids
-        if not roots:
-            return 0
+        """Documentos removidos por soft-delete na reconciliação do sync."""
         result = await self.session.execute(
             select(func.count())
             .select_from(DocumentModel)
             .where(
                 DocumentModel.deleted_at.is_not(None),
-                DocumentModel.kb_root_page_id.in_(roots),
             )
         )
         return result.scalar_one()
+
+    async def count_by_root(self) -> dict[str, int]:
+        """Documentos ativos agrupados por procedência (`kb_root_page_id`).
+
+        Diagnóstico, não escopo (ADR-0015): responde "o oráculo está mesmo
+        lendo o que eu liberei?" no `knowledge:roots`. Documento sem
+        procedência gravada entra sob a chave vazia.
+        """
+        result = await self.session.execute(
+            select(DocumentModel.kb_root_page_id, func.count())
+            .where(
+                DocumentModel.status == "approved",
+                DocumentModel.deleted_at.is_(None),
+            )
+            .group_by(DocumentModel.kb_root_page_id)
+        )
+        return {(root or ""): count for root, count in result.all()}
