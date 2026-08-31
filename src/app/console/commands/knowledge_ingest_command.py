@@ -25,7 +25,7 @@ class KnowledgeIngestCommand(Command):
         # do workspace visível à integração — sem essa checagem, o comando
         # persistiria provenência com aparência legítima para conteúdo fora da
         # KB (ADR-0012 fechou esse mesmo buraco para `FetchNotionTool`).
-        page = await self._notion.get_page_in_scope(page_id)
+        page = await self._notion.get_page_with_provenance(page_id)
         if page is None:
             raise ValidationError(
                 f"Página {page_id} está fora do escopo da base de conhecimento "
@@ -35,7 +35,7 @@ class KnowledgeIngestCommand(Command):
             CurrentAsyncSessionContext.set(session)
             try:
                 # A procedência vem da página (o root que a contém, resolvido por
-                # `get_page_in_scope`), não da env var: com vários roots, a env
+                # `get_page_with_provenance`), não da env var: com vários roots, a env
                 # var não diz sob qual deles esta página está.
                 root_page_id = page.kb_root_page_id or ""
                 document = NotionPageMapper.to_document(page, root_page_id)

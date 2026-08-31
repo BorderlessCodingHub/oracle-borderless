@@ -14,7 +14,7 @@ class _FakeNotion:
         self._in_scope = in_scope
         self.fetched: list[str] = []
 
-    async def get_page_in_scope(self, page_id: str) -> NotionPage | None:
+    async def get_page_with_provenance(self, page_id: str) -> NotionPage | None:
         self.fetched.append(page_id)
         if not self._in_scope:
             return None

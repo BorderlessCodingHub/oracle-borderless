@@ -51,7 +51,7 @@ class FetchNotionTool:
         self._notion = notion
 
     async def run(self, page_id: str) -> str:
-        page = await self._notion.get_page_in_scope(page_id)
+        page = await self._notion.get_page_with_provenance(page_id)
         if page is None:
             return wrap_tool_content(
                 "(página fora do escopo da base de conhecimento — não disponível)"

@@ -15,7 +15,7 @@ class _FakeNotionOutOfScope:
     def __init__(self) -> None:
         self.checked: list[str] = []
 
-    async def get_page_in_scope(self, page_id: str):
+    async def get_page_with_provenance(self, page_id: str):
         self.checked.append(page_id)
         return None
 
@@ -44,10 +44,10 @@ async def test_refuses_an_out_of_scope_page_and_does_not_persist(monkeypatch):
 @pytest.mark.asyncio
 async def test_persists_the_root_that_contains_the_page(monkeypatch):
     """Com vários roots, a env var não diz sob qual deles esta página está —
-    só `get_page_in_scope` sabe, porque foi ela que subiu a ancestralidade."""
+    só `get_page_with_provenance` sabe, porque foi ela que subiu a ancestralidade."""
 
     class _FakeNotionInScope:
-        async def get_page_in_scope(self, page_id: str):
+        async def get_page_with_provenance(self, page_id: str):
             return NotionPage(
                 id=page_id, title="Página", content="corpo", url="https://n",
                 is_approved=True, last_edited_time=None, kb_root_page_id="rootb",

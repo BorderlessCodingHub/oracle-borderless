@@ -17,7 +17,6 @@ from src.domain.documents.services.knowledge_curation_policy import (
 )
 from src.support.clients.notion.mcp_session import ToolCall, notion_mcp_session
 from src.support.clients.notion.page_markdown_assembler import PageMarkdownAssembler
-from src.support.core.settings import settings
 from src.support.utils.notion_ids import normalize_page_id
 
 
@@ -93,18 +92,17 @@ class NotionClient:
         async with notion_mcp_session() as call:
             return await self._assemble(call, page_id)
 
-    async def get_page_in_scope(self, page_id: str) -> NotionPage | None:
-        """Página **só se** dentro da subárvore de algum root; senão ``None``.
+    async def get_page_with_provenance(self, page_id: str) -> NotionPage:
+        """Página completa + a página de topo de onde ela descende.
 
-        Acesso avulso por id (ex.: tool do agente) não passa pela travessia de
-        descoberta, então precisa checar ancestralidade — do contrário qualquer
-        página do workspace visível à integração viraria contexto de resposta.
+        Não recusa por ancestralidade (ADR-0015): o escopo é a permissão da
+        integração, que o próprio MCP aplica negando acesso. O veredito de
+        ingestão/serviço vem de `is_approved` (`KnowledgeCurationPolicy`) e
+        **precisa ser checado pelo chamador** — é o que barra linha de banco
+        (PII) neste caminho.
         """
-        roots = self._require_roots()
         async with notion_mcp_session() as call:
-            matched_root = await self._find_root(call, page_id, roots)
-            if matched_root is None:
-                return None
+            provenance = await self._find_top_level_page(call, page_id)
             page = await call("API-retrieve-a-page", {"page_id": page_id})
             markdown = await self._assemble(call, page_id)
 
@@ -118,7 +116,7 @@ class NotionClient:
             url=page.get("url", ""),
             is_approved=self._policy.should_ingest(ref),
             last_edited_time=_parse_ts(page.get("last_edited_time")),
-            kb_root_page_id=matched_root,
+            kb_root_page_id=provenance,
         )
 
     async def list_approved_pages(self) -> list[NotionPage]:
@@ -193,43 +191,32 @@ class NotionClient:
             cursor = data.get("next_cursor")
 
     @staticmethod
-    def _require_roots() -> tuple[str, ...]:
-        roots = settings.kb_root_page_ids
-        if not roots:
-            raise KnowledgeBaseConfigError(
-                "NOTION_KB_ROOT_PAGE_IDS não configurado — a KB é a união dos "
-                "subtrees dos roots liberados; sem root, o sync abortaria e "
-                "apagaria toda a base."
-            )
-        return roots
+    async def _find_top_level_page(call: ToolCall, page_id: str) -> str | None:
+        """De qual página de topo esta página descende? Sobe a cadeia de `parent`.
 
-    async def _find_root(
-        self, call: ToolCall, page_id: str, roots: tuple[str, ...] | None = None
-    ) -> str | None:
-        """Qual root contém esta página? Sobe a cadeia de `parent`.
+        Devolve o id normalizado da página cujo pai é o `workspace` — a
+        procedência que vai para `kb_root_page_id`. Devolve ``None`` quando a
+        cadeia termina em `database_id`/`data_source_id` (linha de banco não
+        descende de página de topo) ou entra em ciclo.
 
-        Devolve o root normalizado que casou, ou ``None`` se a página não
-        descende de nenhum. Para em `workspace` (topo) ou `database_id` (linha
-        de banco): nenhum dos dois pode ser descendente de um root. `seen`
-        protege de ciclo/repetição.
-
-        Devolver o root — e não um booleano — é o que permite ao chamador
-        gravar a procedência correta quando há vários roots possíveis.
+        Não autoriza nada (ADR-0015): quem decide se a página é ingerível é a
+        `KnowledgeCurationPolicy`, via `is_approved`. Antes esta subida recusava
+        por não achar um root da allowlist, e barrava linha de banco por efeito
+        colateral — a recusa agora é explícita no chamador.
         """
-        targets = set(roots if roots is not None else self._require_roots())
         current = page_id
         seen: set[str | None] = set()
         while True:
             key = normalize_page_id(current)
-            if key in targets:
-                return key
             if key in seen:
                 return None
             seen.add(key)
             page = await call("API-retrieve-a-page", {"page_id": current})
             parent = page.get("parent", {})
+            if parent.get("type") == "workspace":
+                return key
             if parent.get("type") != "page_id":
-                return None  # workspace ou database_id — fora de toda subárvore
+                return None  # linha de banco ou parent desconhecido
             current = parent["page_id"]
 
     async def _collect_scope(self, call: ToolCall, root_id: str) -> list[NotionPage]:
