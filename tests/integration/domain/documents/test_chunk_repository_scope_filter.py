@@ -40,14 +40,20 @@ async def test_document_without_provenance_is_retrievable(seed_document_with_chu
 @pytest.mark.asyncio
 async def test_soft_deleted_document_is_still_excluded(seed_document_with_chunk):
     # A garantia que SOBREVIVE: a reconciliação do sync continua sendo o que
-    # tira documento de circulação.
+    # tira documento de circulação. Semeia também um documento vivo de
+    # controle: sem ele, o teste passaria igual se `search_similar` devolvesse
+    # `[]` por qualquer outro motivo — a asserção positiva é o que garante que
+    # estamos de fato testando a exclusão do soft-deletado, não um retorno vazio.
     await seed_document_with_chunk(
         title="Despublicada", kb_root_page_id=UM_ROOT, soft_deleted=True
     )
+    await seed_document_with_chunk(title="Ativa", kb_root_page_id=UM_ROOT)
 
     hits = await DocumentChunkRepository().search_similar(_QUERY, top_k=10)
 
-    assert "Despublicada" not in {h.citation.title for h in hits}
+    titles = {h.citation.title for h in hits}
+    assert "Despublicada" not in titles
+    assert "Ativa" in titles
 
 
 @pytest.mark.asyncio

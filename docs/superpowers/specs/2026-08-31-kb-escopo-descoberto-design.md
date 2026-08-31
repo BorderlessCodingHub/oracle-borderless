@@ -270,6 +270,12 @@ parcial, independente de `--force`. O `--force` reingeriria a base inteira,
 inclusive as páginas inalteradas — custo de embeddings proporcional ao
 tamanho da base inteira, sem ganho correspondente.
 
+O sync do corte também **não pode usar `--limit`**: em `SyncKnowledgeBaseAction`,
+`partial = limit is not None` desliga a reconciliação inteira, e é a
+reconciliação que fecha a janela descrita acima. Um `--limit` aqui deixaria
+documentos de escopos anteriores recuperáveis indefinidamente, não só durante
+a janela entre deploy e sync.
+
 ## 11. Critérios de aceite
 
 - Uma pergunta sobre um documento de uma página de topo que **nunca** esteve na

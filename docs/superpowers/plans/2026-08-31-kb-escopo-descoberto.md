@@ -1456,6 +1456,8 @@ python cli.py knowledge:roots
 
 O sync incremental (sem `--force`) já basta: página nunca vista entra por `current is None`, documento soft-deletado que volta ao escopo entra por `deleted_at`, página que trocou de root entra pela auto-cura de divergência de procedência, e a reconciliação de saída de escopo roda em qualquer sync não parcial, independente de `--force`. Usar `--force` aqui reingeriria a base inteira, inclusive as páginas inalteradas — custo de embeddings proporcional ao tamanho da base inteira, sem ganho correspondente. Entre os passos 2 e 3 existe uma janela real em que documentos de escopos anteriores ainda não reconciliados ficam recuperáveis — era o filtro de leitura que os escondia. Sem usuários no produto, é aceitável; não descreva essa janela como zero.
 
+Também não use `--limit` neste sync: em `SyncKnowledgeBaseAction`, `partial = limit is not None` desliga a reconciliação, e é a reconciliação que fecha a janela do parágrafo acima — com `--limit`, ela nunca fecharia.
+
 - [ ] **Step 7: Avisar o Yuri**
 
 Não é código, e por isso é fácil esquecer: o combinado da reunião era "te aviso

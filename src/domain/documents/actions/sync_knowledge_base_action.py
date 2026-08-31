@@ -70,9 +70,11 @@ class SyncKnowledgeBaseAction:
                 # Auto-cura: se a provenência gravada não bate com o root sob o
                 # qual a página foi descoberta agora (ex.: coluna NULL logo após
                 # a migração 0004, ou página que mudou de root), reingere mesmo
-                # sem --force. Sem isso, um sync incremental nunca re-stampa
-                # `kb_root_page_id` e o retrieval filtrado por root passa a
-                # devolver [] pra sempre.
+                # sem --force. O retrieval não filtra mais por root (ADR-0015)
+                # — o que dependeria disso ficando errado para sempre é a
+                # procedência exibida por `knowledge:roots` e a contagem por
+                # root que ele soma, sem um sync incremental jamais corrigir
+                # sozinho o valor gravado.
                 or (
                     current is not None
                     and normalize_page_id(current.kb_root_page_id)

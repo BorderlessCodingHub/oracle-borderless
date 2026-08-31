@@ -28,9 +28,12 @@ async def test_lists_roots_with_document_counts(capsys):
     out = capsys.readouterr().out
     assert "Products" in out and "42" in out
     # Root visível sem documento ingerido: sync ainda não rodou, ou tudo abaixo
-    # dele foi barrado pela curadoria. Precisa aparecer, com zero.
-    assert "Borderless Coding Labs" in out
-    assert "0" in out
+    # dele foi barrado pela curadoria. Precisa aparecer, com zero — na MESMA
+    # linha do root (não apenas "0" em algum lugar da saída, que discriminaria
+    # só por acidente já que nenhum id da fixture tem dígito).
+    lines = out.splitlines()
+    labs_line = next(line for line in lines if "Borderless Coding Labs" in line)
+    assert "0 doc(s)" in labs_line
 
 
 @pytest.mark.asyncio

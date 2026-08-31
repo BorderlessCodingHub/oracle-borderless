@@ -38,7 +38,7 @@ export const ARCHITECTURE_MAP: MapBand[] = [
       {
         id: "curation",
         label: "Curadoria",
-        description: "Rejeita linha de banco e títulos na denylist. Segunda linha de defesa do escopo.",
+        description: "Rejeita linha de banco e títulos na denylist. Primeira linha de defesa do escopo — e a única na leitura por id.",
         files: ["src/domain/documents/services/knowledge_curation_policy.py"],
       },
       {
