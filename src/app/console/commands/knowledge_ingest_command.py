@@ -20,23 +20,22 @@ class KnowledgeIngestCommand(Command):
 
     async def handle(self) -> None:
         page_id = self.input["page_id"]
-        # Checa o escopo ANTES de abrir sessão: um id avulso (digitado ou colado)
-        # não passou pela travessia de descoberta, então pode ser qualquer página
-        # do workspace visível à integração — sem essa checagem, o comando
-        # persistiria provenência com aparência legítima para conteúdo fora da
-        # KB (ADR-0012 fechou esse mesmo buraco para `FetchNotionTool`).
+        # Checa a curadoria ANTES de abrir sessão: um id avulso (digitado ou
+        # colado) não passou pela travessia de descoberta, então pode ser
+        # qualquer página que a integração alcance — inclusive linha de banco
+        # (tracker/PII). O escopo em si é a permissão da integração (ADR-0015);
+        # o que falta checar aqui é o veredito da KnowledgeCurationPolicy.
         page = await self._notion.get_page_with_provenance(page_id)
-        if page is None:
+        if not page.is_approved:
             raise ValidationError(
-                f"Página {page_id} está fora do escopo da base de conhecimento "
-                "(fora das subárvores dos roots configurados) — ingestão abortada."
+                f"Página {page_id} foi reprovada pela curadoria (linha de banco "
+                "ou título na denylist) — ingestão abortada."
             )
         async with AsyncSessionLocal() as session:
             CurrentAsyncSessionContext.set(session)
             try:
-                # A procedência vem da página (o root que a contém, resolvido por
-                # `get_page_with_provenance`), não da env var: com vários roots, a env
-                # var não diz sob qual deles esta página está.
+                # A procedência vem da página de topo de onde ela descende
+                # (resolvida por `get_page_with_provenance`), não de env var.
                 root_page_id = page.kb_root_page_id or ""
                 document = NotionPageMapper.to_document(page, root_page_id)
                 action = IngestDocumentAction(embeddings=get_embeddings_client())

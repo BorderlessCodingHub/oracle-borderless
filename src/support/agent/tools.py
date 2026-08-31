@@ -40,11 +40,12 @@ class WebSearchTool:
 
 
 class FetchNotionTool:
-    """Busca uma página do Notion por id — **restrita ao escopo da KB** (ADR-0014).
+    """Busca uma página do Notion por id — **filtrada pela curadoria** (ADR-0015).
 
     O id chega do modelo (via citação ou inferência), não da travessia de
-    descoberta, então o escopo tem de ser checado aqui: sem isso a tool leria
-    qualquer página do workspace visível à integração.
+    descoberta. O escopo em si é a permissão da integração, que o MCP já aplica;
+    o que precisa ser checado aqui é o veredito da `KnowledgeCurationPolicy`,
+    que barra linha de banco (tracker/PII) e títulos da denylist.
     """
 
     def __init__(self, notion: NotionClient) -> None:
@@ -52,7 +53,7 @@ class FetchNotionTool:
 
     async def run(self, page_id: str) -> str:
         page = await self._notion.get_page_with_provenance(page_id)
-        if page is None:
+        if not page.is_approved:
             return wrap_tool_content(
                 "(página fora do escopo da base de conhecimento — não disponível)"
             )
