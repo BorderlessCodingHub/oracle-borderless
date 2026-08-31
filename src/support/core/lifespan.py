@@ -28,22 +28,26 @@ class LifespanManager:
 
     @staticmethod
     def _validate_kb_root_env() -> None:
-        """Detecta deploy com a env var antiga (ou um `_ID`/`_IDS` digitado errado).
+        """Detecta deploy que ainda acha que controla o escopo da KB por env var.
 
-        `NOTION_KB_ROOT_PAGE_ID` (singular, ADR-0011) foi substituído por
-        `NOTION_KB_ROOT_PAGE_IDS` (CSV, ADR-0014). Como o pydantic-settings
-        ignora chave desconhecida (`extra="ignore"`), um deploy que ainda
-        exporta só o nome antigo sobe normal, com `kb_root_page_ids` vazio —
-        e daí o oráculo responde "não encontrei informações" para TODA
-        pergunta, sem nada que ligue o sintoma à causa. Falhar aqui, no boot,
-        é melhor que esse silêncio.
+        Desde o ADR-0015 o escopo é o que a integração do Notion enxerga —
+        nenhum código lê essas variáveis para decidir escopo. Um deploy que
+        ainda as exporta subiria normal, e a pessoa que as configurou acharia
+        que restringiu a base quando não restringiu nada. Falhar no boot é
+        melhor que essa crença silenciosa.
         """
-        if settings.NOTION_KB_ROOT_PAGE_ID and not settings.kb_root_page_ids:
+        stale = [
+            name
+            for name in ("NOTION_KB_ROOT_PAGE_IDS", "NOTION_KB_ROOT_PAGE_ID")
+            if (getattr(settings, name, None) or "").strip()
+        ]
+        if stale:
             raise RuntimeError(
-                "NOTION_KB_ROOT_PAGE_ID está definido, mas foi substituído por "
-                "NOTION_KB_ROOT_PAGE_IDS (lista separada por vírgula) — ver "
-                "ADR-0014. Atualize a env var; a aplicação não sobe sem escopo "
-                "de KB configurado."
+                f"{', '.join(stale)} está definido, mas o escopo da base de "
+                "conhecimento deixou de vir de variável de ambiente: agora é o "
+                "que a integração do Notion enxerga (ADR-0015). Remova a "
+                "variável do ambiente; para mudar o escopo, mude o "
+                "compartilhamento no Notion."
             )
 
     def _boot_scheduler(self) -> None:
