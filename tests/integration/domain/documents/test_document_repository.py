@@ -5,6 +5,7 @@ import pytest
 
 from src.domain.documents.entities.document import Document
 from src.domain.documents.repositories.document_repository import DocumentRepository
+from src.support.utils.notion_ids import normalize_page_id
 
 
 def _doc(page_id, title="T"):
@@ -72,3 +73,29 @@ async def test_upsert_updates_kb_provenance_on_existing_document(db_session):
     assert found is not None
     assert found.kb_root_page_id == "root-b"
     assert found.kb_section == "section-b"
+
+
+@pytest.mark.asyncio
+async def test_count_by_root_groups_active_documents_by_provenance(seed_document_with_chunk):
+    """Diagnóstico do `knowledge:roots` (ADR-0015), não escopo: agrupa documentos
+    ativos por procedência. NULL entra sob a chave vazia; documento soft-deletado
+    não conta em nenhum grupo, mesmo que o root ainda tenha outros documentos ativos."""
+    root_a = "23d8d655-c889-806d-8828-d527ce6a1529"
+    root_b = "99998d655-c889-81cb-aa18-c2a7701"
+
+    await seed_document_with_chunk(title="Do root A", kb_root_page_id=root_a)
+    await seed_document_with_chunk(title="Do root B", kb_root_page_id=root_b)
+    await seed_document_with_chunk(title="Sem procedência", kb_root_page_id=None)
+    await seed_document_with_chunk(
+        title="Removida do root A", kb_root_page_id=root_a, soft_deleted=True
+    )
+
+    counts = await DocumentRepository().count_by_root()
+
+    # O fixture normaliza kb_root_page_id (sem hífen, minúsculo) — a chave que
+    # volta é o id normalizado, não a string passada ao fixture.
+    assert counts == {
+        normalize_page_id(root_a): 1,
+        normalize_page_id(root_b): 1,
+        "": 1,
+    }

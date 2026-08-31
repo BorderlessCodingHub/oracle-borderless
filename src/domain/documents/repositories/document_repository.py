@@ -118,4 +118,11 @@ class DocumentRepository:
             )
             .group_by(DocumentModel.kb_root_page_id)
         )
-        return {(root or ""): count for root, count in result.all()}
+        # Acumula em vez de sobrescrever: o Postgres agrupa NULL e "" como
+        # linhas distintas, e uma comprehension ingênua faria uma pisar na
+        # outra silenciosamente se as duas aparecessem no resultado.
+        counts: dict[str, int] = {}
+        for root, count in result.all():
+            key = root or ""
+            counts[key] = counts.get(key, 0) + count
+        return counts
