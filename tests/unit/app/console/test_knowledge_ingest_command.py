@@ -38,10 +38,13 @@ async def test_refuses_a_page_rejected_by_curation_and_does_not_persist(monkeypa
         "src.app.console.commands.knowledge_ingest_command.AsyncSessionLocal", _boom
     )
 
-    with pytest.raises(ValidationError, match="curadoria"):
+    with pytest.raises(ValidationError, match="curadoria") as exc:
         await command.handle()
 
     assert notion.checked == ["linha-de-tracker"]
+    # Achado 4 (fechamento da Task 4): título de linha de banco pode ser PII —
+    # não pode vazar na mensagem da exceção.
+    assert "Onboarding Control" not in str(exc.value)
 
 
 @pytest.mark.asyncio

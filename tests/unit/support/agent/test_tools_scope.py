@@ -46,3 +46,7 @@ async def test_content_rejected_by_curation_never_reaches_the_model():
 
     assert "conteúdo da página" not in out
     assert "fora do escopo" in out.lower()
+    # Achado 4 (fechamento da Task 4): título de linha de banco pode ser PII
+    # (nome de pessoa) — não pode vazar na recusa, nem por reaproveitamento
+    # descuidado da f-string do ramo aprovado.
+    assert "Bootcamp Web3" not in out

@@ -2,6 +2,8 @@
 de topo uma página descende, subindo a cadeia de `parent` (ADR-0015). Não
 autoriza nada — quem recusa é a curadoria."""
 
+from contextlib import asynccontextmanager
+
 import pytest
 
 from src.support.clients.notion.notion_client import NotionClient
@@ -67,8 +69,6 @@ async def test_get_page_with_provenance_stamps_the_top_level_page_it_descends_fr
     client inteiro e não exercitam esta fiação. Se ela se perder, o comando
     `knowledge:ingest` grava `""` -> `None` de procedência, e a página fica
     invisível à recuperação, removida em silêncio no próximo sync full."""
-    from contextlib import asynccontextmanager
-
     pages = {
         "leaf": {
             "parent": {"type": "page_id", "page_id": "mid"},
@@ -101,3 +101,43 @@ async def test_get_page_with_provenance_stamps_the_top_level_page_it_descends_fr
     assert page.kb_root_page_id == "roota"
     assert page.title == "Leaf Page"
     assert page.is_approved is True
+
+
+@pytest.mark.asyncio
+async def test_get_page_with_provenance_rejects_a_database_row(monkeypatch):
+    """Achado 4: a cadeia real que protege a regra nº 4 na leitura por id —
+    `page["parent"]["type"]` -> `NotionPageRef` -> `_policy.should_ingest` ->
+    `is_approved` — não tinha teste algum: os dois testes de consumidor
+    (`test_tools_scope.py`, `test_knowledge_ingest_command.py`) trocam o
+    client inteiro por um fake que já devolve `is_approved` pronto. Se alguém
+    remover a linha do `ref` em `get_page_with_provenance`, aquela suíte
+    inteira continua verde e o `FetchNotionTool` passa a servir linha de
+    banco (PII)."""
+    pages = {
+        "row": {
+            "parent": {"type": "data_source_id", "data_source_id": "ds1"},
+            "properties": {"title": {"type": "title", "title": [{"plain_text": "Nome da Pessoa"}]}},
+            "url": "https://notion.so/row",
+        },
+    }
+
+    async def call(tool: str, args: dict):
+        if tool == "API-retrieve-a-page":
+            return pages[args["page_id"]]
+        if tool == "API-retrieve-page-markdown":
+            return {"markdown": "PII", "truncated": False}
+        raise AssertionError(f"tool inesperada: {tool}")
+
+    @asynccontextmanager
+    async def fake_session():
+        yield call
+
+    monkeypatch.setattr(
+        "src.support.clients.notion.notion_client.notion_mcp_session",
+        lambda: fake_session(),
+    )
+
+    page = await NotionClient().get_page_with_provenance("row")
+
+    assert page.is_approved is False
+    assert page.kb_root_page_id is None
