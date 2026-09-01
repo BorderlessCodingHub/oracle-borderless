@@ -165,7 +165,8 @@ async def answer_node(state: TurnState, config) -> dict:
     cfg = config["configurable"]
     signals = cfg["signals"]
 
-    messages = state.get("messages") or _answer_messages(state)
+    existing_messages = state.get("messages")
+    messages = existing_messages or _answer_messages(state)
     model = _answer_model(config, enable_tools=cfg.get("enable_tools", True))
     message = await model.ainvoke(messages)
 
@@ -173,8 +174,18 @@ async def answer_node(state: TurnState, config) -> dict:
     signals.outcome = "answer"
 
     kb = [s.citation for s in state.get("knowledge", [])]
+    # Na primeira entrada, state["messages"] está vazio e `messages` acima é o
+    # prompt que acabamos de montar (system + histórico/knowledge/pergunta) —
+    # ele precisa entrar no state agora, porque o reducer add_messages só
+    # ACUMULA. Sem isso, numa re-entrada do tool loop (answer -> tools ->
+    # answer) o state teria só [AIMessage(tool_calls), ToolMessage(...)] e a
+    # próxima chamada ao modelo perderia system prompt, histórico, knowledge
+    # e a pergunta silenciosamente. Na re-entrada (existing_messages já
+    # populado), devolvemos só a resposta nova — o prompt completo já está
+    # no state desde a primeira entrada.
+    new_messages = [message] if existing_messages else [*messages, message]
     return {
-        "messages": [message],
+        "messages": new_messages,
         "citations": kb + list(cfg.get("citations", [])),
         "outcome": "answer",
     }

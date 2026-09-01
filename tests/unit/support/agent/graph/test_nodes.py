@@ -325,3 +325,44 @@ async def test_usage_metadata_fills_the_token_columns():
 
     assert signals.input_tokens == 120
     assert signals.output_tokens == 34
+
+
+@pytest.mark.asyncio
+async def test_the_first_entry_puts_the_full_prompt_in_the_state_alongside_the_reply():
+    """Sem isto, a re-entrada do tool loop (answer -> tools -> answer) só
+    acharia [AIMessage(tool_calls), ToolMessage] no state — o reducer
+    add_messages não reconstrói o que não foi devolvido aqui."""
+    from langchain_core.messages import SystemMessage
+
+    reply = AIMessage(content="resposta final")
+    model = _FakeChatModel(reply)
+    signals = TurnSignals()
+    state = {"question": "o que é PSP?", "history": [], "knowledge": []}
+
+    out = await answer_node(state, _answer_config(signals, model=model))
+
+    assert any(isinstance(m, SystemMessage) for m in out["messages"])
+    assert any("o que é PSP?" in str(m.content) for m in out["messages"])
+    assert out["messages"][-1] is reply
+
+
+@pytest.mark.asyncio
+async def test_a_tool_loop_reentry_reuses_the_state_messages_and_returns_only_the_new_reply():
+    from langchain_core.messages import ToolMessage
+
+    prior = [
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "web_search", "args": {"query": "q"}, "id": "call-1"}],
+        ),
+        ToolMessage(content="resultado da tool", tool_call_id="call-1"),
+    ]
+    reply = AIMessage(content="resposta final")
+    model = _FakeChatModel(reply)
+    signals = TurnSignals()
+    state = {"question": "q", "history": [], "knowledge": [], "messages": prior}
+
+    out = await answer_node(state, _answer_config(signals, model=model))
+
+    assert model.received == prior
+    assert out["messages"] == [reply]
