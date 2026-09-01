@@ -12,6 +12,8 @@ anterior mantinha por convenção, agora explícita na estrutura.
 
 from typing import AsyncIterator
 
+from langchain_core.messages import AIMessage, AIMessageChunk
+
 from src.support.agent.graph.builder import TURN_GRAPH
 from src.support.agent.ports import (
     AgentMessage,
@@ -33,7 +35,22 @@ def _text_of(message) -> str:
 
 
 def _token_chunk(payload) -> AgentStreamChunk | None:
-    message, _metadata = payload
+    """stream_mode="messages" emite TODA mensagem nova encontrada na saída de
+    QUALQUER nó — não só as do modelo de resposta. Isso inclui a `ToolMessage`
+    que o `ToolNode` devolve depois de rodar uma tool (ex.: web_search,
+    fetch_notion_page), com conteúdo bruto embrulhado em `<<TOOL_CONTENT>>`.
+
+    O contrato SSE só transporta texto do modelo de resposta: por isso o
+    filtro dobrado — tipo da mensagem (só AIMessage/AIMessageChunk, nunca
+    ToolMessage) E nó de origem (só "answer", nunca "gate", "tools" etc.).
+    Texto de preâmbulo antes de uma tool call (AIMessage com content textual +
+    tool_calls) continua passando — é paridade com o motor antigo.
+    """
+    message, metadata = payload
+    if not isinstance(message, (AIMessage, AIMessageChunk)):
+        return None
+    if metadata.get("langgraph_node") != "answer":
+        return None
     text = _text_of(message)
     return AgentStreamChunk(type="text", text=text) if text else None
 

@@ -9,7 +9,7 @@ runner mais tarde e reintroduzir um bug intermitente e difícil de rastrear.
 """
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 from src.domain.conversations.services.out_of_scope_reply import (
     OUT_OF_SCOPE_OPENING_PT,
@@ -17,7 +17,7 @@ from src.domain.conversations.services.out_of_scope_reply import (
 )
 from src.domain.shared.value_objects.citation import Citation
 from src.support.agent.graph.builder import build_turn_graph
-from src.support.agent.graph.runner import TurnGraphRunner
+from src.support.agent.graph.runner import TurnGraphRunner, _token_chunk
 from src.support.agent.ports import KnowledgeSnippet, TurnDependencies, TurnSignals
 
 
@@ -176,3 +176,32 @@ async def test_preset_knowledge_skips_the_gate_entirely():
 
     assert search.calls == 0
     assert chunks[-1].citations[0].title == "(injected)"
+
+
+class Test_token_chunk:
+    """stream_mode="messages" emite QUALQUER mensagem nova de QUALQUER nó —
+    inclusive a ToolMessage que o ToolNode devolve depois de rodar uma tool,
+    com conteúdo bruto embrulhado em <<TOOL_CONTENT>>. O contrato SSE só
+    transporta texto do nó de resposta; estes testes travam esse filtro."""
+
+    def test_a_tool_message_never_becomes_a_chunk(self):
+        payload = (
+            ToolMessage(content="<<TOOL_CONTENT>>\nsegredo do tool\n<</TOOL_CONTENT>>", tool_call_id="x"),
+            {"langgraph_node": "tools"},
+        )
+
+        assert _token_chunk(payload) is None
+
+    def test_an_ai_message_from_the_answer_node_becomes_a_chunk(self):
+        payload = (AIMessage(content="olá"), {"langgraph_node": "answer"})
+
+        chunk = _token_chunk(payload)
+
+        assert chunk is not None
+        assert chunk.type == "text"
+        assert chunk.text == "olá"
+
+    def test_an_ai_message_from_another_node_never_becomes_a_chunk(self):
+        payload = (AIMessage(content="x"), {"langgraph_node": "gate"})
+
+        assert _token_chunk(payload) is None
