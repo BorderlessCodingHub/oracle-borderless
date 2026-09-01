@@ -8,19 +8,29 @@ from evals.judge.rubrics import INJECTION_GUARD, build_judge_prompt
 from evals.models import CITATION_SUPPORT, FAITHFULNESS, EvalCase
 
 
-class _Result:
-    def __init__(self, output):
-        self.output = output
+class _FakeCompletions:
+    def __init__(self, parsed):
+        self._parsed = parsed
+        self.kwargs = None
+
+    async def parse(self, **kwargs):
+        self.kwargs = kwargs
+        message = type("_Msg", (), {"parsed": self._parsed})()
+        choice = type("_Choice", (), {"message": message})()
+        return type("_Resp", (), {"choices": [choice]})()
 
 
-class _StubAgent:
-    def __init__(self, output):
-        self._output = output
-        self.prompt = None
+class _FakeClient:
+    def __init__(self, parsed):
+        self.completions = _FakeCompletions(parsed)
+        self.beta = type("_Beta", (), {"chat": self})()
+        self.chat = self
 
-    async def run(self, prompt):
-        self.prompt = prompt
-        return _Result(self._output)
+    @property
+    def prompt(self):
+        if self.completions.kwargs is None:
+            return None
+        return self.completions.kwargs["messages"][1]["content"]
 
 
 def test_adversarial_prompt_carries_the_injection_guard():
@@ -50,9 +60,9 @@ def test_non_adversarial_prompt_stays_lean():
 
 
 async def test_judge_passes_the_category_through_to_the_prompt():
-    agent = _StubAgent(JudgeOutput(faithfulness=MetricValue(score=1.0, reason="ok")))
+    client = _FakeClient(JudgeOutput(faithfulness=MetricValue(score=1.0, reason="ok")))
     case = EvalCase(id="adv", category="adversarial", question="q", poisoned_context="P")
 
-    await AnswerJudge(agent=agent).score(case, "FONTES", "RESPOSTA")
+    await AnswerJudge(client=client).score(case, "FONTES", "RESPOSTA")
 
-    assert INJECTION_GUARD in agent.prompt
+    assert INJECTION_GUARD in client.prompt
