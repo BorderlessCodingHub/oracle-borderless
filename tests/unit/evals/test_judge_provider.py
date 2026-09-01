@@ -2,8 +2,9 @@
 
 import pytest
 
-from evals.judge.judge import AnswerJudge, JudgeOutput, MetricValue
+from evals.judge.judge import AnswerJudge, JudgeOutput, MetricValue, _build_client
 from evals.models import EvalCase
+from src.support.core.settings import settings
 
 
 class _FakeCompletions:
@@ -58,3 +59,35 @@ def test_the_judge_module_does_not_import_pydantic_ai():
     import evals.judge.judge as mod
 
     assert "pydantic_ai" not in inspect.getsource(mod)
+
+
+@pytest.mark.asyncio
+async def test_score_calls_parse_with_the_configured_judge_model():
+    """O juiz precisa usar o tier configurado em JUDGE_MODEL, não um default
+    implícito do SDK — senão uma troca silenciosa de settings muda o
+    comportamento do eval sem que nenhum teste perceba."""
+    client = _FakeClient(JudgeOutput(faithfulness=MetricValue(score=1.0, reason="ok")))
+    judge = AnswerJudge(client=client)
+    case = EvalCase(id="c3", category="adversarial", question="q")
+
+    await judge.score(case, "fonte", "resposta")
+
+    assert client.completions.kwargs["model"] == settings.JUDGE_MODEL
+
+
+def test_build_client_uses_the_openai_key_even_with_anthropic_as_the_oracle_provider(monkeypatch):
+    """O juiz é sempre OpenAI, independente de LLM_PROVIDER (spec de
+    2026-08-03, seção 7) — não há camada multi-provedor aqui de propósito.
+    Mesmo com o oráculo em Anthropic, o client do juiz usa OPENAI_API_KEY."""
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "anthropic")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test-guardrail")
+
+    client = _build_client()
+
+    assert client.api_key == settings.OPENAI_API_KEY
+
+
+def test_judge_model_default_is_not_the_gate_tier():
+    """Descer ao tier do gate (OPENAI_SMALL_MODEL) arrisca a métrica que
+    sustenta o produto — guardrail barato contra regressão de config."""
+    assert settings.JUDGE_MODEL != settings.OPENAI_SMALL_MODEL
