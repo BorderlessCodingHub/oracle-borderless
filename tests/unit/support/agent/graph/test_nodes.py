@@ -234,3 +234,94 @@ async def test_a_failing_distance_probe_never_costs_the_user_the_refusal():
 
     assert out["outcome"] == "refusal"
     assert signals.retrieval_best_distance is None
+
+
+# --- answer --------------------------------------------------------------
+
+from langchain_core.messages import AIMessage  # noqa: E402
+
+from src.support.agent.graph.nodes import answer_node  # noqa: E402
+
+
+class _FakeChatModel:
+    def __init__(self, message=None):
+        self._message = message or AIMessage(content="resposta do oráculo")
+        self.received = None
+
+    def bind_tools(self, tools):
+        return self
+
+    async def ainvoke(self, messages):
+        self.received = messages
+        return self._message
+
+
+def _answer_config(signals, deps=None, model=None, citations=None):
+    return {
+        "configurable": {
+            "signals": signals,
+            "deps": deps or _deps(),
+            "answer_model": model or _FakeChatModel(),
+            "citations": citations if citations is not None else [],
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_answer_node_marks_the_turn_as_answered():
+    signals = TurnSignals()
+    out = await answer_node({"question": "q", "history": [], "knowledge": []}, _answer_config(signals))
+
+    assert out["outcome"] == "answer"
+    assert signals.outcome == "answer"
+
+
+@pytest.mark.asyncio
+async def test_retrieved_knowledge_reaches_the_prompt_wrapped_as_untrusted():
+    model = _FakeChatModel()
+    signals = TurnSignals()
+    state = {"question": "o que é PSP?", "history": [], "knowledge": [_snippet("PSP é um programa")]}
+
+    await answer_node(state, _answer_config(signals, model=model))
+
+    prompt = "\n".join(str(m) for m in model.received)
+    assert "PSP é um programa" in prompt
+    assert "<<TOOL_CONTENT>>" in prompt
+
+
+@pytest.mark.asyncio
+async def test_citations_combine_the_knowledge_base_and_the_web():
+    web = [Citation(source_type="web", title="W", url="https://w", snippet="s")]
+    signals = TurnSignals()
+    state = {"question": "q", "history": [], "knowledge": [_snippet()]}
+
+    out = await answer_node(state, _answer_config(signals, citations=web))
+
+    kinds = sorted(c.source_type for c in out["citations"])
+    assert kinds == ["notion", "web"]
+
+
+@pytest.mark.asyncio
+async def test_missing_usage_metadata_leaves_the_trace_without_tokens():
+    """Observabilidade nunca derruba um turno."""
+    signals = TurnSignals()
+    model = _FakeChatModel(AIMessage(content="ok"))  # sem usage_metadata
+
+    await answer_node({"question": "q", "history": [], "knowledge": []}, _answer_config(signals, model=model))
+
+    assert signals.input_tokens is None
+    assert signals.output_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_usage_metadata_fills_the_token_columns():
+    signals = TurnSignals()
+    message = AIMessage(content="ok", usage_metadata={"input_tokens": 120, "output_tokens": 34, "total_tokens": 154})
+
+    await answer_node(
+        {"question": "q", "history": [], "knowledge": []},
+        _answer_config(signals, model=_FakeChatModel(message)),
+    )
+
+    assert signals.input_tokens == 120
+    assert signals.output_tokens == 34

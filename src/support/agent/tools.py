@@ -2,10 +2,14 @@
 não-confiável). web_search e fetch_notion_page são HTTP (não tocam o banco), então
 rodam com segurança durante o streaming."""
 
+import logging
+
 from src.domain.shared.value_objects.citation import Citation
 from src.support.agent.ports import KnowledgeSnippet
 from src.support.clients.notion.notion_client import NotionClient
 from src.support.clients.tavily.tavily_client import TavilyClient
+
+logger = logging.getLogger(__name__)
 
 _OPEN = "<<TOOL_CONTENT>>"
 _CLOSE = "<</TOOL_CONTENT>>"
@@ -58,3 +62,38 @@ class FetchNotionTool:
                 "(página fora do escopo da base de conhecimento — não disponível)"
             )
         return wrap_tool_content(f"[{page.title} — {page.url}]\n{page.content}")
+
+
+def build_tools() -> list:
+    """As duas tools no formato LangChain.
+
+    O `config` é injetado pelo runtime — o modelo não o vê. É por ele que vêm o
+    coletor de citações e o `signals` deste turno; nada de estado global.
+    """
+    from langchain_core.runnables import RunnableConfig
+    from langchain_core.tools import tool
+
+    @tool
+    async def web_search(query: str, config: RunnableConfig) -> str:
+        """Busca informação pública na web. NÃO é fallback para lacunas da base
+        interna — quando o contexto fornecido não cobre a pergunta, a resposta é
+        a recusa padrão, não uma busca web."""
+        cfg = config["configurable"]
+        cfg["signals"].tool_calls += 1
+        try:
+            return await WebSearchTool(tavily=TavilyClient(), collected=cfg["citations"]).run(query)
+        except Exception as exc:  # falha de tool não derruba o streaming
+            logger.exception("web_search tool failed")
+            return wrap_tool_content(f"(falha ao buscar na web: {exc})")
+
+    @tool
+    async def fetch_notion_page(page_id: str, config: RunnableConfig) -> str:
+        """Busca o conteúdo completo/atualizado de uma página do Notion."""
+        config["configurable"]["signals"].tool_calls += 1
+        try:
+            return await FetchNotionTool(notion=NotionClient()).run(page_id)
+        except Exception as exc:  # falha de tool não derruba o streaming
+            logger.exception("fetch_notion_page tool failed")
+            return wrap_tool_content(f"(falha ao buscar página do Notion: {exc})")
+
+    return [web_search, fetch_notion_page]

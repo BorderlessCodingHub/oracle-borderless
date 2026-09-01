@@ -6,10 +6,13 @@ import asyncio
 import logging
 import time
 
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from src.support.agent.graph.state import TurnState
-from src.support.agent.models import build_small_model
+from src.support.agent.models import build_chat_model, build_small_model
+from src.support.agent.prompts import SYSTEM_PROMPT
+from src.support.agent.tools import build_tools, format_knowledge
 from src.support.core.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -126,3 +129,52 @@ async def _nearest_or_none(deps, query: str) -> float | None:
     except Exception:
         logger.warning("falha ao medir a distância do vizinho mais próximo", exc_info=True)
         return None
+
+
+def _answer_messages(state: TurnState) -> list:
+    """Mesmo prompt de sempre: histórico, contexto embrulhado, pergunta."""
+    parts = [f"{m.role}: {m.content}" for m in state.get("history", [])]
+    parts.append("Contexto recuperado da base de conhecimento:")
+    parts.append(format_knowledge(state.get("knowledge", [])))
+    parts.append(f"Pergunta do usuário: {state['question']}")
+    return [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content="\n\n".join(parts))]
+
+
+def _answer_model(config, enable_tools: bool = True):
+    injected = config.get("configurable", {}).get("answer_model")
+    model = injected or build_chat_model()
+    return model.bind_tools(build_tools()) if enable_tools else model
+
+
+def _fill_usage(signals, message: AIMessage) -> None:
+    """usage_metadata é o campo estável do LangChain, mas em streaming depende de
+    flag por provider. Sem ele, o trace fica sem tokens — nunca derruba o turno."""
+    try:
+        usage = getattr(message, "usage_metadata", None) or {}
+        if usage.get("input_tokens") is not None:
+            signals.input_tokens = int(usage["input_tokens"])
+        if usage.get("output_tokens") is not None:
+            signals.output_tokens = int(usage["output_tokens"])
+    except Exception:  # pragma: no cover - observabilidade não derruba turno
+        logger.warning("não foi possível ler o usage do run", exc_info=True)
+
+
+async def answer_node(state: TurnState, config) -> dict:
+    """Resposta do oráculo. Os tokens saem daqui pelo stream_mode="messages" do
+    LangGraph; este nó devolve a mensagem completa para o tool loop."""
+    cfg = config["configurable"]
+    signals = cfg["signals"]
+
+    messages = state.get("messages") or _answer_messages(state)
+    model = _answer_model(config, enable_tools=cfg.get("enable_tools", True))
+    message = await model.ainvoke(messages)
+
+    _fill_usage(signals, message)
+    signals.outcome = "answer"
+
+    kb = [s.citation for s in state.get("knowledge", [])]
+    return {
+        "messages": [message],
+        "citations": kb + list(cfg.get("citations", [])),
+        "outcome": "answer",
+    }
