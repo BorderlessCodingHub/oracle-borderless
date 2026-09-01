@@ -77,3 +77,52 @@ async def gate_node(state: TurnState, config) -> dict:
     signals.gate_search_query = result["search_query"] or None
     signals.gate_degraded = result["degraded"]
     return result
+
+
+async def retrieve_node(state: TurnState, config) -> dict:
+    """RAG clássico: top-k no pgvector sobre a query que o gate reescreveu.
+
+    Roda com a sessão de banco viva porque o runner dirige o grafo até aqui
+    dentro do escopo do request — ver spec, seção 5. Falha aqui sobe: um turno
+    sem contexto quando deveria ter é pior que um erro visível.
+    """
+    signals = config["configurable"]["signals"]
+    deps = config["configurable"]["deps"]
+
+    signals.retrieval_ran = True
+    signals.retrieval_top_k = settings.RAG_TOP_K
+    signals.retrieval_threshold = settings.RAG_MAX_DISTANCE
+
+    started = time.monotonic()
+    knowledge = await deps.search.execute(state["search_query"])
+    signals.retrieval_ms = int((time.monotonic() - started) * 1000)
+    signals.retrieval_kept = len(knowledge)
+    return {"knowledge": knowledge}
+
+
+async def refuse_node(state: TurnState, config) -> dict:
+    """Recusa padrão: nada passou do limiar. Determinística, sem LLM."""
+    signals = config["configurable"]["signals"]
+    deps = config["configurable"]["deps"]
+
+    signals.retrieval_best_distance = await _nearest_or_none(deps, state.get("search_query", ""))
+    signals.outcome = "refusal"
+
+    sections = await deps.sections.execute()
+    return {
+        "answer": deps.refusal(sections, state["question"]),
+        "citations": [],
+        "outcome": "refusal",
+    }
+
+
+async def _nearest_or_none(deps, query: str) -> float | None:
+    """Só no caminho de recusa, e só para o trace. Falha aqui não pode custar a
+    recusa ao usuário."""
+    if deps.nearest is None or not query:
+        return None
+    try:
+        return await deps.nearest.execute(query)
+    except Exception:
+        logger.warning("falha ao medir a distância do vizinho mais próximo", exc_info=True)
+        return None
