@@ -8,8 +8,25 @@ from evals.models import (
     Turn,
 )
 from evals.runner import run_case
-from src.support.agent.ports import AgentStreamChunk
-from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
+from src.support.agent.ports import AgentStreamChunk, RetrievalDecision
+
+
+class FakeRetrievalGate:
+    """Gate fake local ao harness de eval — `evals/runner.py` ainda usa a
+    interface antiga (`gate.decide`), fora do escopo do grafo (ADR-0016,
+    Task 11). Substitui `tests/fakes/fake_retrieval_gate.py`, removido junto
+    com `AnswerQuestionAction.gate` na Task 10."""
+
+    def __init__(self, retrieve: bool = True, search_query: str | None = None, degraded: bool = False) -> None:
+        self._retrieve = retrieve
+        self._search_query = search_query
+        self._degraded = degraded
+
+    async def decide(self, question, history) -> RetrievalDecision:
+        if not self._retrieve:
+            return RetrievalDecision(retrieve=False, search_query="")
+        query = self._search_query if self._search_query is not None else question
+        return RetrievalDecision(retrieve=True, search_query=query, degraded=self._degraded)
 
 
 class _RecordingSearch:

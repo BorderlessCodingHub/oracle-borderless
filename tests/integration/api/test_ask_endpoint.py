@@ -1,10 +1,11 @@
-from typing import AsyncIterator
 from uuid import UUID
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
+
+from tests.fakes.fake_turn_graph import FakeTurnGraph
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -15,40 +16,20 @@ async def _dispose_db_engine_between_tests():
     await engine.dispose()
 
 
-class FailingOracleEngine:
-    async def stream_answer(self, question, history, knowledge=None, metrics=None) -> AsyncIterator:
-        from src.support.agent.ports import AgentStreamChunk
+class _FailingTurnGraph:
+    """Emite um token e quebra no meio do stream — para o teste de erro."""
 
-        yield AgentStreamChunk(type="text", text="ola ")
-        raise RuntimeError("boom: engine caiu no meio do stream")
+    async def start(self, question, history, deps=None, signals=None, knowledge=None, extra_config=None):
+        if signals is not None:
+            signals.outcome = "answer"
 
+        async def _stream():
+            from src.support.agent.ports import AgentStreamChunk
 
-class _FakeSearchAction:
-    """Substitui `SearchKnowledgeBaseAction` real: devolve 1 trecho não-vazio,
-    para que `retrieve=True` chegue de fato ao engine (sem isso a busca real
-    contra a base de teste, sem documentos no escopo, sempre voltava vazia —
-    o que agora aciona a recusa em vez do engine)."""
+            yield AgentStreamChunk(type="text", text="ola ")
+            raise RuntimeError("boom: engine caiu no meio do stream")
 
-    def __init__(self, *a, **kw):
-        pass
-
-    async def execute(self, query, top_k=None):
-        from src.domain.shared.value_objects.citation import Citation
-        from src.support.agent.ports import KnowledgeSnippet
-
-        return [KnowledgeSnippet("trecho", Citation("notion", "Doc", "https://n/a", "s", "pid"))]
-
-
-class _EmptySearchAction:
-    """Substitui `SearchKnowledgeBaseAction` real por uma busca que sempre volta
-    vazia — para testar deliberadamente o caminho de recusa (`retrieve=True` +
-    nada encontrado), fim a fim, via HTTP."""
-
-    def __init__(self, *a, **kw):
-        pass
-
-    async def execute(self, query, top_k=None):
-        return []
+        return _stream()
 
 
 def _parse_conversation_id(body: str) -> str:
@@ -63,17 +44,28 @@ def _parse_conversation_id(body: str) -> str:
     raise AssertionError("evento 'conversation' não emitido")
 
 
+def _concat_tokens(body: str) -> str:
+    """`FakeTurnGraph` emite um `event: token` por palavra — reconstrói o texto
+    completo para comparar com a frase esperada."""
+    import json
+
+    text = ""
+    for b in body.split("\n\n"):
+        if b.startswith("event: token"):
+            data_line = next(l for l in b.split("\n") if l.startswith("data:"))
+            text += json.loads(data_line[5:].strip())["text"]
+    return text
+
+
 @pytest.mark.asyncio
 async def test_ask_streams_and_persists_both_turns(monkeypatch):
     import src.app.api.controllers.conversation_controller as ctrl
     from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
-    from tests.fakes.fake_oracle_engine import FakeOracleEngine
-    from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
 
-    monkeypatch.setattr(ctrl, "get_oracle_engine", lambda: FakeOracleEngine(answer="resposta de teste"))
+    monkeypatch.setattr(
+        ctrl, "get_turn_graph_runner", lambda: FakeTurnGraph(answer="resposta de teste")
+    )
     monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
-    monkeypatch.setattr(ctrl, "get_retrieval_gate", lambda: FakeRetrievalGate(retrieve=True))
-    monkeypatch.setattr(ctrl, "SearchKnowledgeBaseAction", _FakeSearchAction)
 
     from main import app
 
@@ -113,12 +105,9 @@ async def test_ask_streams_and_persists_both_turns(monkeypatch):
 async def test_ask_failure_emits_error_and_does_not_persist_assistant(monkeypatch):
     import src.app.api.controllers.conversation_controller as ctrl
     from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
-    from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
 
-    monkeypatch.setattr(ctrl, "get_oracle_engine", lambda: FailingOracleEngine())
+    monkeypatch.setattr(ctrl, "get_turn_graph_runner", lambda: _FailingTurnGraph())
     monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
-    monkeypatch.setattr(ctrl, "get_retrieval_gate", lambda: FakeRetrievalGate(retrieve=True))
-    monkeypatch.setattr(ctrl, "SearchKnowledgeBaseAction", _FakeSearchAction)
 
     from main import app
 
@@ -147,17 +136,21 @@ async def test_ask_failure_emits_error_and_does_not_persist_assistant(monkeypatc
 
 @pytest.mark.asyncio
 async def test_ask_streams_refusal_and_persists_both_turns_when_nothing_found(monkeypatch):
-    """Fim a fim: gate pede busca, busca não acha nada — recusa determinística
-    pela SSE, sem chamar o engine, e ainda assim persistida como qualquer resposta."""
+    """Fim a fim: o grafo decide recusa (gate + retrieval + limiar já rodaram
+    dentro dele) — o SSE carrega a recusa determinística, sem tokens de motor,
+    e ainda assim é persistida como qualquer resposta."""
     import src.app.api.controllers.conversation_controller as ctrl
     from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
-    from tests.fakes.fake_oracle_engine import FakeOracleEngine
-    from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
 
-    monkeypatch.setattr(ctrl, "get_oracle_engine", lambda: FakeOracleEngine(answer="resposta de teste"))
+    monkeypatch.setattr(
+        ctrl,
+        "get_turn_graph_runner",
+        lambda: FakeTurnGraph(
+            answer="Não encontrei informações sobre isso na base de conhecimento.",
+            outcome="refusal",
+        ),
+    )
     monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
-    monkeypatch.setattr(ctrl, "get_retrieval_gate", lambda: FakeRetrievalGate(retrieve=True))
-    monkeypatch.setattr(ctrl, "SearchKnowledgeBaseAction", _EmptySearchAction)
 
     from main import app
 
@@ -171,10 +164,9 @@ async def test_ask_streams_refusal_and_persists_both_turns_when_nothing_found(mo
         assert "text/event-stream" in resp.headers["content-type"]
         body = resp.text
         assert "event: conversation" in body
-        assert "Não encontrei informações sobre isso na base de conhecimento." in body
+        assert "Não encontrei informações sobre isso na base de conhecimento." in _concat_tokens(body)
         assert 'event: sources\ndata: {"citations": []}' in body
         assert "event: done" in body
-        assert "resposta de teste" not in body  # o engine nunca foi chamado
 
     conversation_id = UUID(_parse_conversation_id(body))
 

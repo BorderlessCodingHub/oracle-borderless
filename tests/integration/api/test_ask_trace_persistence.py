@@ -13,6 +13,8 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
+from tests.fakes.fake_turn_graph import FakeTurnGraph
+
 
 @pytest_asyncio.fixture(autouse=True)
 async def _dispose_db_engine_between_tests():
@@ -22,34 +24,20 @@ async def _dispose_db_engine_between_tests():
     await engine.dispose()
 
 
-class _FakeSearchAction:
-    def __init__(self, *a, **kw):
-        pass
+class _FailingTurnGraph:
+    """Emite um token e quebra no meio do stream — para o teste de erro."""
 
-    async def execute(self, query, top_k=None):
-        from src.domain.shared.value_objects.citation import Citation
-        from src.support.agent.ports import KnowledgeSnippet
+    async def start(self, question, history, deps=None, signals=None, knowledge=None, extra_config=None):
+        if signals is not None:
+            signals.outcome = "answer"
 
-        return [KnowledgeSnippet("trecho", Citation("notion", "Doc", "https://n/a", "s", "pid"))]
+        async def _stream():
+            from src.support.agent.ports import AgentStreamChunk
 
+            yield AgentStreamChunk(type="text", text="ola ")
+            raise RuntimeError("boom: engine caiu no meio do stream")
 
-class _FailingEngine:
-    async def stream_answer(self, question, history, knowledge=None, metrics=None):
-        from src.support.agent.ports import AgentStreamChunk
-
-        yield AgentStreamChunk(type="text", text="ola ")
-        raise RuntimeError("boom: engine caiu no meio do stream")
-
-
-class _EmptySearchAction:
-    """Sempre volta vazia — aciona a recusa determinística (gate pede busca,
-    nada encontrado), o caminho em que nenhum motor roda."""
-
-    def __init__(self, *a, **kw):
-        pass
-
-    async def execute(self, query, top_k=None):
-        return []
+        return _stream()
 
 
 def _parse_conversation_id(body: str) -> str:
@@ -62,18 +50,27 @@ def _parse_conversation_id(body: str) -> str:
     raise AssertionError("evento 'conversation' não emitido")
 
 
-def _patch_controller(monkeypatch, engine=None):
+def _concat_tokens(body: str) -> str:
+    """`FakeTurnGraph` emite um `event: token` por palavra — reconstrói o texto
+    completo para comparar com a frase esperada."""
+    import json
+
+    text = ""
+    for b in body.split("\n\n"):
+        if b.startswith("event: token"):
+            data_line = next(l for l in b.split("\n") if l.startswith("data:"))
+            text += json.loads(data_line[5:].strip())["text"]
+    return text
+
+
+def _patch_controller(monkeypatch, graph=None):
     import src.app.api.controllers.conversation_controller as ctrl
     from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
-    from tests.fakes.fake_oracle_engine import FakeOracleEngine
-    from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
 
     monkeypatch.setattr(
-        ctrl, "get_oracle_engine", lambda: engine or FakeOracleEngine(answer="resposta de teste")
+        ctrl, "get_turn_graph_runner", lambda: graph or FakeTurnGraph(answer="resposta de teste")
     )
     monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
-    monkeypatch.setattr(ctrl, "get_retrieval_gate", lambda: FakeRetrievalGate(retrieve=True))
-    monkeypatch.setattr(ctrl, "SearchKnowledgeBaseAction", _FakeSearchAction)
 
 
 async def _fetch_trace(conversation_id: UUID) -> dict:
@@ -100,18 +97,18 @@ async def _fetch_trace(conversation_id: UUID) -> dict:
 
 @pytest.mark.asyncio
 async def test_trace_row_exists_after_a_successful_ask(monkeypatch):
-    """A linha do trace carrega o que o motor de fato mediu — não só o
-    esqueleto da Action. `FakeOracleEngine` preenche `metrics` com valores
-    não-triviais (2, 123, 45) para que a asserção falhe se a cadeia
-    engine → `_absorb_engine_metrics` → coluna se romper em algum ponto
-    (ver correção pós-revisão: apagar `_absorb_engine_metrics(draft)` deixava
-    isso passar antes, porque nada distinguia "absorvido" de "default zero")."""
-    from tests.fakes.fake_oracle_engine import FakeOracleEngine
-
-    engine = FakeOracleEngine(
-        answer="resposta de teste", tool_calls=2, input_tokens=123, output_tokens=45
+    """A linha do trace carrega o que o grafo de fato escreveu em `signals` —
+    não só o esqueleto da Action. `FakeTurnGraph` preenche `signals` com
+    valores não-triviais (2, 123, 45) para que a asserção falhe se a cadeia
+    grafo → `_absorb_engine_metrics` → coluna se romper em algum ponto."""
+    graph = FakeTurnGraph(
+        answer="resposta de teste",
+        retrieval_kept=1,
+        tool_calls=2,
+        input_tokens=123,
+        output_tokens=45,
     )
-    _patch_controller(monkeypatch, engine=engine)
+    _patch_controller(monkeypatch, graph=graph)
     from main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -130,14 +127,15 @@ async def test_trace_row_exists_after_a_successful_ask(monkeypatch):
     assert trace["tool_calls"] == 2
     assert trace["input_tokens"] == 123
     assert trace["output_tokens"] == 45
-    assert trace["events"][0]["step"] == "turn_start"
-    assert trace["events"][-1]["step"] == "turn_end"
+    # a Action não registra mais eventos (gate/retrieval/recusa viraram nós do
+    # grafo) — só sobra o que o controller grava: primeiro token e fim do turno.
+    assert [e["step"] for e in trace["events"]] == ["first_token", "turn_end"]
 
 
 @pytest.mark.asyncio
 async def test_failed_turn_is_traced_even_though_the_answer_is_not_persisted(monkeypatch):
     """Invariante da spec: turno que quebrou é o que mais interessa no trace."""
-    _patch_controller(monkeypatch, engine=_FailingEngine())
+    _patch_controller(monkeypatch, graph=_FailingTurnGraph())
     from main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -167,22 +165,17 @@ async def test_failed_turn_is_traced_even_though_the_answer_is_not_persisted(mon
 
 @pytest.mark.asyncio
 async def test_refusal_leaves_engine_ms_and_first_token_ms_null(monkeypatch):
-    """Correção pós-revisão: no caminho de recusa nenhum motor roda, então
+    """Correção pós-revisão: no caminho de recusa nenhum modelo roda, então
     `engine_ms`/`first_token_ms` não podem carregar o tempo de emitir uma
     string canônica — isso envenenaria a média de latência do motor que a
     página de ops mostra. Ambos devem ficar `None`."""
-    import src.app.api.controllers.conversation_controller as ctrl
-    from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
-    from tests.fakes.fake_oracle_engine import FakeOracleEngine
-    from tests.fakes.fake_retrieval_gate import FakeRetrievalGate
-
-    monkeypatch.setattr(
-        ctrl, "get_oracle_engine", lambda: FakeOracleEngine(answer="nunca deveria aparecer")
+    _patch_controller(
+        monkeypatch,
+        graph=FakeTurnGraph(
+            answer="Não encontrei informações sobre isso na base de conhecimento.",
+            outcome="refusal",
+        ),
     )
-    monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
-    monkeypatch.setattr(ctrl, "get_retrieval_gate", lambda: FakeRetrievalGate(retrieve=True))
-    monkeypatch.setattr(ctrl, "SearchKnowledgeBaseAction", _EmptySearchAction)
-
     from main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -190,7 +183,7 @@ async def test_refusal_leaves_engine_ms_and_first_token_ms_null(monkeypatch):
             "/conversations/ask", json={"question": "qual a capital da Austrália?"}
         )
         body = resp.text
-        assert "nunca deveria aparecer" not in body  # confirma que o engine não rodou
+        assert "Não encontrei informações sobre isso na base de conhecimento." in _concat_tokens(body)
 
     trace = await _fetch_trace(UUID(_parse_conversation_id(body)))
     assert trace["outcome"] == "refusal"

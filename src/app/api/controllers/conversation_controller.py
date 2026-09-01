@@ -21,8 +21,7 @@ from src.domain.conversations.actions.list_conversations_action import ListConve
 from src.domain.documents.actions.search_knowledge_base_action import SearchKnowledgeBaseAction
 from src.domain.observability.actions.record_turn_trace_action import RecordTurnTraceAction
 from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
-from src.support.agent.oracle_engine import get_oracle_engine
-from src.support.agent.retrieval_gate import get_retrieval_gate
+from src.support.agent.graph import get_turn_graph_runner
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
 from src.support.core.context import CurrentAsyncSessionContext
 from src.support.core.session_scope import run_in_async_session
@@ -45,9 +44,7 @@ class ConversationController:
     async def ask(request: Request, data: AskQuestionRequest) -> StreamingResponse:
         user_email = request.headers.get(_USER_EMAIL_HEADER)
         search = SearchKnowledgeBaseAction(embeddings=get_embeddings_client())
-        action = AnswerQuestionAction(
-            engine=get_oracle_engine(), search=search, gate=get_retrieval_gate()
-        )
+        action = AnswerQuestionAction(graph=get_turn_graph_runner(), search=search)
 
         # Conversa + user message são gravadas aqui (sessão do request viva).
         conversation_id, stream, draft = await action.execute(
@@ -63,12 +60,12 @@ class ConversationController:
             try:
                 async for chunk in stream:
                     if chunk.type == "text":
-                        # Só há "latência do motor" quando um motor de fato rodou
-                        # (draft.engine_metrics). No caminho de recusa, o "texto"
-                        # é uma string canônica emitida na hora — contá-lo aqui
+                        # Só há "latência do motor" quando um modelo de fato rodou
+                        # (ver `_engine_ran`). No caminho de recusa, o "texto" é
+                        # uma string canônica emitida na hora — contá-lo aqui
                         # misturaria as duas coisas na média que a página de ops
                         # mostra (ver correção pós-revisão).
-                        if draft.engine_metrics is not None and draft.first_token_ms is None:
+                        if _engine_ran(draft) and draft.first_token_ms is None:
                             draft.first_token_ms = int(
                                 (time.monotonic() - engine_started) * 1000
                             )
@@ -90,7 +87,7 @@ class ConversationController:
                 draft.error = f"{type(exc).__name__}: {exc}"[:512]
                 yield _sse("error", {"message": "erro ao gerar a resposta"})
 
-            if draft.engine_metrics is not None:
+            if _engine_ran(draft):
                 draft.engine_ms = int((time.monotonic() - engine_started) * 1000)
             draft.citations_count = len(captured["citations"])
             _absorb_engine_metrics(draft)
@@ -127,13 +124,34 @@ class ConversationController:
         return ConversationDetailResponse.from_entity(conversation, messages)
 
 
+def _engine_ran(draft: TurnTraceDraft) -> bool:
+    """Só há "latência do motor" quando um modelo de fato rodou. A recusa é
+    texto canônico emitido na hora; contá-la aqui misturaria as duas coisas na
+    média que a página de ops mostra."""
+    return draft.signals is not None and draft.signals.outcome == "answer"
+
+
 def _absorb_engine_metrics(draft: TurnTraceDraft) -> None:
-    if draft.engine_metrics is None:
-        return  # caminho de recusa: não houve engine
-    metrics = draft.engine_metrics
-    draft.tool_calls = metrics.tool_calls
-    draft.input_tokens = metrics.input_tokens
-    draft.output_tokens = metrics.output_tokens
+    s = draft.signals
+    if s is None:
+        return
+    draft.gate_retrieve = s.gate_retrieve
+    draft.gate_search_query = s.gate_search_query
+    draft.gate_degraded = s.gate_degraded
+    draft.gate_ms = s.gate_ms
+    draft.retrieval_ran = s.retrieval_ran
+    draft.retrieval_top_k = s.retrieval_top_k
+    draft.retrieval_kept = s.retrieval_kept
+    draft.retrieval_ms = s.retrieval_ms
+    draft.retrieval_best_distance = s.retrieval_best_distance
+    draft.retrieval_threshold = s.retrieval_threshold
+    draft.tool_calls = s.tool_calls
+    draft.input_tokens = s.input_tokens
+    draft.output_tokens = s.output_tokens
+    # `outcome` só vem do signals se o controller não o marcou como "error":
+    # um turno que quebrou no meio do stream continua sendo erro.
+    if draft.outcome != "error":
+        draft.outcome = s.outcome
 
 
 async def _persist_turn(

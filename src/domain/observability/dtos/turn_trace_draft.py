@@ -63,7 +63,7 @@ class TurnTraceDraft:
     output_tokens: int | None = None
     error: str | None = None
     message_id: UUID | None = None
-    engine_metrics: object | None = None  # TurnMetrics preenchido pelo engine (Task 5)
+    signals: object | None = None  # TurnSignals preenchido pelos nós do grafo
 
     events: list[dict] = field(default_factory=list)
     _t0: float = field(init=False, default=0.0, repr=False)
