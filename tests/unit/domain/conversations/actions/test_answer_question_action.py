@@ -10,7 +10,10 @@ from uuid import uuid4
 
 import pytest
 
-from src.domain.conversations.actions.answer_question_action import AnswerQuestionAction
+from src.domain.conversations.actions.answer_question_action import (
+    AnswerQuestionAction,
+    _NearestDistance,
+)
 from src.domain.conversations.entities.conversation import Conversation
 from src.domain.conversations.entities.message import Message
 from src.domain.shared.value_objects.citation import Citation
@@ -183,3 +186,104 @@ async def test_signals_is_the_same_object_the_graph_receives():
     assert draft.signals.tool_calls == 2
     assert draft.signals.input_tokens == 123
     assert draft.signals.output_tokens == 45
+
+
+class _EmbeddingsSpy:
+    """Registra a query recebida e devolve um vetor sentinela — permite provar
+    que `_NearestDistance` encadeia embed_query -> nearest_distance NA ORDEM
+    certa e com os argumentos certos, não que o `except` do caminho de recusa
+    engoliu uma falha e devolveu None por acidente."""
+
+    SENTINEL_VECTOR = [0.11, 0.22, 0.33]
+
+    def __init__(self):
+        self.received_query = None
+
+    async def embed_query(self, query):
+        self.received_query = query
+        return self.SENTINEL_VECTOR
+
+
+class _SearchWithEmbeddings:
+    def __init__(self, embeddings):
+        self.embeddings = embeddings
+
+
+class _ChunksSpy:
+    """Registra o vetor recebido e devolve uma distância não-trivial — se o
+    adapter passasse a query crua (ou nada) em vez do vetor de
+    `embed_query`, este fake pegaria isso na asserção do vetor recebido."""
+
+    def __init__(self, nearest: float | None = 0.61):
+        self._nearest = nearest
+        self.received_vector = None
+
+    async def nearest_distance(self, embedding):
+        self.received_vector = embedding
+        return self._nearest
+
+
+@pytest.mark.asyncio
+async def test_nearest_distance_adapter_chains_embed_query_then_nearest_distance():
+    """Guardrail do caminho de recusa: `_NearestDistance.execute()` precisa
+    encadear `search.embeddings.embed_query(query)` -> `chunks.nearest_distance
+    (vector)`, NESSA ORDEM, propagando o vetor exato — não a query crua, não um
+    vetor vazio. `refuse_node` engole qualquer exceção deste adapter de
+    propósito (observabilidade não pode custar a recusa), então um adapter
+    quebrado devolveria `None` silenciosamente e nenhum teste indireto pegaria
+    isso — daí testar o adapter isolado, sem depender do grafo."""
+    embeddings = _EmbeddingsSpy()
+    search = _SearchWithEmbeddings(embeddings)
+    chunks = _ChunksSpy(nearest=0.61)
+    adapter = _NearestDistance(search, chunks)
+
+    distance = await adapter.execute("renovação de PSP")
+
+    assert embeddings.received_query == "renovação de PSP"
+    assert chunks.received_vector == _EmbeddingsSpy.SENTINEL_VECTOR
+    assert distance == 0.61
+
+
+@pytest.mark.asyncio
+async def test_nearest_distance_adapter_returns_none_when_chunks_repo_says_so():
+    """Sem chunk nenhum na base, `nearest_distance` devolve `None` de verdade —
+    o adapter só repassa, não mascara `None` genuíno como falha nem vice-versa."""
+    embeddings = _EmbeddingsSpy()
+    search = _SearchWithEmbeddings(embeddings)
+    chunks = _ChunksSpy(nearest=None)
+    adapter = _NearestDistance(search, chunks)
+
+    distance = await adapter.execute("pergunta qualquer")
+
+    assert distance is None
+
+
+class _DepsCapturingGraph(FakeTurnGraph):
+    """`FakeTurnGraph` não guarda `deps` (não precisa, para o resto da suíte) —
+    este subclasse local captura só para provar que a Action monta
+    `TurnDependencies.nearest` com um adapter de verdade, não `None`."""
+
+    def __init__(self):
+        super().__init__()
+        self.received_deps = None
+
+    async def start(self, question, history, deps=None, signals=None, knowledge=None, extra_config=None):
+        self.received_deps = deps
+        return await super().start(question, history, deps, signals, knowledge, extra_config)
+
+
+@pytest.mark.asyncio
+async def test_action_wires_turn_dependencies_with_a_working_nearest_adapter():
+    """Sem isto, `TurnDependencies.nearest=None` chegaria ao grafo e o nó de
+    recusa perderia a medição de distância silenciosamente — nenhum teste do
+    grafo pegaria isso porque o grafo confia no que a Action lhe entrega."""
+    graph = _DepsCapturingGraph()
+    action = _make(graph, _FakeSearch(), _FakeConvRepo(), _FakeMsgRepo())
+
+    _, stream, _ = await action.execute("oi", None, "a@x.com")
+    async for _ in stream:
+        pass
+
+    assert graph.received_deps is not None
+    assert graph.received_deps.nearest is not None
+    assert isinstance(graph.received_deps.nearest, _NearestDistance)
