@@ -30,6 +30,9 @@ dependencies = [
     "langsmith>=0.1",
     "pgvector>=0.4.2",
     "tavily-python>=0.7.26",
+    # MCP (Model Context Protocol) — cliente usado por src/support/clients/notion/mcp_session.py.
+    # Antes vinha transitivo via pydantic-ai; explicitado após a troca para LangGraph.
+    "mcp>=1.28.1",
 ]
 
 [project.scripts]
