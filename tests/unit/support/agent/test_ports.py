@@ -54,3 +54,14 @@ def test_small_model_and_timeout_settings_have_defaults():
     assert settings.ANTHROPIC_SMALL_MODEL
     assert settings.OPENAI_SMALL_MODEL
     assert settings.GATE_TIMEOUT_SECONDS > 0
+
+
+def test_signals_default_to_an_unmeasured_turn():
+    from src.support.agent.ports import TurnSignals
+
+    s = TurnSignals()
+    assert s.outcome == "answer"
+    assert s.tool_calls == 0
+    assert s.input_tokens is None
+    assert s.gate_degraded is False
+    assert s.retrieval_ran is False
