@@ -30,8 +30,8 @@ Para arquitetura completa, leia **`docs/architecture.md`**.
 - **Migrations:** Alembic (diretório `database/migrations/`)
 - **Validação:** Pydantic v2 + `pydantic-settings`
 - **Base de conhecimento:** Notion via **MCP (Model Context Protocol)** — client em `src/support/clients/notion/`. Só consome documentos aprovados/liberados.
-- **LLM:** o oráculo pode usar **Claude (Anthropic)** ou **GPT (OpenAI)**, selecionável via `LLM_PROVIDER` (`anthropic` | `openai`). O acesso ao modelo é **exclusivamente** pelo Pydantic AI dentro de `src/support/agent/` (`oracle_engine.py` para a resposta, `retrieval_gate.py` para o gate) — não há client HTTP próprio de LLM.
-- **Agente de IA:** orquestração LLM (Claude ou GPT) sobre a base de conhecimento. Desenho interno é ponto em aberto; quando definido, vive em `src/domain/` como subdomínio próprio.
+- **LLM:** o oráculo pode usar **Claude (Anthropic)** ou **GPT (OpenAI)**, selecionável via `LLM_PROVIDER` (`anthropic` | `openai`). O acesso ao modelo é **exclusivamente** pelo LangGraph dentro de `src/support/agent/graph/` (`nodes.py` contém o gate e a resposta; `models.py` seleciona o provedor) — não há client HTTP próprio de LLM. Ver ADR-0016.
+- **Agente de IA:** um `StateGraph` LangGraph (gate → retrieve → refuse/answer + tool loop) orquestra Claude ou GPT sobre a base de conhecimento, consumido em duas fases via `TurnGraphPort`. Observabilidade fina no LangSmith; `agent_traces` mantém as colunas agregáveis. Ver **ADR-0016**.
 - **Autenticação:** ponto em aberto (haverá auth restrita ao ecossistema; mecanismo a definir). **Não há Keycloak/OpenFGA neste projeto.**
 - **Scheduler:** APScheduler com jobstore PostgreSQL (`src/support/core/scheduling/`) — usado, entre outros, para jobs de sincronização da base de conhecimento.
 - **PK padrão:** UUID v7 (`uuid6.uuid7`) via mixin `HasUUID`
@@ -453,6 +453,7 @@ ADRs atuais (em `docs/adr/`):
 - **ADR-0004** — Actions com sufixo `Action` e `execute()`, sem Service facade
 - **ADR-0005** — Usar SQLAlchemy 2.0 em vez de SQLModel
 - **ADR-0006** — Sessão DB via ContextVar + middleware
+- **ADR-0016** — Framework do agente = LangGraph, observabilidade fina no LangSmith (substitui o ADR-0007)
 
 Índice completo em `docs/adr/README.md`.
 

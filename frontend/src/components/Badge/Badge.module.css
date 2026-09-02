@@ -1,4 +1,0 @@
-.badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-size: .85rem; color: var(--text-muted); }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--emerald-ink); }
-.neutral { color: var(--text-muted); }
-.emerald { color: var(--emerald-ink); border-color: var(--emerald-border); }

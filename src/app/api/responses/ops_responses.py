@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from src.domain.observability.dtos.ops_overview import OpsOverview
 from src.domain.observability.entities.turn_trace import TurnTrace
+from src.support.observability.langsmith import run_url
 
 Window = Literal["24h", "7d", "all"]
 
@@ -39,6 +40,13 @@ class TraceSummaryResponse(BaseModel):
     avg_best_distance: float | None
 
 
+class KnowledgeGapResponse(BaseModel):
+    question: str
+    search_query: str | None
+    best_distance: float
+    occurrences: int
+
+
 class OpsOverviewResponse(BaseModel):
     window: str
     knowledge: KnowledgeCountsResponse
@@ -46,6 +54,7 @@ class OpsOverviewResponse(BaseModel):
     traces: TraceSummaryResponse
     rag_top_k: int
     rag_max_distance: float
+    knowledge_gaps: list[KnowledgeGapResponse]
 
     @classmethod
     def from_dto(cls, dto: OpsOverview) -> "OpsOverviewResponse":
@@ -56,6 +65,7 @@ class OpsOverviewResponse(BaseModel):
             traces=TraceSummaryResponse(**vars(dto.traces)),
             rag_top_k=dto.rag_top_k,
             rag_max_distance=dto.rag_max_distance,
+            knowledge_gaps=[KnowledgeGapResponse(**vars(g)) for g in dto.knowledge_gaps],
         )
 
 
@@ -115,7 +125,7 @@ class TurnDetailResponse(TurnSummaryResponse):
     input_tokens: int | None
     output_tokens: int | None
     error: str | None
-    events: list[dict]
+    langsmith_url: str | None
 
     @classmethod
     def from_entity(cls, t: TurnTrace) -> "TurnDetailResponse":
@@ -134,7 +144,7 @@ class TurnDetailResponse(TurnSummaryResponse):
             input_tokens=t.input_tokens,
             output_tokens=t.output_tokens,
             error=t.error,
-            events=t.events,
+            langsmith_url=run_url(t.langsmith_run_id),
         )
 
 

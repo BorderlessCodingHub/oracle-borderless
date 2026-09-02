@@ -1,10 +1,9 @@
-"""Juiz de eval sobre Pydantic AI (hand-rolled, mesmo padrão do RetrievalGate).
-Fora de src/ — pode importar pydantic_ai livremente."""
+"""Juiz de eval sobre o SDK da OpenAI. Sempre OpenAI, independente de
+LLM_PROVIDER (spec de 2026-08-03, seção 7) — então não há camada
+multi-provedor aqui de propósito."""
 
+from openai import AsyncOpenAI
 from pydantic import BaseModel
-from pydantic_ai import Agent
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.openai import OpenAIProvider
 
 from evals.judge.rubrics import JUDGE_SYSTEM_PROMPT, build_judge_prompt
 from evals.models import (
@@ -29,29 +28,28 @@ class JudgeOutput(BaseModel):
     appropriate_refusal: MetricValue | None = None
 
 
-def _build_judge_model():
-    """Sempre OpenAI — ver spec de 2026-08-03, seção 7."""
-    return OpenAIChatModel(
-        settings.JUDGE_MODEL,
-        provider=OpenAIProvider(api_key=settings.OPENAI_API_KEY),
-    )
-
-
-def _build_judge_agent() -> Agent:
-    return Agent(_build_judge_model(), system_prompt=JUDGE_SYSTEM_PROMPT, output_type=JudgeOutput)
+def _build_client() -> AsyncOpenAI:
+    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 
 class AnswerJudge:
-    def __init__(self, agent=None) -> None:
-        self._agent = agent or _build_judge_agent()
+    def __init__(self, client=None) -> None:
+        self._client = client or _build_client()
 
     async def score(self, case: EvalCase, sources_text: str, answer: str) -> dict[str, MetricScore]:
         metrics = metrics_for_category(case.category)
         prompt = build_judge_prompt(
             case.question, sources_text, answer, metrics, category=case.category
         )
-        result = await self._agent.run(prompt)
-        out = result.output
+        response = await self._client.beta.chat.completions.parse(
+            model=settings.JUDGE_MODEL,
+            messages=[
+                {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            response_format=JudgeOutput,
+        )
+        out = response.choices[0].message.parsed
         field_map = {
             FAITHFULNESS: out.faithfulness,
             CITATION_SUPPORT: out.citation_support,

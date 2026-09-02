@@ -22,13 +22,16 @@ por `---`. Fluxo recomendado:
 | [0004](0004-actions-sem-service-facade.md) | Actions com sufixo `Action`/`execute()`, sem Service facade | *referenciado — a formalizar* |
 | [0005](0005-sqlalchemy-vs-sqlmodel.md) | Usar SQLAlchemy 2.0 em vez de SQLModel | *referenciado — a formalizar* |
 | [0006](0006-sessao-db-via-contextvar.md) | Sessão DB via ContextVar + middleware | *referenciado — a formalizar* |
-| [0007](0007-agent-framework-pydantic-ai.md) | Framework do agente = Pydantic AI (agnóstico de provedor) | Aceito |
+| [0007](0007-agent-framework-pydantic-ai.md) | Framework do agente = Pydantic AI (agnóstico de provedor) | *substituído pelo 0016* |
 | [0008](0008-rag-hibrido-pgvector-mcp.md) | RAG híbrido (pgvector + MCP) e embeddings OpenAI | Aceito |
 | [0009](0009-streaming-sse.md) | Streaming das respostas do chat via SSE | Aceito |
 | [0010](0010-transporte-mcp-notion.md) | Transporte do Notion: MCP server via cliente `mcp` (não SDK REST) | Aceito |
-| [0011](0011-kb-restrita-root-notion.md) | Base de conhecimento restrita ao subtree de um root configurável do Notion | Aceito |
-| [0012](0012-escopo-kb-aplicado-na-recuperacao.md) | Escopo da KB aplicado também na recuperação, não só na descoberta | Aceito |
+| [0011](0011-kb-restrita-root-notion.md) | Base de conhecimento restrita ao subtree de um root configurável do Notion | *substituído pelo 0015* |
+| [0012](0012-escopo-kb-aplicado-na-recuperacao.md) | Escopo da KB aplicado também na recuperação, não só na descoberta | *parcialmente substituído pelo 0015* |
 | [0013](0013-trace-por-turno-no-postgres.md) | Trace por turno persistido no Postgres, coletado num ponto único | Aceito |
+| [0014](0014-kb-multi-root.md) | KB é a união dos subtrees de múltiplos roots do Notion | *substituído pelo 0015* |
+| [0015](0015-kb-escopo-descoberto-pela-permissao.md) | Escopo da KB descoberto pela permissão do Notion | Aceito |
+| [0016](0016-agent-framework-langgraph.md) | Framework do agente = LangGraph, observabilidade fina no LangSmith | Aceito |
 
 > ADR-0001–0006 são citados pelo `CLAUDE.md` mas ainda não foram escritos como arquivo.
 > As regras já estão em vigor (ver `CLAUDE.md` → "Regras inegociáveis"). Backfill quando

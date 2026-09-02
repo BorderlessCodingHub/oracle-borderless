@@ -42,6 +42,20 @@ class SyncStatus:
 
 
 @dataclass
+class KnowledgeGap:
+    """Pergunta recusada que quase passou do limiar — candidata a ingestão.
+
+    Ordenada pela MENOR distância observada: quanto mais perto do limiar, mais
+    provável que a base tenha o assunto mas não o trecho certo.
+    """
+
+    question: str
+    search_query: str | None
+    best_distance: float
+    occurrences: int
+
+
+@dataclass
 class OpsOverview:
     """Tudo que a página de ops precisa numa chamada só."""
 
@@ -51,3 +65,4 @@ class OpsOverview:
     traces: TraceSummary
     rag_top_k: int
     rag_max_distance: float
+    knowledge_gaps: list[KnowledgeGap] = field(default_factory=list)

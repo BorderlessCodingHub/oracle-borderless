@@ -36,6 +36,14 @@ export interface TraceSummary {
   avg_best_distance: number | null;
 }
 
+/** Recusa quase-cobrida — a distância mais próxima ficou perto do limiar. */
+export interface KnowledgeGap {
+  question: string;
+  search_query: string | null;
+  best_distance: number;
+  occurrences: number;
+}
+
 export interface OpsOverview {
   window: string;
   knowledge: KnowledgeCounts;
@@ -43,6 +51,7 @@ export interface OpsOverview {
   traces: TraceSummary;
   rag_top_k: number;
   rag_max_distance: number;
+  knowledge_gaps: KnowledgeGap[];
 }
 
 /** `TurnSummaryResponse` — sem `user_email` e sem `message_id`, de propósito. */
@@ -61,13 +70,6 @@ export interface TurnSummary {
   tool_calls: number;
 }
 
-/** Um passo do turno, como `TurnTraceDraft.event()` grava. */
-export interface TurnEvent {
-  at_ms: number;
-  step: string;
-  detail?: Record<string, unknown> | null;
-}
-
 export interface TurnDetail extends TurnSummary {
   conversation_id: string;
   gate_search_query: string | null;
@@ -81,7 +83,7 @@ export interface TurnDetail extends TurnSummary {
   input_tokens: number | null;
   output_tokens: number | null;
   error: string | null;
-  events: TurnEvent[];
+  langsmith_url: string | null;
 }
 
 /** Uma métrica agregada do report — `evals/report.py::_report_dict`. */

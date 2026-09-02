@@ -9,6 +9,7 @@ const overview = {
   traces: { turns: 0, gate_retrieve: 0, gate_skip: 0, gate_degraded: 0, answers: 0, refusals: 0, errors: 0, avg_first_token_ms: null, max_first_token_ms: null, avg_engine_ms: null, max_engine_ms: null, avg_retrieval_kept: null, avg_best_distance: null },
   rag_top_k: 6,
   rag_max_distance: 0.55,
+  knowledge_gaps: [],
 };
 
 afterEach(() => vi.unstubAllGlobals());

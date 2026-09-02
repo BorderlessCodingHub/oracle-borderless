@@ -7,7 +7,6 @@ from src.domain.documents.mappers.notion_page_mapper import NotionPageMapper
 from src.domain.documents.repositories.document_chunk_repository import DocumentChunkRepository
 from src.domain.documents.repositories.document_repository import DocumentRepository
 from src.support.core.context import CurrentAsyncSessionContext
-from src.support.core.settings import settings
 from src.support.utils.notion_ids import normalize_page_id
 
 logger = logging.getLogger(__name__)
@@ -49,7 +48,6 @@ class SyncKnowledgeBaseAction:
 
     async def execute(self, force: bool = False, limit: int | None = None) -> SyncReport:
         approved = await self.notion.list_approved_pages()
-        root_page_id = settings.NOTION_KB_ROOT_PAGE_ID or ""
         existing = {doc.notion_page_id: doc for doc in await self.documents.list_all()}
         report = SyncReport(total_approved=len(approved))
 
@@ -69,15 +67,18 @@ class SyncKnowledgeBaseAction:
                 or current is None
                 or current.deleted_at is not None
                 or _is_stale(page.last_edited_time, current.last_edited_time)
-                # Auto-cura: se a provenência gravada não bate com o root atual
-                # (ex.: coluna NULL logo após a migração 0004, ou troca de
-                # NOTION_KB_ROOT_PAGE_ID), reingere mesmo sem --force. Sem isso,
-                # um sync incremental nunca re-stampa `kb_root_page_id` e o
-                # retrieval filtrado por root passa a devolver [] pra sempre.
+                # Auto-cura: se a provenência gravada não bate com o root sob o
+                # qual a página foi descoberta agora (ex.: coluna NULL logo após
+                # a migração 0004, ou página que mudou de root), reingere mesmo
+                # sem --force. O retrieval não filtra mais por root (ADR-0015)
+                # — o que dependeria disso ficando errado para sempre é a
+                # procedência exibida por `knowledge:roots` e a contagem por
+                # root que ele soma, sem um sync incremental jamais corrigir
+                # sozinho o valor gravado.
                 or (
                     current is not None
                     and normalize_page_id(current.kb_root_page_id)
-                    != normalize_page_id(root_page_id)
+                    != normalize_page_id(page.kb_root_page_id)
                 )
             )
             if needs_ingest:
@@ -86,7 +87,7 @@ class SyncKnowledgeBaseAction:
                         full = await self.notion.get_page(page.id)
                         full.section = page.section
                         await self.ingest.execute(
-                            NotionPageMapper.to_document(full, root_page_id)
+                            NotionPageMapper.to_document(full, page.kb_root_page_id or "")
                         )
                     report.ingested += 1
                 except Exception as exc:  # falha de uma página não derruba o bloco
@@ -100,7 +101,18 @@ class SyncKnowledgeBaseAction:
         if not partial:
             now = datetime.now(timezone.utc)
             for page_id, doc in existing.items():
-                if page_id not in approved_ids and doc.deleted_at is None:
+                if doc.deleted_at is not None:
+                    continue
+                # Único motivo de saída de escopo observável aqui: a página não
+                # apareceu em nenhuma travessia desta rodada. Um root que o Yuri
+                # despublicou não é mais descoberto por `list_approved_pages`,
+                # então suas páginas somem de `approved_ids` por AUSÊNCIA da
+                # travessia — não porque comparamos a procedência gravada contra
+                # uma lista. Essa segunda comparação já existiu aqui e era sempre
+                # inalcançável; não reintroduza. Descoberta vazia não chega até
+                # aqui: `list_approved_pages` aborta antes (ADR-0015).
+                left_scope = page_id not in approved_ids
+                if left_scope:
                     await self.documents.soft_delete_by_page_id(page_id, now)
                     await self.chunks.replace_for_document(doc.uuid, [])
                     report.removed += 1

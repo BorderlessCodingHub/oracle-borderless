@@ -28,7 +28,7 @@ _FLAT_FIELDS = (
     "input_tokens",
     "output_tokens",
     "error",
-    "events",
+    "langsmith_run_id",
 )
 
 

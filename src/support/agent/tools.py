@@ -2,10 +2,14 @@
 não-confiável). web_search e fetch_notion_page são HTTP (não tocam o banco), então
 rodam com segurança durante o streaming."""
 
+import logging
+
 from src.domain.shared.value_objects.citation import Citation
 from src.support.agent.ports import KnowledgeSnippet
 from src.support.clients.notion.notion_client import NotionClient
 from src.support.clients.tavily.tavily_client import TavilyClient
+
+logger = logging.getLogger(__name__)
 
 _OPEN = "<<TOOL_CONTENT>>"
 _CLOSE = "<</TOOL_CONTENT>>"
@@ -40,20 +44,56 @@ class WebSearchTool:
 
 
 class FetchNotionTool:
-    """Busca uma página do Notion por id — **restrita ao escopo da KB** (ADR-0011).
+    """Busca uma página do Notion por id — **filtrada pela curadoria** (ADR-0015).
 
     O id chega do modelo (via citação ou inferência), não da travessia de
-    descoberta, então o escopo tem de ser checado aqui: sem isso a tool leria
-    qualquer página do workspace visível à integração.
+    descoberta. O escopo em si é a permissão da integração, que o MCP já aplica;
+    o que precisa ser checado aqui é o veredito da `KnowledgeCurationPolicy`,
+    que barra linha de banco (tracker/PII) e títulos da denylist.
     """
 
     def __init__(self, notion: NotionClient) -> None:
         self._notion = notion
 
     async def run(self, page_id: str) -> str:
-        page = await self._notion.get_page_in_scope(page_id)
-        if page is None:
+        page = await self._notion.get_page_with_provenance(page_id)
+        if not page.is_approved:
             return wrap_tool_content(
                 "(página fora do escopo da base de conhecimento — não disponível)"
             )
         return wrap_tool_content(f"[{page.title} — {page.url}]\n{page.content}")
+
+
+def build_tools() -> list:
+    """As duas tools no formato LangChain.
+
+    O `config` é injetado pelo runtime — o modelo não o vê. É por ele que vêm o
+    coletor de citações e o `signals` deste turno; nada de estado global.
+    """
+    from langchain_core.runnables import RunnableConfig
+    from langchain_core.tools import tool
+
+    @tool
+    async def web_search(query: str, config: RunnableConfig) -> str:
+        """Busca informação pública na web. NÃO é fallback para lacunas da base
+        interna — quando o contexto fornecido não cobre a pergunta, a resposta é
+        a recusa padrão, não uma busca web."""
+        cfg = config["configurable"]
+        cfg["signals"].tool_calls += 1
+        try:
+            return await WebSearchTool(tavily=TavilyClient(), collected=cfg["citations"]).run(query)
+        except Exception as exc:  # falha de tool não derruba o streaming
+            logger.exception("web_search tool failed")
+            return wrap_tool_content(f"(falha ao buscar na web: {exc})")
+
+    @tool
+    async def fetch_notion_page(page_id: str, config: RunnableConfig) -> str:
+        """Busca o conteúdo completo/atualizado de uma página do Notion."""
+        config["configurable"]["signals"].tool_calls += 1
+        try:
+            return await FetchNotionTool(notion=NotionClient()).run(page_id)
+        except Exception as exc:  # falha de tool não derruba o streaming
+            logger.exception("fetch_notion_page tool failed")
+            return wrap_tool_content(f"(falha ao buscar página do Notion: {exc})")
+
+    return [web_search, fetch_notion_page]

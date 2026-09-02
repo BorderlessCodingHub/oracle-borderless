@@ -32,7 +32,7 @@ def _entity(**overrides) -> TurnTrace:
         input_tokens=1200,
         output_tokens=300,
         error=None,
-        events=[{"at_ms": 0, "step": "turn_start", "detail": {}}],
+        langsmith_run_id="run-abc",
         created_at=datetime(2026, 8, 3, tzinfo=timezone.utc),
     )
     base.update(overrides)
@@ -48,7 +48,7 @@ def test_to_model_attrs_carries_every_flat_field():
     assert attrs["gate_search_query"] == "renovação de PSP"
     assert attrs["retrieval_best_distance"] == 0.427
     assert attrs["outcome"] == "answer"
-    assert attrs["events"] == entity.events
+    assert attrs["langsmith_run_id"] == "run-abc"
     # created_at é server_default — o mapper não o envia
     assert "created_at" not in attrs
 

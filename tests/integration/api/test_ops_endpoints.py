@@ -34,6 +34,7 @@ async def test_overview_returns_the_map_payload(ops_client):
     assert body["rag_top_k"] > 0
     # sem run do sync, os campos vêm nulos em vez de estourar
     assert "status" in body["sync"]
+    assert isinstance(body["knowledge_gaps"], list)
 
 
 @pytest.mark.asyncio

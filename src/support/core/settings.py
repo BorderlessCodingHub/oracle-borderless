@@ -41,8 +41,13 @@ class Settings(BaseSettings):
     # --- Base de conhecimento: Notion via MCP ---
     NOTION_MCP_URL: str | None = None
     NOTION_MCP_TOKEN: str | None = None
-    # Raiz da KB: a base é EXCLUSIVAMENTE o subtree deste folder do Notion
-    # (folder "Products"). Sem ele, o sync aborta (ver NotionClient).
+    # --- Escopo da KB: NÃO se configura mais aqui ---
+    # Desde o ADR-0015 o escopo é a união dos subtrees das páginas de nível de
+    # workspace que a integração do Notion enxerga, descobertas a cada sync.
+    # Estes dois campos sobrevivem SÓ como detectores: o `LifespanManager`
+    # derruba o boot se qualquer um estiver preenchido, para que um deploy
+    # defasado não suba achando que restringiu a base.
+    NOTION_KB_ROOT_PAGE_IDS: str | None = None
     NOTION_KB_ROOT_PAGE_ID: str | None = None
 
     # --- LLM do oráculo (Claude ou GPT, selecionável) ---
@@ -60,6 +65,15 @@ class Settings(BaseSettings):
     JUDGE_MODEL: str = "gpt-4.1-mini"
     # Onde o harness de eval grava seus reports (lidos pela página de ops)
     EVAL_REPORTS_DIR: str = "evals/reports"
+
+    # --- Tracing: LangSmith (opcional; desligado por padrão) ---
+    LANGSMITH_TRACING: bool = False
+    LANGSMITH_API_KEY: str | None = None
+    LANGSMITH_PROJECT: str = "oracle-borderless"
+    # Base do deep link, copiada da URL do projeto no LangSmith
+    # (ex.: https://smith.langchain.com/o/<org>/projects/p/<project>).
+    # Sem ela o trace guarda o run_id mas a página de ops não oferece link.
+    LANGSMITH_PROJECT_URL: str | None = None
 
     # --- Embeddings (desacoplado do provedor de chat; ver ADR-0008) ---
     EMBEDDING_PROVIDER: Literal["openai"] = "openai"

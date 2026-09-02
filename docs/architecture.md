@@ -466,19 +466,59 @@ O desenho fino da ingestão (full sync vs. incremental, embeddings, cache) é **
 
 O oráculo pode usar **Claude (Anthropic)** ou **GPT (OpenAI)**. O provedor é escolhido em runtime pela variável `LLM_PROVIDER` (`anthropic` | `openai`), sem mudar código de domínio.
 
-Não existe client HTTP de LLM próprio: o único acesso ao modelo é via **Pydantic AI** (ADR-0007), e apenas dois arquivos importam o framework:
+Não existe client HTTP de LLM próprio: o único acesso ao modelo é via um `StateGraph` **LangGraph** (ADR-0016), inteiramente contido em `src/support/agent/graph/`:
 
-```python
-# src/support/agent/oracle_engine.py     — resposta em streaming, com tools
-def get_oracle_engine(enable_tools: bool = True) -> OracleEngine: ...
-
-# src/support/agent/retrieval_gate.py    — decisão skip/rewrite, modelo pequeno
-def get_retrieval_gate() -> RetrievalGate: ...
+```
+                  ┌─────────┐
+        START ───►│  gate   │  modelo pequeno, structured output, fail-open
+                  └────┬────┘
+                       │ should_retrieve
+              ┌────────┴────────┐
+       retrieve=false      retrieve=true
+              │                 │
+              │            ┌────▼─────┐
+              │            │ retrieve │  pgvector top-k + limiar
+              │            └────┬─────┘
+              │                 │ has_grounding
+              │        ┌────────┴────────┐
+              │   vazio & !degraded    tem contexto
+              │        │                 │
+              │   ┌────▼────┐            │
+              │   │ refuse  │            │
+              │   └────┬────┘            │
+              │        │                 │
+              └────────┼─────────────►┌──▼─────┐
+                       │              │ answer │◄──┐
+                       │              └──┬─────┘   │
+                       │      tools_condition│     │
+                       │              ┌──────┴───┐ │
+                       │              │  tools   │─┘
+                       ▼              └──────────┘
+                      END ◄───────────────┘
 ```
 
-O domínio consome ambos por Protocols finos (`OracleEnginePort`, `RetrievalGatePort`) em `src/support/agent/ports.py` — nunca importa `pydantic_ai`.
+```
+src/support/agent/
+├── ports.py              # TurnDependencies, TurnGraphPort — fronteira com o domínio
+├── models.py             # seleção de provider (Claude/GPT) num ponto único
+├── tools.py              # WebSearchTool / FetchNotionTool (HTTP-only, por decisão)
+└── graph/
+    ├── state.py           # TurnState
+    ├── nodes.py           # gate · retrieve · refuse · answer
+    ├── edges.py           # should_retrieve · has_grounding (funções puras)
+    ├── builder.py         # build_turn_graph() — compilado uma vez no módulo, sem checkpointer
+    └── runner.py          # TurnGraphRunner — implementa TurnGraphPort
+```
 
-Modelos e chaves por provedor vêm das settings: `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` / `ANTHROPIC_SMALL_MODEL` e `OPENAI_API_KEY` / `OPENAI_MODEL` / `OPENAI_SMALL_MODEL`.
+O domínio consome o grafo por um único Protocol fino, `TurnGraphPort` (`src/support/agent/ports.py`) — nunca importa `langgraph` nem `langchain*`. A fronteira é protegida por `tests/unit/support/agent/test_domain_boundary.py`. Na direção oposta, os nós do grafo recebem as Actions de domínio (`SearchKnowledgeBaseAction`, `ListKnowledgeSectionsAction`, `build_out_of_scope_reply`) injetadas via `TurnDependencies`, sem que `support/` importe `domain/`.
+
+**Consumo em duas fases.** `DBSessionMiddleware` usa `BaseHTTPMiddleware`: o corpo do `StreamingResponse` SSE é gerado depois que a sessão async do request já foi commitada e fechada. Por isso `TurnGraphRunner.start()` dirige o grafo (`stream_mode=["updates", "messages"]`) até a **entrada do nó `answer`** — o que já executa os nós `gate` e `retrieve`, que tocam o banco — e só então devolve o gerador do restante, consumido pelo controller fora do escopo da sessão. O critério é a entrada no nó, não o primeiro token: uma resposta que abre só com `tool_calls` (content vazio) não produz token nenhum, e parar no primeiro texto faria o laço `answer -> tools -> answer` inteiro rodar com a conexão de banco presa. Dali em diante só há token de LLM e chamada de tool HTTP. Ver **ADR-0016** para o racional completo e por que as alternativas (grafo dono do stream inteiro; dois grafos separados) foram descartadas.
+
+Não há checkpointer: o histórico da conversa segue exclusivamente em `conversations`/`messages`, decisão mantida do ADR-0007 e reafirmada no ADR-0016.
+
+Modelos e chaves por provedor vêm das settings: `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` / `ANTHROPIC_SMALL_MODEL` e `OPENAI_API_KEY` / `OPENAI_MODEL` / `OPENAI_SMALL_MODEL`, resolvidos em `src/support/agent/models.py`.
+
+**LangSmith:** tracing fino (spans, prompts, I/O de tool, tokens, custo, replay) é enviado ao LangSmith quando `LANGSMITH_TRACING=true`, configurável via `LANGSMITH_API_KEY`/`LANGSMITH_PROJECT` nas settings. `agent_traces` (Postgres) mantém as colunas planas agregáveis (decisão do gate, outcome, distância do retrieval, latências) — não é redundância acidental, é o que viabiliza `GROUP BY` na página de Ops, que o LangSmith não pode calcular. `user_email` só chega ao LangSmith como hash estável; o e-mail em claro fica só em `agent_traces`.
 
 ### Scheduler distribuído (`src/support/core/scheduling/`)
 
@@ -626,7 +666,7 @@ schedule.call(CleanupConversationsJob).daily(hour=3)
 
 ## Trace do turno
 
-Cada turno do oráculo acumula seu próprio rastro num coletor em memória — `TurnTraceDraft`, em `src/domain/observability/dtos/` — que a `AnswerQuestionAction` preenche com recência, gate, retrieval e recusa, e o gerador SSE do controller completa com a fase do engine (primeiro token, duração, tokens, tool calls).
+Cada turno do oráculo acumula seu próprio rastro num coletor em memória — `TurnTraceDraft`, em `src/domain/observability/dtos/` — que a `AnswerQuestionAction` preenche com recência, gate, retrieval e recusa, e a fase do engine (primeiro token, duração, tokens, tool calls) vem medida do próprio grafo, via `TurnSignals`, que o gerador SSE do controller apenas absorve.
 
 Terminado o stream, a **mesma** background task que persiste a resposta do assistente grava o trace numa linha de `agent_traces`, em sessão própria (`run_in_async_session`) — o trace primeiro, porque turno que quebrou é o que mais interessa. Nada disso pode derrubar um turno: o call site fica sob `try/except` que loga e engole.
 

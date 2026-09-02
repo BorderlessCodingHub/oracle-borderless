@@ -24,6 +24,7 @@ class GetOpsOverviewAction:
             traces=await self.traces.summarize(window),
             rag_top_k=settings.RAG_TOP_K,
             rag_max_distance=settings.RAG_MAX_DISTANCE,
+            knowledge_gaps=await self.traces.knowledge_gaps(window),
         )
 
     async def _last_sync(self) -> SyncStatus:

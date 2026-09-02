@@ -2,14 +2,11 @@
 
 import pytest
 
-from src.support.core.settings import settings
-
 ROOT = "23d8d655-c889-806d-8828-d527ce6a1529"
 
 
 @pytest.mark.asyncio
-async def test_lists_distinct_sections_sorted(monkeypatch, seed_document_with_chunk):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+async def test_lists_distinct_sections_sorted(seed_document_with_chunk):
     from src.domain.documents.actions.list_knowledge_sections_action import (
         ListKnowledgeSectionsAction,
     )
@@ -22,10 +19,7 @@ async def test_lists_distinct_sections_sorted(monkeypatch, seed_document_with_ch
 
 
 @pytest.mark.asyncio
-async def test_ignores_soft_deleted_and_null_sections(
-    monkeypatch, seed_document_with_chunk
-):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+async def test_ignores_soft_deleted_and_null_sections(seed_document_with_chunk):
     from src.domain.documents.actions.list_knowledge_sections_action import (
         ListKnowledgeSectionsAction,
     )
@@ -40,17 +34,10 @@ async def test_ignores_soft_deleted_and_null_sections(
 
 
 @pytest.mark.asyncio
-async def test_list_sections_returns_empty_when_root_unconfigured(
-    monkeypatch, seed_document_with_chunk
-):
-    """Sem root configurado, a lista de seções degrada para vazia.
-
-    `DocumentModel.kb_root_page_id == None` compilaria para `IS NULL`, que
-    combina exatamente com os documentos sem procedência — o guard-clause em
-    `list_sections` existe para que a ausência de configuração nunca vire um
-    "libera tudo sem procedência" por acidente.
-    """
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", None, raising=False)
+async def test_list_sections_includes_document_without_provenance(seed_document_with_chunk):
+    """Desde o ADR-0015 não há guarda fail-closed amarrada à configuração de
+    roots: documento sem `kb_root_page_id` gravado entra normalmente na lista
+    de seções, como qualquer outro documento aprovado."""
     from src.domain.documents.actions.list_knowledge_sections_action import (
         ListKnowledgeSectionsAction,
     )
@@ -59,14 +46,11 @@ async def test_list_sections_returns_empty_when_root_unconfigured(
         title="Sem procedência", kb_root_page_id=None, kb_section="Fantasma"
     )
 
-    assert await ListKnowledgeSectionsAction().execute() == []
+    assert await ListKnowledgeSectionsAction().execute() == ["Fantasma"]
 
 
 @pytest.mark.asyncio
-async def test_sections_differing_only_by_whitespace_collapse(
-    monkeypatch, seed_document_with_chunk
-):
-    monkeypatch.setattr(settings, "NOTION_KB_ROOT_PAGE_ID", ROOT, raising=False)
+async def test_sections_differing_only_by_whitespace_collapse(seed_document_with_chunk):
     from src.domain.documents.actions.list_knowledge_sections_action import (
         ListKnowledgeSectionsAction,
     )

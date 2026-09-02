@@ -28,8 +28,7 @@ def _dry_run() -> int:
 
 async def _run() -> int:
     from src.domain.documents.actions.search_knowledge_base_action import SearchKnowledgeBaseAction
-    from src.support.agent.oracle_engine import get_oracle_engine
-    from src.support.agent.retrieval_gate import get_retrieval_gate
+    from src.support.agent.graph import get_turn_graph_runner
     from src.support.clients.embeddings.embeddings_client import get_embeddings_client
     from src.support.core.settings import settings
     from evals.judge.judge import get_answer_judge
@@ -50,9 +49,8 @@ async def _run() -> int:
         # sessão dentro deste escopo. Construir antes deixa o repo com session=None.
         return await run_all(
             cases,
-            gate=get_retrieval_gate(),
+            graph=get_turn_graph_runner(enable_tools=False),
             search=SearchKnowledgeBaseAction(embeddings=get_embeddings_client()),
-            engine=get_oracle_engine(enable_tools=False),
             judge=get_answer_judge(),
         )
 

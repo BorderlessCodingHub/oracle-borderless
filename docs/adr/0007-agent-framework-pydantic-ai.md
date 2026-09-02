@@ -2,7 +2,7 @@
 
 ## Status
 
-Aceito — 2026-07-02.
+Aceito — 2026-07-02. **Superseded por [ADR-0016](0016-agent-framework-langgraph.md) — 2026-09-01.**
 
 ## Resumo
 

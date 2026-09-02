@@ -11,11 +11,10 @@ from src.domain.observability.dtos.ops_overview import KnowledgeCounts
 class CountKnowledgeBaseAction:
     """Contagens da base para a página de ops. Fronteira do subdomínio documents:
     quem quer esses números compõe esta Action, que delega aos repositórios —
-    mesmo padrão da `ListKnowledgeSectionsAction` irmã. Escopo do root vigente
-    é invariante de leitura (ADR-0012), já aplicado por
-    `DocumentRepository.count_active/count_archived` e
-    `DocumentChunkRepository.count_in_scope`: documento fora do root não entra
-    em nenhuma contagem, mesmo que ainda esteja ativo no banco.
+    mesmo padrão da `ListKnowledgeSectionsAction` irmã. Desde o ADR-0015 não há
+    escopo por procedência nessas contagens: `DocumentRepository.count_active/
+    count_archived` e `DocumentChunkRepository.count_in_scope` contam qualquer
+    documento aprovado e não removido, de qualquer root.
     """
 
     def __init__(self, documents=None, chunks=None, sections=None) -> None:

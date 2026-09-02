@@ -1,16 +1,5 @@
 import type { Citation, ConversationDetail, ConversationSummary } from "../types";
 
-export interface KnowledgeDoc {
-  id: string;
-  code: string;
-  kind: "SOP" | "SIST" | "VAGA";
-  title: string;
-  origin: string;
-  version: string | null;
-  syncedAt: string;
-  status: "active" | "syncing";
-}
-
 const META_CITATIONS: Citation[] = [
   {
     source_type: "notion",
@@ -61,16 +50,6 @@ export const DEMO_DETAILS: Record<string, ConversationDetail> = {
     ],
   },
 };
-
-export const DEMO_DOCUMENTS: KnowledgeDoc[] = [
-  { id: "d1", code: "SOP", kind: "SOP", title: "SOP-GM-06 — Nomenclatura de Campanhas e Conjuntos de Anúncios", origin: "Notion · Central do GOM", version: "v1.0", syncedAt: "2026-07-18", status: "active" },
-  { id: "d2", code: "SOP", kind: "SOP", title: "SOP-CR-05 — Upload de Vídeo Semanal no YouTube", origin: "Notion · Creative", version: "v1.0", syncedAt: "2026-07-17", status: "active" },
-  { id: "d3", code: "SIST", kind: "SIST", title: "Borderless Feedback & 1:1 System", origin: "Notion · Central do GOM", version: "v2.0", syncedAt: "2026-07-15", status: "active" },
-  { id: "d4", code: "SOP", kind: "SOP", title: "SOP-GM-05 — Webinário Multi-Sessão Evergreen", origin: "Notion · Growth", version: "v1.0", syncedAt: "2026-07-12", status: "active" },
-  { id: "d5", code: "SOP", kind: "SOP", title: "SOP-GM-04 — UTM Convention & Rastreamento de Tráfego", origin: "Notion · Growth", version: null, syncedAt: "2026-07-12", status: "active" },
-  { id: "d6", code: "VAGA", kind: "VAGA", title: "Lead Engineer — Systems & Web (Role & Vaga)", origin: "Notion · Hiring Pipeline", version: "v1.0", syncedAt: "2026-07-09", status: "syncing" },
-  { id: "d7", code: "SOP", kind: "SOP", title: "SOP-CR-04 — YouTube Roteiro System", origin: "Notion · Creative", version: null, syncedAt: "2026-07-02", status: "active" },
-];
 
 export const DEMO_ANSWER =
   "A nomenclatura oficial está no **SOP-GM-06** e segue três níveis:\n\n" +

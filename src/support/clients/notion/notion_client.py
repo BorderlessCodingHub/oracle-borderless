@@ -1,10 +1,21 @@
 """Client da base de conhecimento — Notion via MCP (Model Context Protocol).
 
-Fronteira com o Notion. **Só expõe conteúdo aprovado**: a curadoria
-(`KnowledgeCurationPolicy`) barra linhas de banco (trackers/PII), deixando
-passar só páginas-documento. Transporte via `@notionhq/notion-mcp-server`
-(ADR-0010); truncagem de páginas grandes é contornada pelo
-`PageMarkdownAssembler`.
+Fronteira com o Notion. **Não filtra sozinho** — devolve o veredito da
+curadoria (`KnowledgeCurationPolicy`) em `is_approved` e cabe ao **chamador**
+aplicá-lo. Os dois caminhos têm garantias diferentes:
+
+- `list_approved_pages` (travessia de descoberta) **já** filtra pela policy —
+  só páginas-documento aprovadas voltam, e a subárvore de uma página rejeitada
+  nem é visitada.
+- `get_page`/`get_page_with_provenance` (leitura por id avulso) devolvem a
+  página **completa** — título, url e markdown, inclusive de linha de banco —
+  com `is_approved=False` quando reprovada. Quem chama por id precisa checar
+  o veredito antes de usar o conteúdo: `FetchNotionTool`
+  (`src/support/agent/tools.py`) e `KnowledgeIngestCommand`
+  (`src/app/console/commands/knowledge_ingest_command.py`) já fazem isso.
+
+Transporte via `@notionhq/notion-mcp-server` (ADR-0010); truncagem de páginas
+grandes é contornada pelo `PageMarkdownAssembler`.
 """
 
 from dataclasses import dataclass
@@ -17,12 +28,13 @@ from src.domain.documents.services.knowledge_curation_policy import (
 )
 from src.support.clients.notion.mcp_session import ToolCall, notion_mcp_session
 from src.support.clients.notion.page_markdown_assembler import PageMarkdownAssembler
-from src.support.core.settings import settings
 from src.support.utils.notion_ids import normalize_page_id
 
 
 class KnowledgeBaseConfigError(RuntimeError):
-    """Configuração da base de conhecimento ausente/inválida (ex.: root não definido)."""
+    """Configuração/descoberta da base de conhecimento ausente/inválida (ex.:
+    nenhuma página de nível de workspace visível, ou paginação do `search`
+    malformada)."""
 
 
 @dataclass
@@ -36,6 +48,15 @@ class NotionPage:
     is_approved: bool
     last_edited_time: datetime | None = None
     section: str | None = None  # ancestral de 1º nível abaixo do root (ADR-0012)
+    kb_root_page_id: str | None = None  # root normalizado sob o qual foi achada
+
+
+@dataclass
+class WorkspaceRootPage:
+    """Página no nível do workspace visível à integração. Id já normalizado."""
+
+    id: str
+    title: str
 
 
 def _parse_ts(value: Any) -> datetime | None:
@@ -56,7 +77,12 @@ def _extract_title(page: dict[str, Any]) -> str:
 
 
 class NotionClient:
-    """Fronteira com o Notion via MCP. Só páginas aprovadas."""
+    """Fronteira com o Notion via MCP.
+
+    Devolve o veredito de curadoria em `is_approved`; aplicá-lo é
+    responsabilidade do chamador (ver docstring do módulo). A travessia de
+    descoberta (`list_approved_pages`) é a exceção — ela já filtra.
+    """
 
     def __init__(self) -> None:
         self._policy = KnowledgeCurationPolicy()
@@ -84,17 +110,17 @@ class NotionClient:
         async with notion_mcp_session() as call:
             return await self._assemble(call, page_id)
 
-    async def get_page_in_scope(self, page_id: str) -> NotionPage | None:
-        """Página **só se** dentro da subárvore do root (ADR-0011); senão ``None``.
+    async def get_page_with_provenance(self, page_id: str) -> NotionPage:
+        """Página completa + a página de topo de onde ela descende.
 
-        Acesso avulso por id (ex.: tool do agente) não passa pela travessia de
-        descoberta, então precisa checar ancestralidade — do contrário qualquer
-        página do workspace visível à integração viraria contexto de resposta.
+        Não recusa por ancestralidade (ADR-0015): o escopo é a permissão da
+        integração, que o próprio MCP aplica negando acesso. O veredito de
+        ingestão/serviço vem de `is_approved` (`KnowledgeCurationPolicy`) e
+        **precisa ser checado pelo chamador** — é o que barra linha de banco
+        (PII) neste caminho.
         """
-        root_id = self._require_root()
         async with notion_mcp_session() as call:
-            if not await self._is_in_scope(call, page_id, root_id):
-                return None
+            provenance = await self._find_top_level_page(call, page_id)
             page = await call("API-retrieve-a-page", {"page_id": page_id})
             markdown = await self._assemble(call, page_id)
 
@@ -108,51 +134,135 @@ class NotionClient:
             url=page.get("url", ""),
             is_approved=self._policy.should_ingest(ref),
             last_edited_time=_parse_ts(page.get("last_edited_time")),
+            kb_root_page_id=provenance,
         )
 
     async def list_approved_pages(self) -> list[NotionPage]:
-        """Páginas-documento aprovadas — só o subtree do folder raiz configurado.
+        """Páginas-documento aprovadas — a união dos subtrees dos roots descobertos.
 
-        A KB é EXCLUSIVAMENTE a subárvore de `NOTION_KB_ROOT_PAGE_ID` (folder
-        "Products"). Sem root configurado, **aborta** em vez de devolver ``[]``:
-        o sync completo removeria (soft-delete) toda a base ao reconciliar.
+        Os roots são as páginas de nível de workspace que a integração enxerga
+        (ADR-0015): o que a dona do produto compartilha é o escopo, sem segunda
+        lista para manter em sincronia.
+
+        Descoberta vazia **aborta** em vez de devolver ``[]``: nenhum root
+        visível significa token revogado ou MCP fora do ar, e a reconciliação
+        do sync soft-deletaria a base inteira numa única rodada.
+
+        Uma página alcançável a partir de dois roots fica registrada sob o
+        primeiro descoberto — `kb_root_page_id` é um valor só por documento,
+        então a atribuição precisa ser determinística.
+
+        O próprio root passa pela `KnowledgeCurationPolicy` antes de ser
+        percorrido — a denylist de títulos vale em todos os níveis, não só
+        dentro da subárvore.
         """
-        root_id = self._require_root()
+        collected: list[NotionPage] = []
+        seen: set[str | None] = set()
         async with notion_mcp_session() as call:
-            return await self._collect_scope(call, root_id)
+            roots = await self._workspace_root_pages(call)
+            if not roots:
+                raise KnowledgeBaseConfigError(
+                    "a integração do Notion não enxerga nenhuma página de nível "
+                    "de workspace — token revogado, MCP fora do ar, ou busca "
+                    "vazia por erro. Sync abortado: reconciliar com descoberta "
+                    "vazia apagaria toda a base."
+                )
+            for root in roots:
+                # A denylist de títulos é defesa em profundidade em TODOS os
+                # níveis (ver ADR-0015, "Por que topo + subárvore, e não busca
+                # plana") — inclusive o próprio root. Sem esta checagem, uma
+                # página de topo com título de tracker (ex.: "Sprints 2026")
+                # nunca entraria ela mesma, mas cada filho seu entraria por
+                # conta própria em `_collect_scope`, porque `_collect_scope`
+                # só poda a partir dos blocos que visita — nunca do root que
+                # recebe. Compartilhar a página com a integração bastaria
+                # para ingerir a subárvore inteira.
+                ref = NotionPageRef(object_type="page", parent_type="workspace", title=root.title)
+                if not self._policy.should_ingest(ref):
+                    continue
+                for page in await self._collect_scope(call, root.id):
+                    key = normalize_page_id(page.id)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    collected.append(page)
+        return collected
+
+    async def list_workspace_root_pages(self) -> list[WorkspaceRootPage]:
+        """Páginas de nível de workspace que a integração enxerga — o escopo da KB.
+
+        É a superfície de permissão do lado do Notion: o que a dona do produto
+        liberou é o que o oráculo lê (ADR-0015). Não aplica escopo nenhum por
+        cima disso, de propósito.
+        """
+        async with notion_mcp_session() as call:
+            return await self._workspace_root_pages(call)
 
     @staticmethod
-    def _require_root() -> str:
-        root_id = settings.NOTION_KB_ROOT_PAGE_ID
-        if not root_id or root_id.lstrip().startswith("#"):
-            raise KnowledgeBaseConfigError(
-                "NOTION_KB_ROOT_PAGE_ID não configurado — a KB é o subtree do folder "
-                "Products; sem root, o sync abortaria e apagaria toda a base."
-            )
-        return root_id
+    async def _workspace_root_pages(call: ToolCall) -> list[WorkspaceRootPage]:
+        pages: list[WorkspaceRootPage] = []
+        cursor: str | None = None
+        while True:
+            args: dict[str, Any] = {
+                "filter": {"property": "object", "value": "page"},
+                "page_size": 100,
+            }
+            if cursor:
+                args["start_cursor"] = cursor
+            data = await call("API-post-search", args)
+            for page in data.get("results", []):
+                if page.get("parent", {}).get("type") != "workspace":
+                    continue
+                page_id = normalize_page_id(page.get("id"))
+                if page_id:
+                    pages.append(WorkspaceRootPage(id=page_id, title=_extract_title(page)))
+            if not data.get("has_more"):
+                return pages  # fim normal de paginação
+            if not data.get("next_cursor"):
+                # `has_more=True` sem `next_cursor` não é fim de paginação —
+                # é o `search` respondendo de forma malformada. Continuar o
+                # laço penduraria (`cursor` voltaria a `None`, args idênticos
+                # ao primeiro loop, `while True` nunca sairia, e o
+                # SyncKnowledgeBaseJob seguraria o advisory lock para sempre).
+                # Devolver a lista parcial em silêncio seria pior: o sync
+                # rodaria normalmente e a reconciliação soft-deletaria todo
+                # documento sob os roots que ficaram de fora — sem nada
+                # ligando o sintoma à causa. Levanta alto, na mesma família de
+                # "token revogado / MCP fora do ar".
+                raise KnowledgeBaseConfigError(
+                    "a paginação do `search` do Notion veio malformada "
+                    "(has_more=True sem next_cursor) — o escopo descoberto "
+                    "seria parcial. Sync abortado."
+                )
+            cursor = data.get("next_cursor")
 
-    async def _is_in_scope(
-        self, call: ToolCall, page_id: str, root_id: str | None = None
-    ) -> bool:
-        """A página é o root ou descende dele? Sobe a cadeia de `parent`.
+    @staticmethod
+    async def _find_top_level_page(call: ToolCall, page_id: str) -> str | None:
+        """De qual página de topo esta página descende? Sobe a cadeia de `parent`.
 
-        Para em `workspace` (topo) ou `database_id` (linha de banco): nenhum dos
-        dois pode ser descendente do root. `seen` protege de ciclo/repetição.
+        Devolve o id normalizado da página cujo pai é o `workspace` — a
+        procedência que vai para `kb_root_page_id`. Devolve ``None`` quando a
+        cadeia termina em `database_id`/`data_source_id` (linha de banco não
+        descende de página de topo) ou entra em ciclo.
+
+        Não autoriza nada (ADR-0015): quem decide se a página é ingerível é a
+        `KnowledgeCurationPolicy`, via `is_approved`. Antes esta subida recusava
+        por não achar um root da allowlist, e barrava linha de banco por efeito
+        colateral — a recusa agora é explícita no chamador.
         """
-        target = normalize_page_id(root_id or self._require_root())
         current = page_id
-        seen: set[str] = set()
+        seen: set[str | None] = set()
         while True:
             key = normalize_page_id(current)
-            if key == target:
-                return True
             if key in seen:
-                return False
+                return None
             seen.add(key)
             page = await call("API-retrieve-a-page", {"page_id": current})
             parent = page.get("parent", {})
+            if parent.get("type") == "workspace":
+                return key
             if parent.get("type") != "page_id":
-                return False  # workspace ou database_id — fora da subárvore
+                return None  # linha de banco ou parent desconhecido
             current = parent["page_id"]
 
     async def _collect_scope(self, call: ToolCall, root_id: str) -> list[NotionPage]:
@@ -186,6 +296,7 @@ class NotionClient:
                         is_approved=True,
                         last_edited_time=_parse_ts(block.get("last_edited_time")),
                         section=section,
+                        kb_root_page_id=normalize_page_id(root_id),
                     )
                 )
                 stack.append((block["id"], section))

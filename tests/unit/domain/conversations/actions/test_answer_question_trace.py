@@ -1,84 +1,30 @@
-"""O que a Action registra no trace nas três rotas do turno.
+"""O que a Action ainda registra no trace, depois que gate/retrieval/recusa
+viraram nós do grafo.
 
-Arquivo autocontido de propósito: os fakes do `test_answer_question_action.py`
-vivem dentro dele (privados), então duplicar os mínimos aqui é mais barato e
-menos arriscado que refatorar um teste verde para um conftest compartilhado.
+O que este arquivo cobria sobre gate, retrieval e recusa (draft.gate_retrieve,
+draft.retrieval_ran, draft.outcome == "refusal", etc.) é responsabilidade dos
+nós agora — coberto em `tests/unit/support/agent/graph/test_nodes.py` e
+`test_edges.py`. A Action só grava `history_messages`/`history_tokens_est`
+(cálculo local) e entrega o MESMO objeto `signals` ao grafo e ao draft — o
+resto (`gate_retrieve`, `retrieval_kept`, `outcome`, ...) só chega à coluna do
+trace via `_absorb_engine_metrics` no controller, testado em
+`tests/integration/api/test_ask_trace_persistence.py`.
 """
 
-from datetime import datetime, timezone
-from uuid import uuid4
-
 import pytest
-from uuid6 import uuid7
 
 from src.domain.conversations.actions.answer_question_action import AnswerQuestionAction
-from src.domain.conversations.entities.conversation import Conversation
-from src.domain.shared.value_objects.citation import Citation
-from src.support.agent.ports import AgentStreamChunk, KnowledgeSnippet, RetrievalDecision
-
-SNIPPET = KnowledgeSnippet(
-    "trecho", Citation("notion", "Doc", "https://n.so/x", "trecho", "pid")
-)
-
-
-class FakeGate:
-    def __init__(self, decision: RetrievalDecision) -> None:
-        self.decision = decision
-
-    async def decide(self, question, history):
-        return self.decision
+from tests.fakes.fake_turn_graph import FakeTurnGraph
 
 
 class FakeSearch:
-    """Precisa de `.embeddings` porque o caminho de recusa embeda a query para
-    medir a distância do vizinho mais próximo."""
-
-    class _Embeddings:
-        async def embed_query(self, query):
-            return [0.0, 1.0]
-
-    def __init__(self, snippets) -> None:
-        self.snippets = snippets
-        self.called_with = None
-        self.embeddings = self._Embeddings()
-
     async def execute(self, query, top_k=None):
-        self.called_with = query
-        return self.snippets
-
-
-class FakeEngine:
-    async def stream_answer(self, question, history, knowledge, metrics=None):
-        yield AgentStreamChunk(type="text", text="resposta")
-        yield AgentStreamChunk(type="sources", citations=[])
-
-
-class FakeEngineCapturingMetrics:
-    """Grava o objeto `metrics` recebido — usado para prender que é o MESMO
-    objeto que o draft carrega em `engine_metrics` (débito da revisão da Task
-    4: sem isso, um wiring dividido em duas instâncias gravaria zeros no trace
-    sem nenhum teste falhar)."""
-
-    def __init__(self) -> None:
-        self.received_metrics = None
-
-    async def stream_answer(self, question, history, knowledge, metrics=None):
-        self.received_metrics = metrics
-        yield AgentStreamChunk(type="text", text="resposta")
-        yield AgentStreamChunk(type="sources", citations=[])
+        return []
 
 
 class FakeSections:
     async def execute(self):
         return ["Mentorship", "Bootcamps"]
-
-
-class FakeChunks:
-    def __init__(self, nearest=None) -> None:
-        self.nearest = nearest
-
-    async def nearest_distance(self, embedding):
-        return self.nearest
 
 
 class FakeConvRepo:
@@ -101,13 +47,9 @@ class FakeMsgRepo:
         return []
 
 
-def _make_action(gate, search, chunks=None) -> AnswerQuestionAction:
+def _make_action(graph=None) -> AnswerQuestionAction:
     action = AnswerQuestionAction(
-        engine=FakeEngine(),
-        search=search,
-        gate=gate,
-        sections=FakeSections(),
-        chunks=chunks or FakeChunks(),
+        graph=graph or FakeTurnGraph(), search=FakeSearch(), sections=FakeSections()
     )
     action.conversations = FakeConvRepo()
     action.messages = FakeMsgRepo()
@@ -115,75 +57,8 @@ def _make_action(gate, search, chunks=None) -> AnswerQuestionAction:
 
 
 @pytest.mark.asyncio
-async def test_retrieve_path_records_gate_and_retrieval():
-    action = _make_action(
-        gate=FakeGate(RetrievalDecision(retrieve=True, search_query="renovação de PSP")),
-        search=FakeSearch([SNIPPET]),
-    )
-
-    _, _, draft = await action.execute("e as renovações?", None, None)
-
-    assert draft.gate_retrieve is True
-    assert draft.gate_search_query == "renovação de PSP"
-    assert draft.retrieval_ran is True
-    assert draft.retrieval_kept == 1
-    assert draft.outcome == "answer"
-    assert [e["step"] for e in draft.events] == ["turn_start", "recency", "gate", "retrieval"]
-
-
-@pytest.mark.asyncio
-async def test_skip_path_records_no_retrieval():
-    action = _make_action(
-        gate=FakeGate(RetrievalDecision(retrieve=False, search_query="")),
-        search=FakeSearch([]),
-    )
-
-    _, _, draft = await action.execute("oi", None, None)
-
-    assert draft.gate_retrieve is False
-    assert draft.retrieval_ran is False
-    assert draft.retrieval_kept == 0
-    assert draft.outcome == "answer"
-    assert "retrieval" not in [e["step"] for e in draft.events]
-
-
-@pytest.mark.asyncio
-async def test_refusal_path_records_outcome_and_nearest_distance():
-    action = _make_action(
-        gate=FakeGate(RetrievalDecision(retrieve=True, search_query="bolo de cenoura")),
-        search=FakeSearch([]),  # nada passou do limiar
-        chunks=FakeChunks(nearest=0.72),
-    )
-
-    _, _, draft = await action.execute("como faço bolo de cenoura?", None, None)
-
-    assert draft.outcome == "refusal"
-    assert draft.retrieval_ran is True
-    assert draft.retrieval_kept == 0
-    assert draft.retrieval_best_distance == 0.72
-    assert [e["step"] for e in draft.events][-1] == "refusal"
-
-
-@pytest.mark.asyncio
-async def test_degraded_gate_with_empty_knowledge_does_not_refuse():
-    """A guarda do fail-open: gate degradado nunca classificou o turno."""
-    action = _make_action(
-        gate=FakeGate(RetrievalDecision(retrieve=True, search_query="oi", degraded=True)),
-        search=FakeSearch([]),
-    )
-
-    _, _, draft = await action.execute("oi", None, None)
-
-    assert draft.outcome == "answer"
-    assert draft.gate_degraded is True
-
-
-@pytest.mark.asyncio
 async def test_history_tokens_are_estimated_from_the_loaded_recency():
-    action = _make_action(
-        gate=FakeGate(RetrievalDecision(retrieve=False, search_query="")),
-        search=FakeSearch([]),
-    )
+    action = _make_action()
 
     class _WithHistory(FakeMsgRepo):
         async def load_recent(self, conversation_id):
@@ -192,31 +67,23 @@ async def test_history_tokens_are_estimated_from_the_loaded_recency():
             return [AgentMessage(role="user", content="a" * 400)]
 
     action.messages = _WithHistory()
-    _, _, draft = await action.execute("oi", None, None)
+    _, stream, draft = await action.execute("oi", None, None)
+    [c async for c in stream]
 
     assert draft.history_messages == 1
     assert draft.history_tokens_est == 100  # 400 // 4
 
 
 @pytest.mark.asyncio
-async def test_engine_metrics_is_the_same_object_the_engine_receives():
-    """Se o wiring se dividir em duas instâncias de TurnMetrics, o controller
-    absorveria zeros do draft mesmo com o engine tendo preenchido a sua cópia —
-    e nenhum teste indireto pegaria isso. Prende a identidade diretamente."""
-    engine = FakeEngineCapturingMetrics()
-    action = AnswerQuestionAction(
-        engine=engine,
-        search=FakeSearch([]),
-        gate=FakeGate(RetrievalDecision(retrieve=False, search_query="")),
-        sections=FakeSections(),
-        chunks=FakeChunks(),
-    )
-    action.conversations = FakeConvRepo()
-    action.messages = FakeMsgRepo()
+async def test_signals_is_assigned_to_the_draft_before_the_graph_runs():
+    """A Action instancia `TurnSignals`, grava em `draft.signals` e passa o
+    MESMO objeto ao grafo — é o que permite ao controller ler de volta o que os
+    nós escreveram (`_absorb_engine_metrics`)."""
+    action = _make_action(graph=FakeTurnGraph(outcome="refusal", retrieve=True, retrieval_kept=0))
 
-    _, stream, draft = await action.execute("oi", None, None)
-    async for _ in stream:
-        pass  # consome o stream para o engine de fato registrar `metrics`
+    _, stream, draft = await action.execute("como faço bolo de cenoura?", None, None)
+    [c async for c in stream]
 
-    assert draft.engine_metrics is not None
-    assert engine.received_metrics is draft.engine_metrics
+    assert draft.signals is not None
+    assert draft.signals.outcome == "refusal"
+    assert draft.signals.retrieval_kept == 0

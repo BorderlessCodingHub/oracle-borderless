@@ -10,6 +10,7 @@ import type { MapBox } from "./architectureMap";
 import { ArchitectureMap } from "./components/ArchitectureMap";
 import { BoxDetail } from "./components/BoxDetail";
 import { EvalPanel } from "./components/EvalPanel";
+import { KnowledgeGaps } from "./components/KnowledgeGaps";
 import { TurnDetail } from "./components/TurnDetail";
 import { TurnList } from "./components/TurnList";
 import { WindowPicker } from "./components/WindowPicker";
@@ -91,6 +92,11 @@ export default function OpsPage() {
               )}
             </div>
           </div>
+        </section>
+
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>Lacunas da base</h2>
+          <KnowledgeGaps overview={overview} />
         </section>
 
         <section className={styles.section}>

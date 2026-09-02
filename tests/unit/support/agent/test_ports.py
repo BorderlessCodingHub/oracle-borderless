@@ -1,8 +1,5 @@
-import pytest
-
 from src.support.agent.ports import AgentMessage, AgentStreamChunk, KnowledgeSnippet
 from src.domain.shared.value_objects.citation import Citation
-from tests.fakes.fake_oracle_engine import FakeOracleEngine
 
 
 def test_text_chunk_defaults():
@@ -31,15 +28,6 @@ def test_knowledge_snippet_carries_content_and_citation():
     assert snip.citation.is_notion()
 
 
-@pytest.mark.asyncio
-async def test_fake_engine_accepts_knowledge_argument():
-    engine = FakeOracleEngine(answer="ola mundo")
-    snippets = [KnowledgeSnippet("ctx", Citation("notion", "D", "u", "s", "p"))]
-    chunks = [c async for c in engine.stream_answer("q?", [], snippets)]
-    assert any(c.type == "text" for c in chunks)
-    assert any(c.type == "sources" for c in chunks)
-
-
 def test_retrieval_decision_holds_flag_and_query():
     from src.support.agent.ports import RetrievalDecision
 
@@ -54,3 +42,14 @@ def test_small_model_and_timeout_settings_have_defaults():
     assert settings.ANTHROPIC_SMALL_MODEL
     assert settings.OPENAI_SMALL_MODEL
     assert settings.GATE_TIMEOUT_SECONDS > 0
+
+
+def test_signals_default_to_an_unmeasured_turn():
+    from src.support.agent.ports import TurnSignals
+
+    s = TurnSignals()
+    assert s.outcome == "answer"
+    assert s.tool_calls == 0
+    assert s.input_tokens is None
+    assert s.gate_degraded is False
+    assert s.retrieval_ran is False

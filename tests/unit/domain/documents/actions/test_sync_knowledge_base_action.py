@@ -7,30 +7,39 @@ import pytest
 from src.domain.documents.actions.sync_knowledge_base_action import SyncKnowledgeBaseAction
 from src.domain.documents.entities.document import Document
 from src.support.clients.notion.notion_client import NotionPage
-from src.support.core.settings import settings
-from src.support.utils.notion_ids import normalize_page_id
 
 
 def _dt(day: int) -> datetime:
     return datetime(2026, 7, day, tzinfo=timezone.utc)
 
 
-def _approved(page_id: str, edited: datetime, section: str | None = None) -> NotionPage:
+def _approved(
+    page_id: str,
+    edited: datetime,
+    section: str | None = None,
+    kb_root_page_id: str = "roota",
+) -> NotionPage:
     return NotionPage(
         id=page_id, title=f"Doc {page_id}", content="", url="https://n", is_approved=True,
-        last_edited_time=edited, section=section,
+        last_edited_time=edited, section=section, kb_root_page_id=kb_root_page_id,
     )
 
 
-def _existing(page_id: str, edited: datetime | None, deleted: bool = False) -> Document:
-    """Documento já com provenência correta (root atual) por padrão — os testes
-    que não são sobre provenância não devem disparar reingest por causa dela."""
+def _existing(
+    page_id: str,
+    edited: datetime | None,
+    deleted: bool = False,
+    kb_root_page_id: str = "roota",
+) -> Document:
+    """Documento já com provenência correta (mesmo root de `_approved`) por
+    padrão — os testes que não são sobre provenância não devem disparar
+    reingest por causa dela."""
     now = _dt(1)
     return Document(
         uuid=uuid4(), notion_page_id=page_id, title=f"Doc {page_id}", content="c",
         source_url="https://n", status="approved", created_at=now, updated_at=now,
         deleted_at=_dt(1) if deleted else None, last_edited_time=edited,
-        kb_root_page_id=normalize_page_id(settings.NOTION_KB_ROOT_PAGE_ID),
+        kb_root_page_id=kb_root_page_id,
     )
 
 
@@ -183,35 +192,44 @@ async def test_force_reingests_even_when_unchanged():
 
 
 @pytest.mark.asyncio
-async def test_stale_provenance_root_triggers_reingest_without_force(monkeypatch):
+async def test_stale_provenance_root_triggers_reingest_without_force():
     """Documento existente, NÃO stale (mesmo last_edited_time), mas com
-    `kb_root_page_id` divergente do root atual (ex.: `NULL` pré-migração 0004)
-    precisa ser reingerido mesmo sem `--force` — senão a base fica presa com
-    provenência velha para sempre após uma migração ou troca de root."""
-    monkeypatch.setattr(
-        settings, "NOTION_KB_ROOT_PAGE_ID", "23d8d655-c889-806d-8828-d527ce6a1529", raising=False
-    )
+    `kb_root_page_id` divergente do root sob o qual a página foi descoberta agora
+    (ex.: `NULL` pré-migração 0004) precisa ser reingerido mesmo sem `--force` —
+    senão a base fica presa com provenência velha para sempre após uma migração
+    ou troca de root.
+
+    Também trava a regressão em que a reconciliação (que roda no mesmo
+    `execute()`, já que este não é um run parcial) desfazia a auto-cura:
+    lendo a procedência do snapshot velho de `existing` em vez do root
+    recém-descoberto, ela via `kb_root_page_id=None` e soft-deletava a página
+    que acabara de ser corrigida."""
     notion = FakeNotion([_approved("a", _dt(5))])
     ingest = FakeIngest()
     stale_doc = _existing("a", _dt(5))  # last_edited_time igual — não é stale por timestamp
     stale_doc.kb_root_page_id = None  # provenência pré-migração 0004
-    action = _action(notion, ingest, FakeDocRepo([stale_doc]), FakeChunkRepo())
+    docs = FakeDocRepo([stale_doc])
+    action = _action(notion, ingest, docs, FakeChunkRepo())
 
     report = await action.execute()  # sem force
 
     assert ingest.executed == ["a"]
     assert report.ingested == 1 and report.skipped == 0
+    assert report.removed == 0
+    assert docs.soft_deleted == []
 
 
 @pytest.mark.asyncio
-async def test_provenance_is_stamped_from_traversal_section(monkeypatch):
+async def test_provenance_is_stamped_from_traversal_section():
     """`get_page` (FakeNotion) devolve uma NotionPage 'fresca' sem `section` — como
     o client real. A `section` só existe na `page` da travessia (`list_approved_pages`).
     Sem `full.section = page.section` no sync, a provenência se perderia."""
-    monkeypatch.setattr(
-        settings, "NOTION_KB_ROOT_PAGE_ID", "23d8d655-c889-806d-8828-d527ce6a1529", raising=False
-    )
-    notion = FakeNotion([_approved("a", _dt(5), section="Bootcamps")])
+    notion = FakeNotion([
+        _approved(
+            "a", _dt(5), section="Bootcamps",
+            kb_root_page_id="23d8d655-c889-806d-8828-d527ce6a1529",
+        )
+    ])
     ingest = FakeIngest()
     action = _action(notion, ingest, FakeDocRepo([]), FakeChunkRepo())
 
@@ -221,3 +239,42 @@ async def test_provenance_is_stamped_from_traversal_section(monkeypatch):
     doc = ingest.documents[0]
     assert doc.kb_section == "Bootcamps"
     assert doc.kb_root_page_id == "23d8d655c889806d8828d527ce6a1529"  # sem hífens
+
+
+@pytest.mark.asyncio
+async def test_ingests_each_page_under_its_own_root():
+    notion = FakeNotion([
+        _approved("a", _dt(5), kb_root_page_id="roota"),
+        _approved("b", _dt(5), kb_root_page_id="rootb"),
+    ])
+    ingest = FakeIngest()
+
+    await _action(notion, ingest, FakeDocRepo([]), FakeChunkRepo()).execute()
+
+    # FakeNotion.get_page devolve um NotionPage novo, sem procedência — é
+    # exatamente por isso que a action passa `page.kb_root_page_id` (da página
+    # descoberta) como segundo argumento posicional a `NotionPageMapper.to_document`,
+    # em vez de ler a procedência de `full` (a página completa).
+    assert {d.notion_page_id: d.kb_root_page_id for d in ingest.documents} == {
+        "a": "roota",
+        "b": "rootb",
+    }
+
+
+@pytest.mark.asyncio
+async def test_soft_deletes_documents_whose_root_is_no_longer_shared():
+    # Um root que o Yuri despublicou deixa de ser descoberto por
+    # `list_approved_pages` — a página some por AUSÊNCIA da travessia, não por
+    # comparação de procedência. O NotionClient real não tem como devolver uma
+    # página aprovada etiquetada com um root que ele não está percorrendo
+    # (`_collect_scope` só etiqueta com os roots descobertos), então este é o
+    # único cenário de saída de escopo que a action precisa (e consegue)
+    # detectar.
+    docs = FakeDocRepo([_existing("z", _dt(5), kb_root_page_id="rootremovido")])
+    chunks = FakeChunkRepo()
+
+    report = await _action(FakeNotion([]), FakeIngest(), docs, chunks).execute()
+
+    assert report.removed == 1
+    assert docs.soft_deleted == ["z"]
+    assert chunks.cleared != []

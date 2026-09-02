@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import Float, case, func, select
 from sqlalchemy.sql.elements import ColumnElement
 
-from src.domain.observability.dtos.ops_overview import TraceSummary
+from src.domain.observability.dtos.ops_overview import KnowledgeGap, TraceSummary
 from src.domain.observability.entities.turn_trace import TurnTrace
 from src.domain.observability.mappers import TurnTraceMapper
 from src.domain.observability.models.turn_trace import TurnTraceModel
@@ -93,3 +93,32 @@ class TurnTraceRepository:
         stmt = select(TurnTraceModel).where(TurnTraceModel.uuid == trace_id)
         model = (await self.session.execute(stmt)).scalar_one_or_none()
         return TurnTraceMapper.to_entity(model) if model else None
+
+    async def knowledge_gaps(self, window: str, limit: int = 10) -> list[KnowledgeGap]:
+        """Recusas com distância medida, agrupadas por pergunta, mais próximas primeiro."""
+        stmt = (
+            select(
+                TurnTraceModel.question,
+                func.min(TurnTraceModel.retrieval_best_distance).label("best"),
+                func.count().label("occurrences"),
+                func.min(TurnTraceModel.gate_search_query).label("search_query"),
+            )
+            .where(
+                *self._in_window(window),
+                TurnTraceModel.outcome == "refusal",
+                TurnTraceModel.retrieval_best_distance.isnot(None),
+            )
+            .group_by(TurnTraceModel.question)
+            .order_by(func.min(TurnTraceModel.retrieval_best_distance).asc())
+            .limit(limit)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            KnowledgeGap(
+                question=r.question,
+                search_query=r.search_query,
+                best_distance=float(r.best),
+                occurrences=int(r.occurrences),
+            )
+            for r in rows
+        ]
