@@ -97,9 +97,9 @@ export const ARCHITECTURE_MAP: MapBand[] = [
       },
       {
         id: "gate",
-        label: "Retrieval gate",
-        description: "Modelo pequeno decide buscar ou não, e reescreve a query. Fail-open.",
-        files: ["src/support/agent/retrieval_gate.py"],
+        label: "Nó do gate",
+        description: "Modelo pequeno decide buscar ou não, e reescreve a query. Fail-open: erro ou timeout marca o turno como degradado e recupera mesmo assim.",
+        files: ["src/support/agent/graph/nodes.py", "src/support/agent/models.py"],
         metric: "gate",
       },
       {
@@ -120,23 +120,40 @@ export const ARCHITECTURE_MAP: MapBand[] = [
         metric: "refusals",
       },
       {
-        id: "engine",
-        label: "OracleEngine + tools",
-        description: "Pydantic AI. Grounding, citação e recusa vêm do system prompt.",
+        id: "graph",
+        label: "Grafo do turno",
+        description: "StateGraph LangGraph: gate → retrieval → recusa ou resposta → tool loop. As três decisões são arestas condicionais, testadas isoladamente.",
         files: [
-          "src/support/agent/oracle_engine.py",
+          "src/support/agent/graph/builder.py",
+          "src/support/agent/graph/edges.py",
+          "src/support/agent/graph/state.py",
+        ],
+      },
+      {
+        id: "engine",
+        label: "Resposta + tools",
+        description: "Nó de resposta com as tools. Grounding, citação e recusa vêm do system prompt.",
+        files: [
+          "src/support/agent/graph/nodes.py",
           "src/support/agent/tools.py",
           "src/support/agent/prompts.py",
         ],
         metric: "engine",
       },
       {
+        id: "runner",
+        label: "Consumo em duas fases",
+        description: "Dirige o grafo até o primeiro token com a sessão de banco viva; só depois entrega o gerador ao SSE. É o que mantém retrieval e streaming em escopos diferentes.",
+        files: ["src/support/agent/graph/runner.py"],
+      },
+      {
         id: "persist",
         label: "Persistência + trace",
-        description: "Resposta e trace gravados pós-stream, em sessão própria.",
+        description: "Resposta e trace gravados pós-stream, em sessão própria. LangSmith rastreia a execução do grafo.",
         files: [
           "src/domain/conversations/actions/append_assistant_message_action.py",
           "src/domain/observability/actions/record_turn_trace_action.py",
+          "src/support/observability/langsmith.py",
         ],
         metric: "turns",
       },
