@@ -25,7 +25,7 @@ async def _fake_run_in_async_session(fn):
 async def test_search_action_is_built_inside_the_session_scope(monkeypatch):
     seen = {}
 
-    async def fake_run_all(cases, *, gate, search, engine, judge):
+    async def fake_run_all(cases, *, graph, search, judge):
         seen["session"] = search.chunk_repo.session
         return []
 
@@ -34,10 +34,7 @@ async def test_search_action_is_built_inside_the_session_scope(monkeypatch):
     monkeypatch.setattr(entry, "load_cases", lambda _path: [])
     monkeypatch.setattr(entry, "write_report", lambda *a, **kw: None)
     monkeypatch.setattr(
-        "src.support.agent.retrieval_gate.get_retrieval_gate", lambda: object()
-    )
-    monkeypatch.setattr(
-        "src.support.agent.oracle_engine.get_oracle_engine", lambda **kw: object()
+        "src.support.agent.graph.get_turn_graph_runner", lambda **kw: object()
     )
     monkeypatch.setattr(
         "src.support.clients.embeddings.embeddings_client.get_embeddings_client",
