@@ -76,7 +76,7 @@ Isso não é um detalhe do LangGraph — é o LangGraph encontrando o ADR-0006 (
 
 A resposta é `TurnGraphPort.start()` consumido em **duas fases**, implementado em `src/support/agent/graph/runner.py`:
 
-- `AnswerQuestionAction.execute()` chama `await runner.start(...)`, que dirige o grafo com `stream_mode=["updates", "messages"]` até o **primeiro token** (ou até a recusa, que não passa por LLM e chega via `updates`) — isso roda gate e retrieve **dentro** do escopo da sessão do request.
+- `AnswerQuestionAction.execute()` chama `await runner.start(...)`, que dirige o grafo com `stream_mode=["updates", "messages"]` até a **entrada do nó `answer`** (ou até a recusa, que não passa por LLM e chega via `updates`) — o critério é a entrada no nó, e não o primeiro token, porque uma resposta que abre só com `tool_calls` não produz token nenhum e deixaria o tool loop inteiro rodar com a conexão de banco presa — isso roda gate e retrieve **dentro** do escopo da sessão do request.
 - `start()` devolve um gerador (`_resume`) que o controller consome no corpo do SSE, já fora da sessão. Dali em diante só há token de LLM e tool HTTP — as tools são deliberadamente HTTP-only, e o comentário em `tools.py` sobre rodarem "com segurança durante o streaming" é a invariante que a estrutura agora impõe, não uma observação.
 
 O teste que protege essa invariante é o mais importante do lote: uma `search` fake que registra se rodou, com a asserção de que **ela já rodou** quando `start()` retorna, antes de qualquer iteração do gerador (`test_runner.py::test_gate_and_retrieval_run_before_the_generator_is_handed_off`). É a única defesa contra alguém "simplificar" o runner depois e reintroduzir o bug de sessão.
@@ -103,7 +103,11 @@ Duas alternativas foram descartadas por essa mesma restrição, não por gosto:
 
 Uma dependência sai, cinco entram (contando o `mcp` explicitado). Isso fura a **regra 10 do CLAUDE.md** de forma consciente — exatamente o motivo pelo qual o ADR-0007 havia rejeitado LangChain como núcleo. A decisão aqui assume o risco de churn de API do ecossistema LangChain em troca dos drivers descritos acima; não é isenção silenciosa da regra, é a exceção que este ADR autoriza.
 
-Consequência observada, não hipotética: majors de dependências transitivas se moveram como efeito colateral da troca — `openai` 2.44 → 3.6, `mcp` 1.28 → 2.1. O juiz do eval (que usa o SDK `openai` direto) foi verificado compatível com a nova major antes do corte do motor (passo 1 da sequência de migração), mas o comportamento do `mcp` 2.1 contra o Notion real em produção ainda não foi observado numa sincronização real — fica registrado como ponto a observar no primeiro sync pós-deploy, não como risco mitigado.
+Consequência observada, não hipotética: majors de dependências transitivas se moveram como efeito colateral da troca — `openai` 2.44 → 3.6, `mcp` 1.28 → 2.1. O que de fato foi verificado, e quando (correção de uma afirmação imprecisa da redação original desta ADR, que dava a entender que um eval completo havia rodado no momento da troca):
+
+- **Na troca (01/09/2026):** conferência estática do juiz do eval contra a API do SDK `openai` 3.6 — formato de chamada e de resposta — mais a suíte de testes. Não houve eval completo naquele momento.
+- **Em 02/09/2026, depois do corte:** o eval completo rodou contra o grafo **e** contra `openai` 3.6, com chamadas reais. Resultado idêntico ao baseline pré-migração — faithfulness 1.00 (n=9), appropriate_refusal 1.00 (n=5), citation_support 1.00 (n=7); delta 0.00 nas três métricas, nenhum caso abaixo do piso.
+- **Ainda não verificado:** o comportamento do `mcp` 2.1 contra o Notion real numa sincronização de produção. Fica registrado como ponto a observar no primeiro sync pós-deploy, não como risco mitigado — o eval não exercita esse caminho.
 
 ### LangSmith
 
@@ -133,7 +137,7 @@ Divisão de responsabilidade, para não duplicar UI (que é o que custa caro —
 - **Ecossistema com churn.** LangChain historicamente quebra compatibilidade entre minors; a mitigação é a mesma que já existia — o núcleo do agente fica contido em `support/agent/`, isolado do domínio.
 - **Uma dependência a mais para auditar** (efetivamente cinco entrando por uma saindo, ver seção de dependências), com o `mcp` saindo do estado transitivo para explícito.
 - **Extração de tokens em streaming permanece frágil.** No LangChain a leitura é `usage_metadata` em `AIMessage`, mais estável que a adivinhação de campo entre versões que o Pydantic AI exigia, mas ainda depende de flag por provider (`stream_usage`) e difere entre Anthropic e OpenAI. Princípio mantido: se o token não vier, o trace fica sem ele em vez de derrubar o turno.
-- **Compatibilidade de majors não observada em produção real.** `openai` e `mcp` subiram de major como efeito colateral; verificados pelo eval e pelos testes, mas o comportamento do `mcp` 2.1 contra o Notion real ainda não foi visto numa sincronização de produção.
+- **Compatibilidade de majors não observada em produção real.** `openai` e `mcp` subiram de major como efeito colateral. O `openai` 3.6 foi exercitado de ponta a ponta pelo eval completo de 02/09/2026 (delta 0.00 contra o baseline); o `mcp` 2.1 só passou pelos testes — seu comportamento contra o Notion real ainda não foi visto numa sincronização de produção.
 
 ## Alternativas consideradas
 
