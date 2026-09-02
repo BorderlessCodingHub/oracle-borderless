@@ -91,14 +91,7 @@ const DEMO_DETAILS: Record<string, TurnDetail> = {
     input_tokens: 2410,
     output_tokens: 320,
     error: null,
-    events: [
-      { at_ms: 0, step: "history_loaded", detail: { messages: 2, tokens_est: 180 } },
-      { at_ms: 12, step: "gate_decided", detail: { retrieve: true, degraded: false } },
-      { at_ms: 322, step: "retrieval_done", detail: { kept: 4, best_distance: 0.21 } },
-      { at_ms: 410, step: "engine_started", detail: {} },
-      { at_ms: 1170, step: "first_token", detail: {} },
-      { at_ms: 3390, step: "engine_finished", detail: { tool_calls: 1, citations: 3 } },
-    ],
+    langsmith_url: "https://smith.langchain.com/o/demo/projects/p/demo/r/demo-turn-1",
   },
   "demo-turn-2": {
     ...DEMO_TURNS[1],
@@ -114,12 +107,7 @@ const DEMO_DETAILS: Record<string, TurnDetail> = {
     input_tokens: null,
     output_tokens: null,
     error: null,
-    events: [
-      { at_ms: 0, step: "history_loaded", detail: { messages: 0, tokens_est: 0 } },
-      { at_ms: 9, step: "gate_decided", detail: { retrieve: true, degraded: false } },
-      { at_ms: 301, step: "retrieval_done", detail: { kept: 0, nearest_distance: 0.71 } },
-      { at_ms: 302, step: "refused", detail: { reason: "nada passou do limiar" } },
-    ],
+    langsmith_url: null,
   },
 };
 

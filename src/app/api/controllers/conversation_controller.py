@@ -25,6 +25,7 @@ from src.support.agent.graph import get_turn_graph_runner
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
 from src.support.core.context import CurrentAsyncSessionContext
 from src.support.core.session_scope import run_in_async_session
+from src.support.observability.langsmith import hash_email, new_run_id
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +45,19 @@ class ConversationController:
     async def ask(request: Request, data: AskQuestionRequest) -> StreamingResponse:
         user_email = request.headers.get(_USER_EMAIL_HEADER)
         search = SearchKnowledgeBaseAction(embeddings=get_embeddings_client())
-        action = AnswerQuestionAction(graph=get_turn_graph_runner(), search=search)
+        run_id = new_run_id()
+        action = AnswerQuestionAction(
+            graph=get_turn_graph_runner(run_id=run_id, user_hash=hash_email(user_email)),
+            search=search,
+        )
 
         # Conversa + user message são gravadas aqui (sessão do request viva).
         conversation_id, stream, draft = await action.execute(
             data.question, data.conversation_id, user_email
         )
+        # Gravado sempre — coluna barata; o link só aparece na UI quando
+        # LANGSMITH_PROJECT_URL está configurado (ver run_url).
+        draft.langsmith_run_id = run_id
 
         captured: dict = {"text": "", "citations": []}
 
@@ -69,7 +77,6 @@ class ConversationController:
                             draft.first_token_ms = int(
                                 (time.monotonic() - engine_started) * 1000
                             )
-                            draft.record("first_token")
                         captured["text"] += chunk.text
                         yield _sse("token", {"text": chunk.text})
                     elif chunk.type == "sources":
@@ -91,7 +98,6 @@ class ConversationController:
                 draft.engine_ms = int((time.monotonic() - engine_started) * 1000)
             draft.citations_count = len(captured["citations"])
             _absorb_engine_metrics(draft)
-            draft.record("turn_end", outcome=draft.outcome)
 
             # A resposta só é persistida em sucesso (decisão do M2); o trace é
             # gravado SEMPRE — turno que quebrou é o que mais interessa no trace.

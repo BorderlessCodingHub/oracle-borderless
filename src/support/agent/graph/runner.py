@@ -82,8 +82,6 @@ class TurnGraphRunner:
     ) -> None:
         self._graph = graph or TURN_GRAPH
         self._enable_tools = enable_tools
-        # run_id e user_hash só ganham uso na Task 13 (LangSmith); ficam aqui
-        # desde já para a fábrica não mudar de assinatura no meio do plano.
         self._run_id = run_id
         self._user_hash = user_hash
 
@@ -97,7 +95,7 @@ class TurnGraphRunner:
         extra_config: dict | None = None,
     ) -> AsyncIterator[AgentStreamChunk]:
         collected = {"citations": []}
-        config = {
+        config: dict = {
             "configurable": {
                 "deps": deps,
                 "signals": signals,
@@ -106,6 +104,12 @@ class TurnGraphRunner:
                 **(extra_config or {}),
             }
         }
+        # run_id/metadata ficam no TOPO do config (contrato do LangGraph/LangSmith),
+        # não em "configurable". O e-mail em claro nunca entra aqui — só o hash.
+        if self._run_id is not None:
+            config["run_id"] = self._run_id
+        if self._user_hash is not None:
+            config["metadata"] = {"user_hash": self._user_hash}
         state = {
             "question": question,
             "history": history,
@@ -154,6 +158,4 @@ def get_turn_graph_runner(
     run_id: str | None = None,
     user_hash: str | None = None,
 ) -> "TurnGraphRunner":
-    # run_id e user_hash só ganham uso na Task 13 (LangSmith); ficam aqui desde já
-    # para a fábrica não mudar de assinatura no meio do plano.
     return TurnGraphRunner(enable_tools=enable_tools, run_id=run_id, user_hash=user_hash)

@@ -51,8 +51,9 @@ class TurnSignals:
     """Sinal do turno, escrito pelos nós do grafo conforme ele progride.
 
     Sucede o antigo `TurnMetrics`, absorvendo o que a Action media à mão e o que
-    o `draft.record()` gravava como JSON. Mesmo padrão de sempre: objeto mutável
-    instanciado pela Action, escrito por quem executa.
+    o extinto `draft.record()` gravava como JSON — a sequência passo-a-passo
+    agora vive no LangSmith, não no Postgres. Mesmo padrão de sempre: objeto
+    mutável instanciado pela Action, escrito por quem executa.
     """
 
     tool_calls: int = 0

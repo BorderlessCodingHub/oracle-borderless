@@ -68,7 +68,9 @@ def _patch_controller(monkeypatch, graph=None):
     from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
 
     monkeypatch.setattr(
-        ctrl, "get_turn_graph_runner", lambda: graph or FakeTurnGraph(answer="resposta de teste")
+        ctrl,
+        "get_turn_graph_runner",
+        lambda **kw: graph or FakeTurnGraph(answer="resposta de teste"),
     )
     monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
 
@@ -81,7 +83,8 @@ async def _fetch_trace(conversation_id: UUID) -> dict:
             await s.execute(
                 text(
                     "SELECT question, gate_retrieve, retrieval_kept, outcome, engine_ms, "
-                    "first_token_ms, tool_calls, input_tokens, output_tokens, events, error "
+                    "first_token_ms, tool_calls, input_tokens, output_tokens, "
+                    "langsmith_run_id, error "
                     "FROM agent_traces WHERE conversation_id = :cid"
                 ),
                 {"cid": conversation_id},
@@ -127,9 +130,9 @@ async def test_trace_row_exists_after_a_successful_ask(monkeypatch):
     assert trace["tool_calls"] == 2
     assert trace["input_tokens"] == 123
     assert trace["output_tokens"] == 45
-    # a Action não registra mais eventos (gate/retrieval/recusa viraram nós do
-    # grafo) — só sobra o que o controller grava: primeiro token e fim do turno.
-    assert [e["step"] for e in trace["events"]] == ["first_token", "turn_end"]
+    # O controller gera o run_id antes de chamar a Action e grava a referência
+    # sempre — a sequência passo-a-passo em si vive no LangSmith, não aqui.
+    assert trace["langsmith_run_id"] is not None
 
 
 @pytest.mark.asyncio

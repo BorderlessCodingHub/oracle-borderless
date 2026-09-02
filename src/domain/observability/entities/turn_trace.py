@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
@@ -7,8 +7,9 @@ from uuid import UUID
 class TurnTrace:
     """O que aconteceu num turno do oráculo. Entity pura — sem SQLAlchemy.
 
-    Colunas planas são o que a página agrega em SQL; `events` é a sequência
-    ordenada que o detalhe do turno exibe. Ver spec, seção 3.
+    Colunas planas são o que a página agrega em SQL; `langsmith_run_id` é a
+    referência ao run completo, cuja sequência passo-a-passo o LangSmith já
+    mostra melhor do que o Postgres conseguiria. Ver spec, seção 3.
     """
 
     uuid: UUID
@@ -37,7 +38,7 @@ class TurnTrace:
     input_tokens: int | None = None
     output_tokens: int | None = None
     error: str | None = None
-    events: list[dict] = field(default_factory=list)
+    langsmith_run_id: str | None = None
 
     def is_refusal(self) -> bool:
         return self.outcome == "refusal"

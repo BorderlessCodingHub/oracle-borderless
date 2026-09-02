@@ -5,38 +5,18 @@ fases do request, o controller completa a fase do engine, e a background task
 pós-stream converte para Entity e persiste.
 """
 
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable
 from uuid import UUID
 
 from uuid6 import uuid7
 
 from src.domain.observability.entities.turn_trace import TurnTrace
 
-_JSON_SAFE = (str, int, float, bool, type(None))
-
-
-def _safe(value):
-    """JSONB aceita só primitivos; qualquer outra coisa vira str.
-
-    Existe para honrar o invariante "trace nunca derruba um turno": um detail
-    inesperado não pode estourar na serialização depois, longe da origem.
-    """
-    if isinstance(value, _JSON_SAFE):
-        return value
-    if isinstance(value, (list, tuple)):
-        return [_safe(v) for v in value]
-    if isinstance(value, dict):
-        return {str(k): _safe(v) for k, v in value.items()}
-    return str(value)
-
 
 @dataclass
 class TurnTraceDraft:
     question: str
-    clock: Callable[[], float] = time.monotonic
 
     user_email: str | None = None
     history_messages: int = 0
@@ -65,19 +45,7 @@ class TurnTraceDraft:
     message_id: UUID | None = None
     signals: object | None = None  # TurnSignals preenchido pelos nós do grafo
 
-    events: list[dict] = field(default_factory=list)
-    _t0: float = field(init=False, default=0.0, repr=False)
-
-    def __post_init__(self) -> None:
-        self._t0 = self.clock()
-
-    def elapsed_ms(self) -> int:
-        return int((self.clock() - self._t0) * 1000)
-
-    def record(self, step: str, **detail) -> None:
-        self.events.append(
-            {"at_ms": self.elapsed_ms(), "step": step, "detail": {k: _safe(v) for k, v in detail.items()}}
-        )
+    langsmith_run_id: str | None = None
 
     def to_entity(self, conversation_id: UUID) -> TurnTrace:
         return TurnTrace(
@@ -106,6 +74,6 @@ class TurnTraceDraft:
             input_tokens=self.input_tokens,
             output_tokens=self.output_tokens,
             error=self.error,
-            events=list(self.events),
+            langsmith_run_id=self.langsmith_run_id,
             created_at=datetime.now(timezone.utc),
         )

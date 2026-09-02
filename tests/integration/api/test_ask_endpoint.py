@@ -63,7 +63,7 @@ async def test_ask_streams_and_persists_both_turns(monkeypatch):
     from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
 
     monkeypatch.setattr(
-        ctrl, "get_turn_graph_runner", lambda: FakeTurnGraph(answer="resposta de teste")
+        ctrl, "get_turn_graph_runner", lambda **kw: FakeTurnGraph(answer="resposta de teste")
     )
     monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
 
@@ -106,7 +106,7 @@ async def test_ask_failure_emits_error_and_does_not_persist_assistant(monkeypatc
     import src.app.api.controllers.conversation_controller as ctrl
     from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
 
-    monkeypatch.setattr(ctrl, "get_turn_graph_runner", lambda: _FailingTurnGraph())
+    monkeypatch.setattr(ctrl, "get_turn_graph_runner", lambda **kw: _FailingTurnGraph())
     monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
 
     from main import app
@@ -145,7 +145,7 @@ async def test_ask_streams_refusal_and_persists_both_turns_when_nothing_found(mo
     monkeypatch.setattr(
         ctrl,
         "get_turn_graph_runner",
-        lambda: FakeTurnGraph(
+        lambda **kw: FakeTurnGraph(
             answer="Não encontrei informações sobre isso na base de conhecimento.",
             outcome="refusal",
         ),

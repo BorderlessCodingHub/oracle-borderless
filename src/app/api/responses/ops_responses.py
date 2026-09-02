@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from src.domain.observability.dtos.ops_overview import OpsOverview
 from src.domain.observability.entities.turn_trace import TurnTrace
+from src.support.observability.langsmith import run_url
 
 Window = Literal["24h", "7d", "all"]
 
@@ -115,7 +116,7 @@ class TurnDetailResponse(TurnSummaryResponse):
     input_tokens: int | None
     output_tokens: int | None
     error: str | None
-    events: list[dict]
+    langsmith_url: str | None
 
     @classmethod
     def from_entity(cls, t: TurnTrace) -> "TurnDetailResponse":
@@ -134,7 +135,7 @@ class TurnDetailResponse(TurnSummaryResponse):
             input_tokens=t.input_tokens,
             output_tokens=t.output_tokens,
             error=t.error,
-            events=t.events,
+            langsmith_url=run_url(t.langsmith_run_id),
         )
 
 
