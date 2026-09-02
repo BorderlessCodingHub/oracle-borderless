@@ -512,7 +512,7 @@ src/support/agent/
 
 O domínio consome o grafo por um único Protocol fino, `TurnGraphPort` (`src/support/agent/ports.py`) — nunca importa `langgraph` nem `langchain*`. A fronteira é protegida por `tests/unit/support/agent/test_domain_boundary.py`. Na direção oposta, os nós do grafo recebem as Actions de domínio (`SearchKnowledgeBaseAction`, `ListKnowledgeSectionsAction`, `build_out_of_scope_reply`) injetadas via `TurnDependencies`, sem que `support/` importe `domain/`.
 
-**Consumo em duas fases.** `DBSessionMiddleware` usa `BaseHTTPMiddleware`: o corpo do `StreamingResponse` SSE é gerado depois que a sessão async do request já foi commitada e fechada. Por isso `TurnGraphRunner.start()` dirige o grafo (`stream_mode=["updates", "messages"]`) até o **primeiro token** — o que já executa os nós `gate` e `retrieve`, que tocam o banco — e só então devolve o gerador do restante, consumido pelo controller fora do escopo da sessão. Dali em diante só há token de LLM e chamada de tool HTTP. Ver **ADR-0016** para o racional completo e por que as alternativas (grafo dono do stream inteiro; dois grafos separados) foram descartadas.
+**Consumo em duas fases.** `DBSessionMiddleware` usa `BaseHTTPMiddleware`: o corpo do `StreamingResponse` SSE é gerado depois que a sessão async do request já foi commitada e fechada. Por isso `TurnGraphRunner.start()` dirige o grafo (`stream_mode=["updates", "messages"]`) até a **entrada do nó `answer`** — o que já executa os nós `gate` e `retrieve`, que tocam o banco — e só então devolve o gerador do restante, consumido pelo controller fora do escopo da sessão. O critério é a entrada no nó, não o primeiro token: uma resposta que abre só com `tool_calls` (content vazio) não produz token nenhum, e parar no primeiro texto faria o laço `answer -> tools -> answer` inteiro rodar com a conexão de banco presa. Dali em diante só há token de LLM e chamada de tool HTTP. Ver **ADR-0016** para o racional completo e por que as alternativas (grafo dono do stream inteiro; dois grafos separados) foram descartadas.
 
 Não há checkpointer: o histórico da conversa segue exclusivamente em `conversations`/`messages`, decisão mantida do ADR-0007 e reafirmada no ADR-0016.
 
@@ -666,7 +666,7 @@ schedule.call(CleanupConversationsJob).daily(hour=3)
 
 ## Trace do turno
 
-Cada turno do oráculo acumula seu próprio rastro num coletor em memória — `TurnTraceDraft`, em `src/domain/observability/dtos/` — que a `AnswerQuestionAction` preenche com recência, gate, retrieval e recusa, e o gerador SSE do controller completa com a fase do engine (primeiro token, duração, tokens, tool calls).
+Cada turno do oráculo acumula seu próprio rastro num coletor em memória — `TurnTraceDraft`, em `src/domain/observability/dtos/` — que a `AnswerQuestionAction` preenche com recência, gate, retrieval e recusa, e a fase do engine (primeiro token, duração, tokens, tool calls) vem medida do próprio grafo, via `TurnSignals`, que o gerador SSE do controller apenas absorve.
 
 Terminado o stream, a **mesma** background task que persiste a resposta do assistente grava o trace numa linha de `agent_traces`, em sessão própria (`run_in_async_session`) — o trace primeiro, porque turno que quebrou é o que mais interessa. Nada disso pode derrubar um turno: o call site fica sob `try/except` que loga e engole.
 

@@ -143,7 +143,7 @@ export const ARCHITECTURE_MAP: MapBand[] = [
       {
         id: "runner",
         label: "Consumo em duas fases",
-        description: "Dirige o grafo até o primeiro token com a sessão de banco viva; só depois entrega o gerador ao SSE. É o que mantém retrieval e streaming em escopos diferentes.",
+        description: "Dirige o grafo até a ENTRADA do nó de resposta com a sessão de banco viva; só depois entrega o gerador ao SSE. É o que mantém retrieval e streaming em escopos diferentes.",
         files: ["src/support/agent/graph/runner.py"],
       },
       {
