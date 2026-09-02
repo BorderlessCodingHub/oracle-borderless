@@ -40,6 +40,13 @@ class TraceSummaryResponse(BaseModel):
     avg_best_distance: float | None
 
 
+class KnowledgeGapResponse(BaseModel):
+    question: str
+    search_query: str | None
+    best_distance: float
+    occurrences: int
+
+
 class OpsOverviewResponse(BaseModel):
     window: str
     knowledge: KnowledgeCountsResponse
@@ -47,6 +54,7 @@ class OpsOverviewResponse(BaseModel):
     traces: TraceSummaryResponse
     rag_top_k: int
     rag_max_distance: float
+    knowledge_gaps: list[KnowledgeGapResponse]
 
     @classmethod
     def from_dto(cls, dto: OpsOverview) -> "OpsOverviewResponse":
@@ -57,6 +65,7 @@ class OpsOverviewResponse(BaseModel):
             traces=TraceSummaryResponse(**vars(dto.traces)),
             rag_top_k=dto.rag_top_k,
             rag_max_distance=dto.rag_max_distance,
+            knowledge_gaps=[KnowledgeGapResponse(**vars(g)) for g in dto.knowledge_gaps],
         )
 
 

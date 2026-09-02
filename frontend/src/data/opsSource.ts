@@ -43,6 +43,20 @@ const DEMO_OVERVIEW: OpsOverview = {
   },
   rag_top_k: 6,
   rag_max_distance: 0.55,
+  knowledge_gaps: [
+    {
+      question: "como renovo o certificado do bootcamp?",
+      search_query: "renovação certificado bootcamp",
+      best_distance: 0.58,
+      occurrences: 3,
+    },
+    {
+      question: "o programa de mentoria tem custo extra?",
+      search_query: "mentoria custo",
+      best_distance: 0.63,
+      occurrences: 1,
+    },
+  ],
 };
 
 const DEMO_TURNS: TurnSummary[] = [

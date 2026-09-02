@@ -36,6 +36,14 @@ export interface TraceSummary {
   avg_best_distance: number | null;
 }
 
+/** Recusa quase-cobrida — a distância mais próxima ficou perto do limiar. */
+export interface KnowledgeGap {
+  question: string;
+  search_query: string | null;
+  best_distance: number;
+  occurrences: number;
+}
+
 export interface OpsOverview {
   window: string;
   knowledge: KnowledgeCounts;
@@ -43,6 +51,7 @@ export interface OpsOverview {
   traces: TraceSummary;
   rag_top_k: number;
   rag_max_distance: number;
+  knowledge_gaps: KnowledgeGap[];
 }
 
 /** `TurnSummaryResponse` — sem `user_email` e sem `message_id`, de propósito. */
