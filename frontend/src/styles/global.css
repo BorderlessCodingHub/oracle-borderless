@@ -7,7 +7,7 @@ body {
     radial-gradient(50% 40% at 100% 100%, var(--glow-2), transparent 70%);
   background-attachment: fixed;
 }
-h1, h2, h3 { line-height: 1.1; letter-spacing: -0.02em; font-weight: 800; }
+h1, h2, h3 { line-height: 1.1; letter-spacing: -0.02em; font-weight: 800; text-wrap: balance; }
 .container { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-5); }
 .text-gradient {
   background: var(--gradient-text);
@@ -16,3 +16,16 @@ h1, h2, h3 { line-height: 1.1; letter-spacing: -0.02em; font-weight: 800; }
   color: transparent;
 }
 .eyebrow { color: var(--emerald-ink); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; font-size: 0.78rem; }
+
+/* Foco visível e consistente para navegação por teclado. */
+:focus-visible { outline: 2px solid var(--emerald-ink); outline-offset: 2px; }
+
+/* Quem pediu menos movimento não vê cursor piscando, dots quicando nem
+   chevron girando — as animações colapsam para o estado final. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

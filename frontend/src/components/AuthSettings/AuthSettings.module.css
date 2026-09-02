@@ -1,0 +1,12 @@
+.account { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.avatar {
+  width: 34px; height: 34px; border-radius: 50%; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border);
+  background: var(--violet-soft);
+  color: var(--violet-ink);
+  font-weight: 700; font-size: .82rem;
+}
+.identity { display: grid; min-width: 0; }
+.name { font-size: .82rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status { font-size: .7rem; color: var(--text-muted); }

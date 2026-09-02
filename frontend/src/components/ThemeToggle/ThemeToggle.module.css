@@ -1,22 +1,12 @@
 .group { display: inline-flex; gap: var(--space-1); padding: var(--space-1); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-1); }
-.option, .active { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 0; border-radius: var(--radius-sm); font: inherit; font-size: .82rem; cursor: pointer; }
+.option, .active { display: inline-flex; align-items: center; padding: 6px 9px; border: 0; border-radius: var(--radius-sm); font: inherit; font-size: .82rem; cursor: pointer; transition: color .15s ease, background-color .15s ease; }
 .option { background: transparent; color: var(--text-muted); }
 .option:hover { color: var(--text); }
 .active { background: var(--violet-soft); color: var(--text); }
 /* Fallback explícito: alguns fallbacks default do sistema não têm ☾ (Windows) */
 .icon { font-family: "Segoe UI Symbol", "Apple Symbols", sans-serif; }
 
-/* Ícone-only já a partir de 1080px, não só no telefone: com rótulo o controle
-   ocupa ~270px, e o header só cabe inteiro a partir de ~1085px de viewport.
-   O rótulo continua no leitor de tela — some visualmente, não da árvore de
-   acessibilidade. */
-@media (max-width: 1080px) {
-  .option, .active { padding: 6px 9px; }
-  .label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-}
-
-/* Telefones estreitos (<=400px): aperta mais o que sobrou. */
-@media (max-width: 400px) {
-  .group { gap: 0; }
-  .option, .active { padding: 6px 7px; }
-}
+/* Controle de canto (topo direito da tela): sempre só ícones — o rótulo some
+   visualmente em todas as larguras, mas continua na árvore de acessibilidade
+   (tooltips via title cobrem o mouse). */
+.label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

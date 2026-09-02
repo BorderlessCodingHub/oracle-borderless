@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Logo } from "../../../components/Logo/Logo";
-import { ThemeToggle } from "../../../components/ThemeToggle/ThemeToggle";
+import { AuthSettings } from "../../../components/AuthSettings/AuthSettings";
 import type { ConversationSummary } from "../../../lib/types";
 import styles from "../ChatPage.module.css";
 
@@ -34,6 +34,9 @@ export function Sidebar({ conversations, activeId, onNew, onOpen }: Props) {
       <Link to="/" className={styles.sidebarBrand}><Logo size={34} /> Oracle Borderless</Link>
       <button className={styles.newBtn} onClick={onNew}>+ Nova conversa</button>
       <div className={styles.listLabel}>Conversas</div>
+      {conversations.length === 0 && (
+        <p className={styles.convEmpty}>Suas conversas aparecem aqui.</p>
+      )}
       <ul className={styles.convList}>
         {conversations.map((c) => (
           <li key={c.id}>
@@ -48,8 +51,7 @@ export function Sidebar({ conversations, activeId, onNew, onOpen }: Props) {
         ))}
       </ul>
       <div className={styles.sidebarFoot} data-testid="sidebar-foot">
-        <ThemeToggle />
-        {/* Identidade volta aqui quando /me existir (fase de autenticação). */}
+        <AuthSettings />
       </div>
     </aside>
   );

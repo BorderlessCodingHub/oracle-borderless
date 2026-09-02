@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Cor do chrome do navegador acompanha --bg de tokens.css (mudou lá, mude
+         aqui e em src/lib/theme.ts). O script abaixo corrige quando o tema
+         salvo diverge do SO. -->
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#080808" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#FBFBFD" />
     <script>
       // Aplica o tema antes do primeiro paint, senão quem escolheu claro vê um
       // lampejo preto a cada reload. Duplica src/lib/theme.ts de propósito:

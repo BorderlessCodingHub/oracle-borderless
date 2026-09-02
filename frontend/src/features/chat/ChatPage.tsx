@@ -10,6 +10,7 @@ import { EmptyState } from "./components/EmptyState";
 import { ThinkingIndicator } from "./components/ThinkingIndicator";
 import { ErrorState } from "./components/ErrorState";
 import { Logo } from "../../components/Logo/Logo";
+import { ThemeToggle } from "../../components/ThemeToggle/ThemeToggle";
 import styles from "./ChatPage.module.css";
 
 let turnIdSeq = 0;
@@ -86,7 +87,12 @@ export default function ChatPage() {
   }, [stream.answer, stream.citations, stream.status]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    const reduceMotion =
+      typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: reduceMotion ? "auto" : "smooth",
+    });
   }, [turns, stream.status]);
 
   useEffect(() => {
@@ -157,11 +163,18 @@ export default function ChatPage() {
       />
       <div className={styles.main}>
         <header className={styles.topbar}>
-          <div>
+          <div className={styles.topbarTitle}>
             <strong>{turns.length ? "Conversa" : "Nova conversa"}</strong>
             <span className={styles.topSub}>● Respondendo só com fontes aprovadas do Notion</span>
           </div>
-          {/* Identidade volta aqui quando /me existir (fase de autenticação). */}
+          <div className={styles.topbarActions}>
+            {/* No mobile a sidebar some — sem este botão não há como iniciar
+                outra conversa em telas estreitas. */}
+            <button type="button" className={styles.newBtnCompact} onClick={newConversation}>
+              + Nova conversa
+            </button>
+            <ThemeToggle />
+          </div>
         </header>
         <div className={styles.thread} ref={scrollRef}>
           {turns.length === 0 && stream.status === "idle" ? (

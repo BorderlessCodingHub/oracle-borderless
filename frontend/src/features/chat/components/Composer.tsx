@@ -13,9 +13,13 @@ export function Composer({ onSend, disabled }: { onSend: (q: string) => void; di
   return (
     <form className={styles.composer} onSubmit={submit}>
       <input
+        name="question"
+        aria-label="Pergunta ao oráculo"
+        autoComplete="off"
+        enterKeyHint="send"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Faça sua pergunta..."
+        placeholder="Faça sua pergunta…"
       />
       <button type="submit" aria-label="Enviar" disabled={disabled}>↑</button>
     </form>

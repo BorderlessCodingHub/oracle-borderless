@@ -29,8 +29,18 @@ export function resolveTheme(theme: Theme): ResolvedTheme {
   return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
+/** Espelha --bg de tokens.css — mudou lá, mude aqui e no index.html. */
+const THEME_META_COLORS: Record<ResolvedTheme, string> = {
+  dark: "#080808",
+  light: "#FBFBFD",
+};
+
 export function applyTheme(theme: Theme): ResolvedTheme {
   const resolved = resolveTheme(theme);
   document.documentElement.setAttribute("data-theme", resolved);
+  // O chrome do navegador acompanha o tema forçado, não só o do SO.
+  document
+    .querySelectorAll('meta[name="theme-color"]')
+    .forEach((meta) => meta.setAttribute("content", THEME_META_COLORS[resolved]));
   return resolved;
 }
