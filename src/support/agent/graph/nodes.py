@@ -165,6 +165,14 @@ async def answer_node(state: TurnState, config) -> dict:
     cfg = config["configurable"]
     signals = cfg["signals"]
 
+    # Carimbo da PRIMEIRA entrada no estágio de resposta (revisão I2). É a origem
+    # de first_token_ms/engine_ms, que o runner fecha, e o marcador que diz ao
+    # runner que uma falha daqui em diante é do estágio de resposta — não de
+    # gate/retrieve/refuse (revisão I3). Nas re-entradas do tool loop (answer ->
+    # tools -> answer) não se mexe: a origem é a primeira entrada.
+    if signals.answer_started_at is None:
+        signals.answer_started_at = time.monotonic()
+
     existing_messages = state.get("messages")
     messages = existing_messages or _answer_messages(state)
     model = _answer_model(config, enable_tools=cfg.get("enable_tools", True))

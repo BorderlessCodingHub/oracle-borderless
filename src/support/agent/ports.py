@@ -74,6 +74,23 @@ class TurnSignals:
 
     outcome: str = "answer"  # "answer" | "refusal" | "error"
 
+    # Latência do estágio de resposta, medida DENTRO do grafo (revisão I2).
+    # Antes o controller cronometrava a partir do início do corpo SSE; com o
+    # consumo em duas fases o primeiro token já nasce durante o `await start()`,
+    # então aquele relógio dava `first_token_ms` ≈ 0 sempre e deixava de fora
+    # justamente a fatia dominante do `engine_ms`. Quem mede agora é quem sabe:
+    # o nó `answer` carimba a entrada, o runner fecha as duas contas.
+    #
+    # `answer_started_at` é interno (time.monotonic da PRIMEIRA entrada no nó
+    # `answer`) e não vai para o trace — só serve de origem das duas medidas
+    # abaixo. Também é o marcador que distingue "o estágio de resposta começou"
+    # de "ainda estávamos em gate/retrieve/refuse" (ver runner, revisão I3).
+    answer_started_at: float | None = None
+    # Ambos ficam None no caminho de recusa: a recusa é texto canônico emitido
+    # na hora, e entrar nas médias do motor misturaria as duas coisas.
+    first_token_ms: int | None = None
+    engine_ms: int | None = None
+
 
 class KnowledgeSearchPort(Protocol):
     """Satisfeito por SearchKnowledgeBaseAction, sem alteração."""

@@ -205,3 +205,183 @@ class Test_token_chunk:
         payload = (AIMessage(content="x"), {"langgraph_node": "gate"})
 
         assert _token_chunk(payload) is None
+
+
+class _SlowChatModel:
+    """Demora `delay` segundos ANTES de responder — é o que separa "medido a
+    partir da entrada no nó de resposta" de "medido depois do handoff"."""
+
+    def __init__(self, delay: float, text: str = "resposta do oráculo"):
+        self._delay = delay
+        self._text = text
+
+    def bind_tools(self, tools):
+        return self
+
+    async def ainvoke(self, messages):
+        import asyncio
+
+        await asyncio.sleep(self._delay)
+        return AIMessage(content=self._text)
+
+
+class _ExplodingChatModel:
+    """Quebra ANTES de qualquer token — a falha mais comum do provider."""
+
+    def bind_tools(self, tools):
+        return self
+
+    async def ainvoke(self, messages):
+        raise RuntimeError("provider caiu antes do primeiro token")
+
+
+class _FailingSearch:
+    async def execute(self, query, top_k=None):
+        raise RuntimeError("pgvector fora do ar")
+
+
+class _ToolCallingModel:
+    """Abre com uma AIMessage SÓ de tool_calls (content vazio) — a forma comum
+    de Anthropic/OpenAI. Nenhum texto é produzido na primeira entrada."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    async def ainvoke(self, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return AIMessage(
+                content="",
+                tool_calls=[{"name": "fake_tool", "args": {"query": "psp"}, "id": "call-1"}],
+            )
+        return AIMessage(content="resposta final")
+
+
+def _tool_loop_graph(executed: dict):
+    """Grafo mínimo answer -> tools -> answer, com uma tool FAKE (sem rede).
+
+    O grafo real embute `ToolNode(build_tools())`, cujas tools batem na web e no
+    Notion; aqui só interessa saber SE o loop rodou, então a tool é local."""
+    from langchain_core.tools import tool
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.prebuilt import ToolNode, tools_condition
+
+    from src.support.agent.graph.nodes import answer_node
+    from src.support.agent.graph.state import TurnState
+
+    @tool
+    def fake_tool(query: str) -> str:
+        """Tool falsa: só registra que foi executada."""
+        executed["ran"] = True
+        return "resultado da tool"
+
+    builder = StateGraph(TurnState)
+    builder.add_node("answer", answer_node)
+    builder.add_node("tools", ToolNode([fake_tool]))
+    builder.add_edge(START, "answer")
+    builder.add_conditional_edges("answer", tools_condition, {"tools": "tools", END: END})
+    builder.add_edge("tools", "answer")
+    return builder.compile()
+
+
+@pytest.mark.asyncio
+async def test_phase_one_stops_at_the_answer_node_even_without_any_text():
+    """A INVARIANTE, do outro lado (revisão I4).
+
+    Parar no primeiro TEXTO não bastava: com uma primeira resposta só de
+    tool_calls nenhum chunk de texto nasce, e o laço answer -> tools -> answer
+    inteiro rodaria dentro do `await start()` — segurando a conexão Postgres do
+    request durante chamadas HTTP externas. A fase 1 termina na ENTRADA do nó de
+    resposta, com ou sem texto."""
+    executed = {"ran": False}
+    model = _ToolCallingModel()
+    runner = TurnGraphRunner(graph=_tool_loop_graph(executed), enable_tools=False)
+
+    stream = await runner.start(
+        "o que é PSP?",
+        [],
+        _deps(_RecordingSearch([_snippet()])),
+        TurnSignals(),
+        knowledge=[_snippet()],
+        extra_config={"answer_model": model},
+    )
+
+    assert executed["ran"] is False, (
+        "a tool rodou DENTRO do await de start(): a chamada HTTP externa está "
+        "segurando a conexão de banco do request"
+    )
+    assert model.calls == 1
+
+    chunks = await _drain(stream)
+
+    assert executed["ran"] is True
+    assert "resposta final" in "".join(c.text for c in chunks if c.type == "text")
+
+
+@pytest.mark.asyncio
+async def test_first_token_and_engine_ms_are_measured_from_the_answer_node():
+    """Revisão I2: quem mede é o grafo. Medido do corpo SSE, `first_token_ms`
+    daria ~0 — o primeiro token já nasceu durante o `await start()`."""
+    signals = TurnSignals()
+
+    stream = await _runner().start(
+        "o que é PSP?",
+        [],
+        _deps(_RecordingSearch([_snippet()])),
+        signals,
+        extra_config=_models(answer=_SlowChatModel(delay=0.05)),
+    )
+    await _drain(stream)
+
+    assert signals.first_token_ms is not None
+    assert signals.first_token_ms >= 50, (
+        f"first_token_ms={signals.first_token_ms}: a medida está começando "
+        "depois do handoff, não na entrada do nó de resposta"
+    )
+    assert signals.engine_ms is not None
+    assert signals.engine_ms >= signals.first_token_ms
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_leaves_the_engine_latencies_unmeasured():
+    """A recusa é texto canônico, sem modelo: não entra nas médias do motor."""
+    signals = TurnSignals()
+
+    stream = await _runner().start(
+        "quanto custa um carro?", [], _deps(_RecordingSearch([])), signals, extra_config=_models()
+    )
+    await _drain(stream)
+
+    assert signals.first_token_ms is None
+    assert signals.engine_ms is None
+
+
+@pytest.mark.asyncio
+async def test_an_answer_stage_failure_is_deferred_to_the_generator():
+    """Revisão I3: se a falha do modelo subisse pelo `await start()`, o
+    middleware faria rollback (perdendo a mensagem do usuário) e o turno viraria
+    um 500 seco, SEM linha de agent_traces com outcome="error" — o trace mais
+    valioso de todos. Adiada, ela cai no `except` do controller."""
+    stream = await _runner().start(
+        "o que é PSP?",
+        [],
+        _deps(_RecordingSearch([_snippet()])),
+        TurnSignals(),
+        extra_config=_models(answer=_ExplodingChatModel()),
+    )
+
+    with pytest.raises(RuntimeError, match="provider caiu"):
+        await _drain(stream)
+
+
+@pytest.mark.asyncio
+async def test_a_retrieval_failure_still_breaks_inside_the_session():
+    """O outro lado da regra: falha de retrieval sobe EAGER, dentro do escopo do
+    request, para o rollback do middleware pegar (spec, seção 7)."""
+    with pytest.raises(RuntimeError, match="pgvector fora do ar"):
+        await _runner().start(
+            "o que é PSP?", [], _deps(_FailingSearch()), TurnSignals(), extra_config=_models()
+        )

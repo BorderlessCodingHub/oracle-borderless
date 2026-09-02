@@ -1,6 +1,5 @@
 import json
 import logging
-import time
 from typing import AsyncIterator
 from uuid import UUID
 
@@ -64,19 +63,9 @@ class ConversationController:
         async def event_source() -> AsyncIterator[str]:
             yield _sse("conversation", {"id": str(conversation_id)})
             failed = False
-            engine_started = time.monotonic()
             try:
                 async for chunk in stream:
                     if chunk.type == "text":
-                        # Só há "latência do motor" quando um modelo de fato rodou
-                        # (ver `_engine_ran`). No caminho de recusa, o "texto" é
-                        # uma string canônica emitida na hora — contá-lo aqui
-                        # misturaria as duas coisas na média que a página de ops
-                        # mostra (ver correção pós-revisão).
-                        if _engine_ran(draft) and draft.first_token_ms is None:
-                            draft.first_token_ms = int(
-                                (time.monotonic() - engine_started) * 1000
-                            )
                         captured["text"] += chunk.text
                         yield _sse("token", {"text": chunk.text})
                     elif chunk.type == "sources":
@@ -94,8 +83,6 @@ class ConversationController:
                 draft.error = f"{type(exc).__name__}: {exc}"[:512]
                 yield _sse("error", {"message": "erro ao gerar a resposta"})
 
-            if _engine_ran(draft):
-                draft.engine_ms = int((time.monotonic() - engine_started) * 1000)
             draft.citations_count = len(captured["citations"])
             _absorb_engine_metrics(draft)
 
@@ -154,6 +141,16 @@ def _absorb_engine_metrics(draft: TurnTraceDraft) -> None:
     draft.tool_calls = s.tool_calls
     draft.input_tokens = s.input_tokens
     draft.output_tokens = s.output_tokens
+    # first_token_ms/engine_ms vêm MEDIDOS do grafo (revisão I2). O controller
+    # não pode cronometrá-los: com o consumo em duas fases o primeiro token já
+    # nasceu durante o `await start()`, antes de este corpo SSE começar a
+    # iterar — medir daqui dava ~0 no primeiro token e deixava de fora a fatia
+    # dominante do engine_ms. `_engine_ran` segue como filtro: a recusa é texto
+    # canônico e não entra nas médias do motor. Podem chegar None (turno que
+    # quebrou antes do fim do stream); a coluna é nullable.
+    if _engine_ran(draft):
+        draft.first_token_ms = s.first_token_ms
+        draft.engine_ms = s.engine_ms
     # `outcome` só vem do signals se o controller não o marcou como "error":
     # um turno que quebrou no meio do stream continua sendo erro.
     if draft.outcome != "error":

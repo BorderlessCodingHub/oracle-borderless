@@ -22,6 +22,8 @@ class FakeTurnGraph:
         tool_calls: int = 0,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
+        first_token_ms: int = 7,
+        engine_ms: int = 42,
     ) -> None:
         self._answer = answer
         self._citations = citations or [Citation("notion", "Doc", "https://n/a", "trecho")]
@@ -32,6 +34,8 @@ class FakeTurnGraph:
         self._tool_calls = tool_calls
         self._input_tokens = input_tokens
         self._output_tokens = output_tokens
+        self._first_token_ms = first_token_ms
+        self._engine_ms = engine_ms
         self.question = None
         self.knowledge = None
 
@@ -55,6 +59,13 @@ class FakeTurnGraph:
             signals.tool_calls = self._tool_calls
             signals.input_tokens = self._input_tokens
             signals.output_tokens = self._output_tokens
+            # Desde a revisão I2 quem mede a latência do motor é o grafo, não o
+            # controller — o fake precisa preenchê-la como o runner real faz.
+            # No caminho de recusa nenhum modelo roda: as duas ficam None.
+            if self._outcome == "answer":
+                signals.answer_started_at = 0.0
+                signals.first_token_ms = self._first_token_ms
+                signals.engine_ms = self._engine_ms
         return self._stream()
 
     async def _stream(self) -> AsyncIterator[AgentStreamChunk]:
