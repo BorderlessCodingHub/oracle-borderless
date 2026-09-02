@@ -7,6 +7,7 @@ from typing import AsyncIterator
 from src.support.core.database import dispose_engines
 from src.support.core.logging import configure_logging
 from src.support.core.settings import settings
+from src.support.observability.langsmith import configure_langsmith
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,8 @@ class LifespanManager:
     async def startup(self) -> None:
         configure_logging()
         logger.info("Iniciando %s (env=%s)", settings.APP_NAME, settings.ENVIRONMENT)
+
+        configure_langsmith()
 
         self._validate_kb_root_env()
 

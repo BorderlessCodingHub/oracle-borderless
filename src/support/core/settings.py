@@ -66,6 +66,15 @@ class Settings(BaseSettings):
     # Onde o harness de eval grava seus reports (lidos pela página de ops)
     EVAL_REPORTS_DIR: str = "evals/reports"
 
+    # --- Tracing: LangSmith (opcional; desligado por padrão) ---
+    LANGSMITH_TRACING: bool = False
+    LANGSMITH_API_KEY: str | None = None
+    LANGSMITH_PROJECT: str = "oracle-borderless"
+    # Base do deep link, copiada da URL do projeto no LangSmith
+    # (ex.: https://smith.langchain.com/o/<org>/projects/p/<project>).
+    # Sem ela o trace guarda o run_id mas a página de ops não oferece link.
+    LANGSMITH_PROJECT_URL: str | None = None
+
     # --- Embeddings (desacoplado do provedor de chat; ver ADR-0008) ---
     EMBEDDING_PROVIDER: Literal["openai"] = "openai"
     EMBEDDING_MODEL: str = "text-embedding-3-small"
