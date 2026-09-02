@@ -366,3 +366,55 @@ async def test_a_tool_loop_reentry_reuses_the_state_messages_and_returns_only_th
 
     assert model.received == prior
     assert out["messages"] == [reply]
+
+
+class _FakeSearchByQuery:
+    """Devolve snippets por query — simula reescrita que embeda pior que a pergunta."""
+
+    def __init__(self, by_query):
+        self._by_query = by_query
+        self.queries = []
+
+    async def execute(self, query, top_k=None):
+        self.queries.append(query)
+        return self._by_query.get(query, [])
+
+
+@pytest.mark.asyncio
+async def test_a_rewrite_that_keeps_nothing_falls_back_to_the_raw_question():
+    search = _FakeSearchByQuery({"O que é a mentoria a base?": [_snippet()]})
+    signals = TurnSignals()
+    config = {"configurable": {"signals": signals, "deps": _deps(search=search)}}
+
+    out = await retrieve_node(
+        {"question": "O que é a mentoria a base?", "search_query": "mentoria da base"}, config
+    )
+
+    assert search.queries == ["mentoria da base", "O que é a mentoria a base?"]
+    assert len(out["knowledge"]) == 1
+    assert out["search_query"] == "O que é a mentoria a base?"
+    assert signals.retrieval_kept == 1
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_that_also_keeps_nothing_still_refuses():
+    search = _FakeSearchByQuery({})
+    signals = TurnSignals()
+    config = {"configurable": {"signals": signals, "deps": _deps(search=search)}}
+
+    out = await retrieve_node({"question": "pergunta", "search_query": "reescrita"}, config)
+
+    assert search.queries == ["reescrita", "pergunta"]
+    assert out["knowledge"] == []
+    assert signals.retrieval_kept == 0
+
+
+@pytest.mark.asyncio
+async def test_a_rewrite_equal_to_the_question_never_searches_twice():
+    search = _FakeSearchByQuery({})
+    signals = TurnSignals()
+    config = {"configurable": {"signals": signals, "deps": _deps(search=search)}}
+
+    await retrieve_node({"question": "pergunta", "search_query": "pergunta"}, config)
+
+    assert search.queries == ["pergunta"]

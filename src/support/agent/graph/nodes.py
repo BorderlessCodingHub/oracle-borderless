@@ -24,12 +24,17 @@ Decida se responder à ÚLTIMA mensagem do usuário exige buscar nessa base.
 
 - retrieve=false para: saudações, agradecimentos, conversa fiada, perguntas sobre
   você mesmo, e qualquer coisa totalmente respondível pelo histórico da conversa.
+  Uma resposta anterior dizendo que NÃO encontrou informações não torna a pergunta
+  respondível pelo histórico — se o usuário insiste ou reformula, retrieve=true.
 - retrieve=true para qualquer pergunta substantiva sobre o ecossistema, suas regras
   ou dados operacionais.
 
-Quando retrieve=true, devolva também search_query: uma query AUTÔNOMA, no idioma da
-pergunta, resolvendo pronomes/elipses a partir da conversa (ex.: "e as renovações?"
--> "renovação de PSP"). Quando retrieve=false, search_query é "".
+Quando retrieve=true, devolva também search_query: a pergunta reescrita de forma
+AUTÔNOMA, no idioma da pergunta, resolvendo pronomes/elipses a partir da conversa.
+Mantenha a forma de pergunta completa — NÃO condense em palavras-chave (ex.:
+"e as renovações?" -> "como funciona a renovação da mentoria PSP?", nunca
+"renovação PSP"). Se a pergunta já é autônoma, devolva-a como está.
+Quando retrieve=false, search_query é "".
 """
 
 
@@ -97,10 +102,17 @@ async def retrieve_node(state: TurnState, config) -> dict:
     signals.retrieval_threshold = settings.RAG_MAX_DISTANCE
 
     started = time.monotonic()
-    knowledge = await deps.search.execute(state["search_query"])
+    query = state["search_query"]
+    knowledge = await deps.search.execute(query)
+    if not knowledge and state.get("question") and query != state["question"]:
+        # A reescrita do gate pode condensar a pergunta em palavras-chave que
+        # embedam pior que o texto original e caem fora do limiar. Antes de
+        # recusar, tenta a pergunta crua — uma recuperação a mais > uma perdida.
+        query = state["question"]
+        knowledge = await deps.search.execute(query)
     signals.retrieval_ms = int((time.monotonic() - started) * 1000)
     signals.retrieval_kept = len(knowledge)
-    return {"knowledge": knowledge}
+    return {"knowledge": knowledge, "search_query": query}
 
 
 async def refuse_node(state: TurnState, config) -> dict:
