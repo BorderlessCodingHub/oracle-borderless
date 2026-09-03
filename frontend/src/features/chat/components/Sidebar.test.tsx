@@ -1,32 +1,35 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
+import { AuthProvider } from "../../../hooks/useAuth";
+import { loadSession, saveSession } from "../../../lib/auth/session";
 import { Sidebar } from "./Sidebar";
 
+afterEach(() => localStorage.clear());
+
 function renderSidebar() {
+  saveSession({
+    user: { id: "u-1", email: "ana@x.com", name: "Ana", username: "ana" },
+    accessToken: "jwt",
+    isAdmin: false,
+  });
   return render(
-    <MemoryRouter>
-      <Sidebar conversations={[]} activeId={null} onNew={vi.fn()} onOpen={vi.fn()} />
-    </MemoryRouter>
+    <AuthProvider>
+      <MemoryRouter>
+        <Sidebar conversations={[]} activeId={null} onNew={vi.fn()} onOpen={vi.fn()} />
+      </MemoryRouter>
+    </AuthProvider>
   );
 }
 
 describe("Sidebar", () => {
-  it("rodapé traz as configurações de autenticação, não o tema", () => {
+  it("rodapé mostra a conta logada e o sair — sem controle de tema", async () => {
     renderSidebar();
-    // O ThemeToggle mudou para o canto superior direito da tela (topbar do
-    // ChatPage / Header do ops). Reintroduzi-lo aqui duplicaria o controle.
     expect(screen.queryByRole("group", { name: "Tema da interface" })).not.toBeInTheDocument();
-    // O slot de auth mora no rodapé: identidade placeholder até /me existir.
     const foot = screen.getByTestId("sidebar-foot");
-    expect(foot).toHaveTextContent("Visitante");
-    expect(foot).toHaveTextContent(/autenticação/i);
-  });
-
-  it("não exibe identidade enquanto não há autenticação", () => {
-    renderSidebar();
-    expect(screen.queryByText(/@/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/autenticado na borda/i)).not.toBeInTheDocument();
+    expect(foot).toHaveTextContent("ana@x.com");
+    fireEvent.click(screen.getByRole("button", { name: /sair/i }));
+    expect(loadSession()).toBeNull();
   });
 
   it("lista vazia ganha um empty state em vez de espaço morto", () => {
