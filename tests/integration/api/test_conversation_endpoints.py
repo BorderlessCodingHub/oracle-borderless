@@ -116,3 +116,10 @@ async def test_conversa_de_outro_usuario_da_404():
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(f"/conversations/{cid}", headers=auth_headers("intrusa@x.com"))
         assert resp.status_code == 404
+
+    # cleanup
+    from src.support.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as s:
+        await s.execute(text("DELETE FROM conversations WHERE uuid = :cid"), {"cid": cid})
+        await s.commit()
