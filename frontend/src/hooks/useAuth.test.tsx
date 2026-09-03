@@ -5,6 +5,7 @@ import { loadSession, saveSession } from "../lib/auth/session";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   localStorage.clear();
 });
 
@@ -23,6 +24,22 @@ describe("useAuth", () => {
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(result.current.user?.email).toBe("ana@x.com");
     expect(result.current.isAdmin).toBe(true);
+  });
+
+  it("storage bloqueado vira status 'error' (terceiro estado) e retry recupera", async () => {
+    const getItemSpy = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new Error("blocked");
+      });
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("error"));
+    expect(result.current.user).toBeNull();
+
+    getItemSpy.mockRestore();
+    act(() => result.current.retry());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.user).toBeNull();
   });
 
   it("login ok grava a sessão e devolve null", async () => {
