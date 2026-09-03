@@ -24,9 +24,11 @@ async def require_user(request: Request) -> AuthenticatedUser:
         claims = jwt.decode(
             token.strip(), verify_key, algorithms=[settings.BORDERLESS_JWT_ALGORITHM]
         )
-    except jwt.PyJWTError:
+    except jwt.PyJWTError as exc:
         # Inválido, expirado ou assinatura errada — mesmo 401 genérico.
-        raise HTTPException(status_code=401, detail="not-authenticated", headers=_WWW_AUTH)
+        raise HTTPException(
+            status_code=401, detail="not-authenticated", headers=_WWW_AUTH
+        ) from exc
 
     email = str(claims.get("email") or "").strip().lower()
     if not email:

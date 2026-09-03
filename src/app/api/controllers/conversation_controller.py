@@ -3,7 +3,6 @@ import logging
 from typing import AsyncIterator
 from uuid import UUID
 
-from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 from src.app.api.requests.ask_question_request import AskQuestionRequest
@@ -39,7 +38,7 @@ def _citation_payload(c) -> dict:
 
 class ConversationController:
     @staticmethod
-    async def ask(request: Request, data: AskQuestionRequest) -> StreamingResponse:
+    async def ask(data: AskQuestionRequest) -> StreamingResponse:
         user_email = CurrentRequestContext.get_user().email
         search = SearchKnowledgeBaseAction(embeddings=get_embeddings_client())
         run_id = new_run_id()
@@ -101,13 +100,13 @@ class ConversationController:
         return StreamingResponse(event_source(), media_type="text/event-stream")
 
     @staticmethod
-    async def list(request: Request) -> list[ConversationSummaryResponse]:
+    async def list() -> list[ConversationSummaryResponse]:
         user_email = CurrentRequestContext.get_user().email
         conversations = await ListConversationsAction().execute(user_email)
         return [ConversationSummaryResponse.from_entity(c) for c in conversations]
 
     @staticmethod
-    async def get(request: Request, conversation_id: UUID) -> ConversationDetailResponse:
+    async def get(conversation_id: UUID) -> ConversationDetailResponse:
         user_email = CurrentRequestContext.get_user().email
         conversation, messages = await GetConversationAction().execute(
             conversation_id, user_email
