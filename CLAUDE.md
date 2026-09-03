@@ -21,7 +21,7 @@ Componentes transversais (scheduler distribuído, ContextVars de request, dual e
 
 Para arquitetura completa, leia **`docs/architecture.md`**.
 
-> **Pontos ainda em aberto** (a decidir em conjunto, não inventar): interface (chat web vs. contexto de código), arquitetura interna do agente de IA, estratégia de ingestão/atualização da base de conhecimento, e a **camada de autenticação** (haverá autenticação restrita a quem tem acesso ao ecossistema — o mecanismo ainda não está definido). Enquanto não decidido, não implemente auth concreta nem invente o desenho do agente.
+> **Pontos ainda em aberto** (a decidir em conjunto, não inventar): interface (chat web vs. contexto de código), arquitetura interna do agente de IA, estratégia de ingestão/atualização da base de conhecimento. Enquanto não decidido, não invente o desenho do agente.
 
 ## Stack principal
 
@@ -32,7 +32,7 @@ Para arquitetura completa, leia **`docs/architecture.md`**.
 - **Base de conhecimento:** Notion via **MCP (Model Context Protocol)** — client em `src/support/clients/notion/`. Só consome documentos aprovados/liberados.
 - **LLM:** o oráculo pode usar **Claude (Anthropic)** ou **GPT (OpenAI)**, selecionável via `LLM_PROVIDER` (`anthropic` | `openai`). O acesso ao modelo é **exclusivamente** pelo LangGraph dentro de `src/support/agent/graph/` (`nodes.py` contém o gate e a resposta; `models.py` seleciona o provedor) — não há client HTTP próprio de LLM. Ver ADR-0016.
 - **Agente de IA:** um `StateGraph` LangGraph (gate → retrieve → refuse/answer + tool loop) orquestra Claude ou GPT sobre a base de conhecimento, consumido em duas fases via `TurnGraphPort`. Observabilidade fina no LangSmith; `agent_traces` mantém as colunas agregáveis. Ver **ADR-0016**.
-- **Autenticação:** ponto em aberto (haverá auth restrita ao ecossistema; mecanismo a definir). **Não há Keycloak/OpenFGA neste projeto.**
+- **Autenticação:** plataforma Borderless como IdP via bridge `POST /auth/login` (key header de servidor); sessão = accessToken JWT da plataforma validado localmente (`require_user`); admin do `/ops` por allowlist `ADMIN_EMAILS` (404 para os demais). **Não há Keycloak/OpenFGA/Supabase neste projeto.** Ver ADR-0017 e `docs/autenticacao.md`.
 - **Scheduler:** APScheduler com jobstore PostgreSQL (`src/support/core/scheduling/`) — usado, entre outros, para jobs de sincronização da base de conhecimento.
 - **PK padrão:** UUID v7 (`uuid6.uuid7`) via mixin `HasUUID`
 - **Package manager:** UV
@@ -278,7 +278,7 @@ class DocumentController:
 ```python
 # src/app/api/routes/documents.py
 router = APIRouter(prefix="/documents", tags=["Documents"])
-# Auth: ponto em aberto — quando definida, entra como dependency do router.
+# Rota de negócio nasce com require_user (ADR-0017); public_router é exceção deliberada.
 router.post("")(DocumentController.ingest_document)
 router.get("")(DocumentController.list_documents)
 ```

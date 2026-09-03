@@ -1,9 +1,11 @@
 # Autenticação — spec do Oracle Borderless
 
-**Status:** aprovado em 03/09/2026 (brainstorm com a dona do produto). Substitui o
-"ponto em aberto" de autenticação do `CLAUDE.md`. A decisão arquitetural vira o
-**ADR-0017** (plataforma como IdP, JWT validado localmente, sem Supabase) antes
-da implementação.
+**Status:** implementação concluída em 03/09/2026. Substitui o "ponto em aberto"
+de autenticação do `CLAUDE.md`. A decisão arquitetural está registrada no
+**ADR-0017** (plataforma como IdP, JWT validado localmente, sem Supabase). As
+pendências da §9 seguem em aberto para confirmação com o time — até lá, o
+`.env` de produção fica incompleto e o login devolve `unavailable`/401 nesse
+ambiente.
 
 > Este documento nasceu do guia de replicação da auth do socratic-dev. O modelo
 > de lá foi **adaptado, não copiado**: o contrato novo da plataforma devolve um
