@@ -2,6 +2,8 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { ThemeProvider } from "./hooks/useTheme";
+import { AuthProvider } from "./hooks/useAuth";
+import { saveSession } from "./lib/auth/session";
 import { stubMatchMedia } from "./test/matchMedia";
 import App from "./App";
 
@@ -36,13 +38,25 @@ function renderAt(path: string) {
     })
   );
   return render(
-    <ThemeProvider>
-      <MemoryRouter initialEntries={[path]}>
-        <LocationProbe />
-        <App />
-      </MemoryRouter>
-    </ThemeProvider>
+    <AuthProvider>
+      <ThemeProvider>
+        <MemoryRouter initialEntries={[path]}>
+          <LocationProbe />
+          <App />
+        </MemoryRouter>
+      </ThemeProvider>
+    </AuthProvider>
   );
+}
+
+// Sessão semeada para os testes de roteamento que esperam o chat — sem ela o
+// RequireAuth (Task 9) redireciona qualquer rota privada para /login.
+function seedSession() {
+  saveSession({
+    user: { id: "u", email: "ana@x.com", name: null, username: null },
+    accessToken: "jwt",
+    isAdmin: false,
+  });
 }
 
 afterEach(() => {
@@ -53,6 +67,7 @@ afterEach(() => {
 
 describe("roteamento", () => {
   it("serve o chat na raiz", async () => {
+    seedSession();
     renderAt("/");
     expect(await screen.findByRole("textbox")).toBeInTheDocument();
     // toHaveTextContent(string) faz substring — todo pathname contém "/", o
@@ -61,24 +76,28 @@ describe("roteamento", () => {
   });
 
   it("serve o chat em /c/:id", async () => {
+    seedSession();
     renderAt("/c/abc-123");
     expect(await screen.findByRole("textbox")).toBeInTheDocument();
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/c\/abc-123$/);
   });
 
   it("redireciona /oracle para a raiz", async () => {
+    seedSession();
     renderAt("/oracle");
     await screen.findByRole("textbox");
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/$/);
   });
 
   it("redireciona /oracle/:id preservando a conversa", async () => {
+    seedSession();
     renderAt("/oracle/abc-123");
     await screen.findByRole("textbox");
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/c\/abc-123$/);
   });
 
   it("redireciona /about e /knowledge para a raiz (catch-all)", async () => {
+    seedSession();
     const about = renderAt("/about");
     await screen.findByRole("textbox");
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/$/);
@@ -87,5 +106,11 @@ describe("roteamento", () => {
     renderAt("/knowledge");
     await screen.findByRole("textbox");
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/$/);
+  });
+
+  it("sem sessão, a raiz cai no /login", async () => {
+    renderAt("/"); // sem saveSession
+    expect(await screen.findByText(/entrar no oráculo/i)).toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent(/^\/login$/);
   });
 });
