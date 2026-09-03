@@ -18,7 +18,7 @@ from src.domain.conversations.entities.conversation import Conversation
 from src.domain.conversations.entities.message import Message
 from src.domain.shared.value_objects.citation import Citation
 from src.support.agent.ports import AgentMessage, KnowledgeSnippet
-from src.support.core.exceptions import NotFoundError, UnauthorizedDomainError
+from src.support.core.exceptions import NotFoundError
 from tests.fakes.fake_turn_graph import FakeTurnGraph
 
 
@@ -149,12 +149,13 @@ async def test_recency_loaded_before_appending_current_message():
 
 
 @pytest.mark.asyncio
-async def test_mismatched_owner_propagates_unauthorized():
+async def test_mismatched_owner_propagates_not_found():
+    # ADR-0017: conversa de outro usuário é 404 — nunca revela que existe.
     now = datetime(2026, 7, 10, tzinfo=timezone.utc)
     existing = Conversation(uuid4(), "a@x.com", "T", now, now, None)
     action = _make(FakeTurnGraph(), _FakeSearch(), _FakeConvRepo(existing=existing), _FakeMsgRepo())
 
-    with pytest.raises(UnauthorizedDomainError):
+    with pytest.raises(NotFoundError):
         await action.execute("oi", existing.uuid, "b@x.com")
 
 

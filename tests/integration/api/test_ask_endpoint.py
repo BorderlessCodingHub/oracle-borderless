@@ -5,6 +5,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
+from tests.fakes.auth import auth_headers
 from tests.fakes.fake_turn_graph import FakeTurnGraph
 
 
@@ -74,6 +75,7 @@ async def test_ask_streams_and_persists_both_turns(monkeypatch):
         resp = await client.post(
             "/conversations/ask",
             json={"question": "o que é o onboarding?"},
+            headers=auth_headers("asker@x.com"),
         )
         assert resp.status_code == 200
         assert "text/event-stream" in resp.headers["content-type"]
@@ -113,7 +115,11 @@ async def test_ask_failure_emits_error_and_does_not_persist_assistant(monkeypatc
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/conversations/ask", json={"question": "o que é o onboarding?"})
+        resp = await client.post(
+            "/conversations/ask",
+            json={"question": "o que é o onboarding?"},
+            headers=auth_headers("asker@x.com"),
+        )
         assert resp.status_code == 200
         body = resp.text
         assert "event: error" in body
@@ -159,6 +165,7 @@ async def test_ask_streams_refusal_and_persists_both_turns_when_nothing_found(mo
         resp = await client.post(
             "/conversations/ask",
             json={"question": "qual a capital da Austrália?"},
+            headers=auth_headers("asker@x.com"),
         )
         assert resp.status_code == 200
         assert "text/event-stream" in resp.headers["content-type"]

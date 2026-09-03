@@ -22,13 +22,11 @@ from src.domain.observability.actions.record_turn_trace_action import RecordTurn
 from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
 from src.support.agent.graph import get_turn_graph_runner
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
-from src.support.core.context import CurrentAsyncSessionContext
+from src.support.core.context import CurrentAsyncSessionContext, CurrentRequestContext
 from src.support.core.session_scope import run_in_async_session
 from src.support.observability.langsmith import hash_email, new_run_id
 
 logger = logging.getLogger(__name__)
-
-_USER_EMAIL_HEADER = "cf-access-authenticated-user-email"
 
 
 def _sse(event: str, data: dict) -> str:
@@ -42,7 +40,7 @@ def _citation_payload(c) -> dict:
 class ConversationController:
     @staticmethod
     async def ask(request: Request, data: AskQuestionRequest) -> StreamingResponse:
-        user_email = request.headers.get(_USER_EMAIL_HEADER)
+        user_email = CurrentRequestContext.get_user().email
         search = SearchKnowledgeBaseAction(embeddings=get_embeddings_client())
         run_id = new_run_id()
         action = AnswerQuestionAction(
@@ -104,13 +102,13 @@ class ConversationController:
 
     @staticmethod
     async def list(request: Request) -> list[ConversationSummaryResponse]:
-        user_email = request.headers.get(_USER_EMAIL_HEADER)
+        user_email = CurrentRequestContext.get_user().email
         conversations = await ListConversationsAction().execute(user_email)
         return [ConversationSummaryResponse.from_entity(c) for c in conversations]
 
     @staticmethod
     async def get(request: Request, conversation_id: UUID) -> ConversationDetailResponse:
-        user_email = request.headers.get(_USER_EMAIL_HEADER)
+        user_email = CurrentRequestContext.get_user().email
         conversation, messages = await GetConversationAction().execute(
             conversation_id, user_email
         )

@@ -3,6 +3,8 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
+from tests.fakes.auth import auth_headers
+
 
 @pytest_asyncio.fixture(autouse=True)
 async def _dispose_engine():
@@ -54,7 +56,7 @@ async def test_list_and_get_conversation():
     from main import app
 
     transport = ASGITransport(app=app)
-    headers = {"Cf-Access-Authenticated-User-Email": email}
+    headers = auth_headers(email)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         listing = await client.get("/conversations", headers=headers)
         assert listing.status_code == 200
@@ -89,5 +91,28 @@ async def test_get_missing_conversation_returns_404():
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get(f"/conversations/{uuid4()}")
+        resp = await client.get(f"/conversations/{uuid4()}", headers=auth_headers("qualquer@x.com"))
+        assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_sem_token_tudo_da_401():
+    from main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        assert (await client.get("/conversations")).status_code == 401
+        assert (
+            await client.post("/conversations/ask", json={"question": "q", "conversation_id": None})
+        ).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_conversa_de_outro_usuario_da_404():
+    cid = await _seed_conversation("dona@x.com")
+    from main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/conversations/{cid}", headers=auth_headers("intrusa@x.com"))
         assert resp.status_code == 404

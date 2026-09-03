@@ -13,6 +13,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
+from tests.fakes.auth import auth_headers
 from tests.fakes.fake_turn_graph import FakeTurnGraph
 
 
@@ -115,7 +116,11 @@ async def test_trace_row_exists_after_a_successful_ask(monkeypatch):
     from main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/conversations/ask", json={"question": "o que é o PSP?"})
+        resp = await client.post(
+            "/conversations/ask",
+            json={"question": "o que é o PSP?"},
+            headers=auth_headers("asker@x.com"),
+        )
         assert resp.status_code == 200
         body = resp.text
         assert "event: done" in body
@@ -142,7 +147,11 @@ async def test_failed_turn_is_traced_even_though_the_answer_is_not_persisted(mon
     from main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/conversations/ask", json={"question": "vai falhar"})
+        resp = await client.post(
+            "/conversations/ask",
+            json={"question": "vai falhar"},
+            headers=auth_headers("asker@x.com"),
+        )
         body = resp.text
         assert "event: error" in body
 
@@ -183,7 +192,9 @@ async def test_refusal_leaves_engine_ms_and_first_token_ms_null(monkeypatch):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
-            "/conversations/ask", json={"question": "qual a capital da Austrália?"}
+            "/conversations/ask",
+            json={"question": "qual a capital da Austrália?"},
+            headers=auth_headers("asker@x.com"),
         )
         body = resp.text
         assert "Não encontrei informações sobre isso na base de conhecimento." in _concat_tokens(body)

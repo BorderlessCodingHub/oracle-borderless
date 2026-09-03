@@ -11,7 +11,7 @@ from src.domain.conversations.actions.list_conversations_action import ListConve
 from src.domain.conversations.entities.conversation import Conversation
 from src.domain.conversations.repositories.conversation_repository import ConversationRepository
 from src.domain.shared.value_objects.citation import Citation
-from src.support.core.exceptions import NotFoundError, UnauthorizedDomainError
+from src.support.core.exceptions import NotFoundError
 
 
 async def _conv(db_session, user_email=None):
@@ -43,8 +43,9 @@ async def test_get_conversation_not_found_raises(db_session):
 
 @pytest.mark.asyncio
 async def test_get_conversation_denies_other_owner(db_session):
+    # ADR-0017: conversa de outro usuário é 404 — nunca revela que existe.
     conv = await _conv(db_session, user_email="a@x.com")
-    with pytest.raises(UnauthorizedDomainError):
+    with pytest.raises(NotFoundError):
         await GetConversationAction().execute(conv.uuid, "b@x.com")
 
 
