@@ -40,3 +40,13 @@ async def test_fail_open_quando_o_banco_falha(db_session, monkeypatch):
 
     monkeypatch.setattr(db_session, "execute", _explode)
     assert await rate_limit("signin:x@x.com", limit=1, window_ms=600_000) is True
+
+
+@pytest.mark.asyncio
+async def test_fail_open_com_erro_real_de_banco_nao_envenena_a_transacao(db_session):
+    chave_longa_demais = "x" * 300  # estoura VARCHAR(255) -> DataError do Postgres
+    assert await rate_limit(chave_longa_demais, limit=1, window_ms=600_000) is True
+
+    # O savepoint (`begin_nested`) isolou o erro: a sessão continua utilizável
+    # para uma chamada seguinte, bem-formada, na mesma transação.
+    assert await rate_limit("signin:pos-erro@x.com", limit=1, window_ms=600_000) is True
