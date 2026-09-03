@@ -5,7 +5,7 @@ import type {
   ConversationDetail,
   ConversationSummary,
 } from "../types";
-import { apiUrl, getJSON } from "./client";
+import { apiUrl, authHeaders, getJSON, handleUnauthorized } from "./client";
 import { parseSSE } from "./sse";
 
 interface SummaryDTO { id: string; title: string | null; updated_at: string; }
@@ -33,9 +33,14 @@ export async function getConversation(id: string): Promise<ConversationDetail> {
 export async function* askStream(input: AskInput): AsyncGenerator<AskEvent> {
   const resp = await fetch(apiUrl("/conversations/ask"), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ question: input.question, conversation_id: input.conversationId ?? null }),
   });
+  if (resp.status === 401) {
+    handleUnauthorized();
+    yield { type: "error", message: "Sessão expirada — faça login de novo." };
+    return;
+  }
   if (!resp.ok || !resp.body) {
     yield { type: "error", message: `Falha na requisição (${resp.status})` };
     return;
