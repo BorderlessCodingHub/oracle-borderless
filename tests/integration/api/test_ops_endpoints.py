@@ -15,10 +15,17 @@ async def _dispose_db_engine_between_tests():
 
 
 @pytest_asyncio.fixture
-async def ops_client():
+async def ops_client(monkeypatch):
     from main import app
+    from src.support.core.settings import settings
+    from tests.fakes.auth import auth_headers
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    monkeypatch.setattr(settings, "ADMIN_EMAILS", "admin@x.com")
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers=auth_headers("admin@x.com"),
+    ) as client:
         yield client
 
 
@@ -68,3 +75,23 @@ async def test_eval_reports_no_runs_when_there_is_no_report(ops_client, tmp_path
     assert body["status"] == "no_runs"
     assert body["report"] is None
     assert body["history"] == []
+
+
+@pytest.mark.asyncio
+async def test_ops_sem_token_da_401():
+    from main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        assert (await c.get("/ops/overview?window=24h")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_ops_para_nao_admin_da_404(monkeypatch):
+    from main import app
+    from src.support.core.settings import settings
+    from tests.fakes.auth import auth_headers
+
+    monkeypatch.setattr(settings, "ADMIN_EMAILS", "admin@x.com")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/ops/overview?window=24h", headers=auth_headers("comum@x.com"))
+        assert resp.status_code == 404
