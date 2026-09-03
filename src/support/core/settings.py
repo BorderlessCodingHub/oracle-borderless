@@ -38,6 +38,16 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT: int = 30
     DB_POOL_RECYCLE: int = 3600
 
+    # --- Autenticação: plataforma Borderless como IdP (ADR-0017) ---
+    BORDERLESS_AUTH_URL: str = "https://api.borderlesscoding.com"
+    BORDERLESS_AUTH_API_KEY: str | None = None  # key de app — segredo de SERVIDOR
+    # Nome do header da key e algoritmo/chave do JWT: defaults documentados;
+    # pendências do §9 do spec mudam só o .env, não o código.
+    BORDERLESS_AUTH_KEY_HEADER: str = "x-api-key"
+    BORDERLESS_JWT_ALGORITHM: str = "RS256"
+    BORDERLESS_JWT_VERIFY_KEY: str | None = None  # PEM pública (RS/ES) ou segredo (HS)
+    ADMIN_EMAILS: str = ""  # allowlist de admins do /ops, separada por vírgula
+
     # --- Base de conhecimento: Notion via MCP ---
     NOTION_MCP_URL: str | None = None
     NOTION_MCP_TOKEN: str | None = None
@@ -122,6 +132,13 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
+
+    @property
+    def admin_emails(self) -> frozenset[str]:
+        """Allowlist normalizada (trim + lowercase) — fonte única do isAdmin."""
+        return frozenset(
+            e.strip().lower() for e in self.ADMIN_EMAILS.split(",") if e.strip()
+        )
 
 
 @lru_cache

@@ -32,6 +32,7 @@ por `---`. Fluxo recomendado:
 | [0014](0014-kb-multi-root.md) | KB é a união dos subtrees de múltiplos roots do Notion | *substituído pelo 0015* |
 | [0015](0015-kb-escopo-descoberto-pela-permissao.md) | Escopo da KB descoberto pela permissão do Notion | Aceito |
 | [0016](0016-agent-framework-langgraph.md) | Framework do agente = LangGraph, observabilidade fina no LangSmith | Aceito |
+| [0017](0017-auth-plataforma-como-idp.md) | Plataforma Borderless como IdP; JWT local; sem Supabase | Aceito |
 
 > ADR-0001–0006 são citados pelo `CLAUDE.md` mas ainda não foram escritos como arquivo.
 > As regras já estão em vigor (ver `CLAUDE.md` → "Regras inegociáveis"). Backfill quando
