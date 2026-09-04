@@ -19,3 +19,18 @@ export function toPlainText(input: string): string {
     .replace(/\s+/g, " ")                       // collapse whitespace
     .trim();
 }
+
+/**
+ * Remove os marcadores "[Fonte: título — url]" que o modelo copia do contexto das
+ * ferramentas para o corpo da resposta. As fontes já chegam pelo evento `sources`
+ * e vivem no bloco recolhível ("N fontes") — no texto elas só poluem. Também
+ * apaga um marcador ainda aberto no fim (chega token a token durante o stream)
+ * e colapsa as linhas vazias que sobram.
+ */
+export function stripSourceMarkers(input: string): string {
+  return input
+    .replace(/[ \t]*\[Fonte:[^\]]*\]/g, "") // marcador completo
+    .replace(/[ \t]*\[Fonte:[^\]]*$/, "")  // marcador incompleto no fim (streaming)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}

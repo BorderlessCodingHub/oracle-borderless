@@ -1,0 +1,27 @@
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import { MessageBubble } from "./MessageBubble";
+
+describe("MessageBubble", () => {
+  it("não renderiza o marcador [Fonte: …] no texto; a fonte fica só no bloco de fontes", () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={"O PSP é o programa premium.\n\n[Fonte: Offer Architecture, PSP — https://app.notion.com/p/x]"}
+        citations={[
+          {
+            source_type: "notion",
+            title: "Offer Architecture, PSP",
+            url: "https://app.notion.com/p/x",
+            snippet: "…",
+          },
+        ]}
+      />
+    );
+    expect(screen.getByText("O PSP é o programa premium.")).toBeInTheDocument();
+    expect(screen.queryByText(/\[Fonte:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/app\.notion\.com/)).not.toBeInTheDocument();
+    // a proveniência continua a um clique
+    expect(screen.getByRole("button", { name: /1 fonte/i })).toBeInTheDocument();
+  });
+});

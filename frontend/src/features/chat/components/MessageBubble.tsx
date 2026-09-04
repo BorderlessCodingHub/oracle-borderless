@@ -2,7 +2,7 @@ import ReactMarkdown from "react-markdown";
 import type { Citation } from "../../../lib/types";
 import { Logo } from "../../../components/Logo/Logo";
 import { CitationsBlock } from "./CitationsBlock";
-import { stripHtml } from "../../../lib/utils/text";
+import { stripHtml, stripSourceMarkers } from "../../../lib/utils/text";
 import { safeUrl } from "../../../lib/utils/safeUrl";
 import styles from "../ChatPage.module.css";
 
@@ -35,7 +35,7 @@ export function MessageBubble({ role, content, citations, streaming }: Props) {
               img: ({ alt }) => <>{alt ?? ""}</>,
             }}
           >
-            {stripHtml(content)}
+            {stripHtml(stripSourceMarkers(content))}
           </ReactMarkdown>
           {streaming && <span className={styles.cursor} />}
         </div>
