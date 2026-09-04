@@ -1,20 +1,9 @@
 # Autenticação — spec do Oracle Borderless (v2 — BFF)
 
-**Status:** refatoração **aprovada em 04/09/2026, ainda não implementada**. A v1
-(ADR-0017: JWT validado localmente, SPA guarda o token) está implementada na branch
-`feat/autenticacao`, mas o contrato real da plataforma
-(`autenticacao_plataform.md`, verificado no código da `borderless-api` pelo tech
-lead) derrubou duas premissas dela:
-
-1. **Não existe key de app** — o login é público (§7 do doc da plataforma). As envs
-   `BORDERLESS_AUTH_API_KEY`/`BORDERLESS_AUTH_KEY_HEADER` não têm contrapartida.
-2. **O `accessToken` não é JWT** — é token de sessão **opaco** do Better Auth.
-   Validação local é impossível; validar = chamar a plataforma.
-
-A decisão da v2 está no **ADR-0018** (BFF: o token da plataforma vive só no
-servidor; o SPA recebe cookie httpOnly próprio), que substitui o mecanismo de
-validação/sessão do ADR-0017. Este documento descreve o **alvo da refatoração**;
-o §0 lista o delta exato sobre o código existente.
+**Status:** v2 (BFF) **implementada em 2026-09-04** na branch `feat/autenticacao`,
+conforme o ADR-0018. O §0 abaixo registra o delta que foi aplicado sobre a v1
+(ADR-0017), para leitura histórica; o restante do documento descreve o que o
+código faz hoje. Contrato da plataforma verificado em `autenticacao_plataform.md`.
 
 ---
 
@@ -98,8 +87,9 @@ SPA ──(cookie ob_session vai sozinho no fetch same-origin)──► FastAPI
   cookie é httpOnly — o SPA não tem como ler; `/auth/me` é a única fonte.
 - **Logout:** `POST /auth/logout` → best-effort `POST /api/auth/signout` na
   plataforma (invalida lá — descartar só localmente deixa a sessão viva),
-  apaga a linha de `sessions`, `Set-Cookie` expirado. Sempre 204, mesmo se a
-  plataforma falhar (o log registra).
+  apaga a linha de `sessions`, `Set-Cookie` expirado. 204 mesmo se a
+  plataforma falhar (o log registra). A rota vive no `router` protegido: sem
+  cookie válido responde o 401 genérico — não há o que encerrar.
 - **Expiração:** a plataforma renova a sessão conforme o uso (janela de 7 dias
   deslizante). Sem refresh token: o primeiro `401` da plataforma apaga a sessão
   local e o SPA volta ao `/login?next=…`. Não há expiração local própria — a
@@ -143,9 +133,11 @@ O envelope de erro é `{"error": {"code", "type", "domain", "message", "timestam
 
 ### 4.1 Tabela e subdomínio — `sessions` nasce em `src/domain/users/`
 
-Agora há persistência: entity `Session` (dataclass pura), `SessionModel`
-(SQLAlchemy), `SessionMapper`, `SessionRepository` — o padrão completo do
-CLAUDE.md. Migration nova.
+Agora há persistência: entity `UserSession` (dataclass pura), `UserSessionModel`
+(SQLAlchemy), `UserSessionMapper`, `UserSessionRepository` — o padrão completo do
+CLAUDE.md (prefixo `User` para não colidir com a `AsyncSession` do SQLAlchemy que
+os repositórios já chamam de `self.session`). Migration `0009_sessions`. A
+resolução cookie → sessão → validação vive na `ResolveSessionAction`.
 
 Colunas de `sessions`:
 
@@ -271,14 +263,14 @@ CSRF token para split-host.
 
 ## 9. O que remover da v1 (checklist de limpeza)
 
-- [ ] `pyjwt[crypto]` do `pyproject.toml` (e do ADR — o 0018 registra)
-- [ ] Validação JWT em `require_user.py` (o arquivo é reescrito, não deletado)
-- [ ] Envs `BORDERLESS_AUTH_API_KEY/KEY_HEADER/JWT_*` de `Settings` e `.env.example`
-- [ ] Key header no `BorderlessAuthClient`
-- [ ] `tests/fakes/auth.py` (forja JWT) → substituir por fixture de sessão
-- [ ] `frontend/src/lib/auth/session.ts`, `authHeaders()`/Bearer no `client.ts` e
+- [x] `pyjwt[crypto]` do `pyproject.toml` (e do ADR — o 0018 registra)
+- [x] Validação JWT em `require_user.py` (o arquivo é reescrito, não deletado)
+- [x] Envs `BORDERLESS_AUTH_API_KEY/KEY_HEADER/JWT_*` de `Settings` e `.env.example`
+- [x] Key header no `BorderlessAuthClient`
+- [x] `tests/fakes/auth.py` (forja JWT) → substituir por fixture de sessão
+- [x] `frontend/src/lib/auth/session.ts`, `authHeaders()`/Bearer no `client.ts` e
       no `askStream`, e os testes correspondentes
-- [ ] §5.1 antigo do spec (localStorage) — este documento já o substitui
+- [x] §5.1 antigo do spec (localStorage) — este documento já o substitui
 
 ## 10. Testes (delta)
 
@@ -298,14 +290,14 @@ CSRF token para split-host.
 
 - [ ] Validar o contrato manualmente (curl do §3 com usuário de teste) — passo 1
       do doc da plataforma; destrava tudo
-- [ ] ADR-0018 já escrito — revisar e manter
-- [ ] Migration + Session (entity/model/mapper/repository)
-- [ ] `BorderlessAuthClient` v2 + exceção `ForbiddenError` + handler (403 com message)
-- [ ] `SignInAction` v2 + `SignOutAction`
-- [ ] `POST /auth/login` (Set-Cookie) + `GET /auth/me` + `POST /auth/logout`
-- [ ] `require_user` v2 (cookie → sessão → cache/fail-open)
-- [ ] Limpeza da v1 (§9) + fixtures de teste novas
-- [ ] Frontend: useAuth v2 (restore /me), remoção do session.ts/Bearer, forbidden
-- [ ] CLAUDE.md: linha da stack de auth passa a descrever o BFF (fazer NO commit
+- [x] ADR-0018 já escrito — revisar e manter
+- [x] Migration + Session (entity/model/mapper/repository)
+- [x] `BorderlessAuthClient` v2 + exceção `ForbiddenError` + handler (403 com message)
+- [x] `SignInAction` v2 + `SignOutAction`
+- [x] `POST /auth/login` (Set-Cookie) + `GET /auth/me` + `POST /auth/logout`
+- [x] `require_user` v2 (cookie → sessão → cache/fail-open)
+- [x] Limpeza da v1 (§9) + fixtures de teste novas
+- [x] Frontend: useAuth v2 (restore /me), remoção do session.ts/Bearer, forbidden
+- [x] CLAUDE.md: linha da stack de auth passa a descrever o BFF (fazer NO commit
       da implementação — hoje ela descreve a v1, que é o que o código da branch faz)
-- [ ] Suíte completa + prospector + build
+- [x] Suíte completa + prospector + build

@@ -38,20 +38,18 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT: int = 30
     DB_POOL_RECYCLE: int = 3600
 
-    # --- Autenticação: plataforma Borderless como IdP (ADR-0017) ---
+    # --- Autenticação: plataforma Borderless como IdP, BFF (ADR-0017/0018) ---
+    # Login é público (sem key de app) e o accessToken é opaco: não há nada de
+    # JWT para configurar. TTL do cache de validação e janela de fail-open são
+    # constantes em ResolveSessionAction (virar env só se precisar calibrar).
     BORDERLESS_AUTH_URL: str = "https://api.borderlesscoding.com"
-    BORDERLESS_AUTH_API_KEY: str | None = None  # key de app — segredo de SERVIDOR
-    # Nome do header da key e algoritmo/chave do JWT: defaults documentados;
-    # pendências do §9 do spec mudam só o .env, não o código.
-    BORDERLESS_AUTH_KEY_HEADER: str = "x-api-key"
-    BORDERLESS_JWT_ALGORITHM: str = "RS256"
-    BORDERLESS_JWT_VERIFY_KEY: str | None = None  # PEM pública (RS/ES) ou segredo (HS)
     ADMIN_EMAILS: str = ""  # allowlist de admins do /ops, separada por vírgula
 
     # --- CORS ---
     # Vazio (default) = SPA e API no mesmo host (proxy do Vite em dev) e nenhum
-    # CORSMiddleware é montado. Preencher só quando o SPA ficar num host
-    # diferente da API. Bearer, não cookie — allow_credentials fica False.
+    # CORSMiddleware é montado. A sessão é cookie SameSite=Lax (ADR-0018):
+    # split-host exigiria SameSite=None + CSRF token — fora da v2. Este campo
+    # segue só para o caso same-site com subdomínios, sem credentials.
     CORS_ORIGINS: str = ""  # origens separadas por vírgula, ex.: https://app.borderlesscoding.com
 
     # --- Base de conhecimento: Notion via MCP ---

@@ -32,7 +32,7 @@ Para arquitetura completa, leia **`docs/architecture.md`**.
 - **Base de conhecimento:** Notion via **MCP (Model Context Protocol)** — client em `src/support/clients/notion/`. Só consome documentos aprovados/liberados.
 - **LLM:** o oráculo pode usar **Claude (Anthropic)** ou **GPT (OpenAI)**, selecionável via `LLM_PROVIDER` (`anthropic` | `openai`). O acesso ao modelo é **exclusivamente** pelo LangGraph dentro de `src/support/agent/graph/` (`nodes.py` contém o gate e a resposta; `models.py` seleciona o provedor) — não há client HTTP próprio de LLM. Ver ADR-0016.
 - **Agente de IA:** um `StateGraph` LangGraph (gate → retrieve → refuse/answer + tool loop) orquestra Claude ou GPT sobre a base de conhecimento, consumido em duas fases via `TurnGraphPort`. Observabilidade fina no LangSmith; `agent_traces` mantém as colunas agregáveis. Ver **ADR-0016**.
-- **Autenticação:** plataforma Borderless como IdP via bridge `POST /auth/login` (key header de servidor); sessão = accessToken JWT da plataforma validado localmente (`require_user`); admin do `/ops` por allowlist `ADMIN_EMAILS` (404 para os demais). **Não há Keycloak/OpenFGA/Supabase neste projeto.** Ver ADR-0017 e `docs/autenticacao.md`.
+- **Autenticação:** plataforma Borderless como IdP via **BFF**: `POST /auth/login` (público, sem key) chama o signin da plataforma, guarda o `accessToken` **opaco** na tabela `sessions` e devolve cookie httpOnly `ob_session`; `require_user` resolve cookie → sessão → valida na plataforma (`GET /api/users/profile`, cache 60s, fail-open ≤10min); `GET /auth/me` restaura, `POST /auth/logout` revoga. Admin do `/ops` por allowlist `ADMIN_EMAILS` (404 para os demais). **Não há Keycloak/OpenFGA/Supabase nem JWT neste projeto.** Ver ADR-0017, ADR-0018 e `docs/autenticacao.md`.
 - **Scheduler:** APScheduler com jobstore PostgreSQL (`src/support/core/scheduling/`) — usado, entre outros, para jobs de sincronização da base de conhecimento.
 - **PK padrão:** UUID v7 (`uuid6.uuid7`) via mixin `HasUUID`
 - **Package manager:** UV
@@ -454,7 +454,8 @@ ADRs atuais (em `docs/adr/`):
 - **ADR-0005** — Usar SQLAlchemy 2.0 em vez de SQLModel
 - **ADR-0006** — Sessão DB via ContextVar + middleware
 - **ADR-0016** — Framework do agente = LangGraph, observabilidade fina no LangSmith (substitui o ADR-0007)
-- **ADR-0017** — Plataforma Borderless como IdP; JWT local; sem Supabase
+- **ADR-0017** — Plataforma Borderless como IdP; sem Supabase (validação/sessão substituídas pelo 0018)
+- **ADR-0018** — Auth vira BFF: token opaco da plataforma vive só no servidor; cookie httpOnly; `pyjwt` removido
 
 Índice completo em `docs/adr/README.md`.
 
