@@ -18,7 +18,7 @@ from src.domain.conversations.services.out_of_scope_reply import (
 from src.domain.shared.value_objects.citation import Citation
 from src.support.agent.graph.builder import build_turn_graph
 from src.support.agent.graph.runner import TurnGraphRunner, _token_chunk
-from src.support.agent.ports import KnowledgeSnippet, TurnDependencies, TurnSignals
+from src.support.agent.ports import KnowledgeSnippet, SourcesChunk, TextChunk, TurnDependencies, TurnSignals
 
 
 def _snippet(text="PSP é um programa do ecossistema"):
@@ -110,7 +110,7 @@ async def test_the_stream_ends_with_the_sources_chunk():
     )
     chunks = await _drain(stream)
 
-    assert chunks[-1].type == "sources"
+    assert isinstance(chunks[-1], SourcesChunk)
     assert [c.title for c in chunks[-1].citations] == ["Doc PSP"]
 
 
@@ -125,7 +125,7 @@ async def test_the_answer_text_reaches_the_caller():
     )
     chunks = await _drain(stream)
 
-    text = "".join(c.text for c in chunks if c.type == "text")
+    text = "".join(c.text for c in chunks if isinstance(c, TextChunk))
     assert "PSP" in text
 
 
@@ -140,10 +140,10 @@ async def test_an_empty_retrieval_refuses_without_calling_the_model():
     )
     chunks = await _drain(stream)
 
-    text = "".join(c.text for c in chunks if c.type == "text")
+    text = "".join(c.text for c in chunks if isinstance(c, TextChunk))
     assert text.startswith(OUT_OF_SCOPE_OPENING_PT)
     assert signals.outcome == "refusal"
-    assert chunks[-1].type == "sources"
+    assert isinstance(chunks[-1], SourcesChunk)
     assert chunks[-1].citations == []
 
 
@@ -198,7 +198,7 @@ class Test_token_chunk:
         chunk = _token_chunk(payload)
 
         assert chunk is not None
-        assert chunk.type == "text"
+        assert isinstance(chunk, TextChunk)
         assert chunk.text == "olá"
 
     def test_an_ai_message_from_another_node_never_becomes_a_chunk(self):
@@ -318,7 +318,7 @@ async def test_phase_one_stops_at_the_answer_node_even_without_any_text():
     chunks = await _drain(stream)
 
     assert executed["ran"] is True
-    assert "resposta final" in "".join(c.text for c in chunks if c.type == "text")
+    assert "resposta final" in "".join(c.text for c in chunks if isinstance(c, TextChunk))
 
 
 @pytest.mark.asyncio

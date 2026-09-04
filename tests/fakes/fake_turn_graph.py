@@ -7,7 +7,14 @@ afirmar que a cadeia grafo → draft → coluna do trace está de fato conectada
 from typing import AsyncIterator
 
 from src.domain.shared.value_objects.citation import Citation
-from src.support.agent.ports import AgentMessage, AgentStreamChunk, KnowledgeSnippet
+from src.support.agent.ports import (
+    AgentMessage,
+    AgentStreamChunk,
+    KnowledgeSnippet,
+    SourcesChunk,
+    StepChunk,
+    TextChunk,
+)
 
 
 class FakeTurnGraph:
@@ -69,7 +76,11 @@ class FakeTurnGraph:
         return self._stream()
 
     async def _stream(self) -> AsyncIterator[AgentStreamChunk]:
+        # Um passo "answer" em volta do texto, para os testes de integração
+        # exercitarem a tradução de passos além de texto e fontes.
+        yield StepChunk(name="answer", phase="started")
         for token in self._answer.split():
-            yield AgentStreamChunk(type="text", text=token + " ")
+            yield TextChunk(text=token + " ")
+        yield StepChunk(name="answer", phase="finished")
         cites = [] if self._outcome == "refusal" else self._citations
-        yield AgentStreamChunk(type="sources", citations=cites)
+        yield SourcesChunk(citations=cites)

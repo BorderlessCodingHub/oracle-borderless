@@ -18,10 +18,69 @@ class AgentMessage:
 
 
 @dataclass
-class AgentStreamChunk:
-    type: Literal["text", "sources"]
-    text: str = ""
+class TextChunk:
+    """Texto do modelo de resposta (ou o texto canônico da recusa)."""
+
+    text: str
+
+
+@dataclass
+class SourcesChunk:
+    """Fontes do turno. Sempre o último chunk do stream."""
+
     citations: list[Citation] = field(default_factory=list)
+
+
+@dataclass
+class StepChunk:
+    """Um nó do grafo abriu ou fechou: gate, retrieve, refuse ou answer.
+
+    `detail` só vem no `finished` e só quando há dado útil para a UI
+    (ex.: {"kept": 4} do retrieval). Ver ADR-0019.
+    """
+
+    name: str
+    phase: Literal["started", "finished"]
+    detail: dict | None = None
+
+
+@dataclass
+class ToolCallStartChunk:
+    id: str
+    name: str
+
+
+@dataclass
+class ToolCallArgsChunk:
+    """Fragmento do JSON dos argumentos, como o provedor o entrega."""
+
+    id: str
+    delta: str
+
+
+@dataclass
+class ToolCallEndChunk:
+    id: str
+
+
+@dataclass
+class ToolCallResultChunk:
+    """Só o status. O conteúdo que a tool devolveu ao modelo NUNCA passa por
+    aqui (regra 4 do CLAUDE.md) — fica no LangSmith."""
+
+    id: str
+    status: Literal["ok", "error"]
+
+
+AgentStreamChunk = (
+    TextChunk
+    | SourcesChunk
+    | StepChunk
+    | ToolCallStartChunk
+    | ToolCallArgsChunk
+    | ToolCallEndChunk
+    | ToolCallResultChunk
+)
 
 
 @dataclass

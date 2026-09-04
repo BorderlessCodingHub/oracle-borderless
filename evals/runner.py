@@ -8,7 +8,7 @@ from evals.models import CaseResult, EvalCase, MetricScore, metrics_for_category
 from src.domain.conversations.services.out_of_scope_reply import build_out_of_scope_reply
 from src.domain.documents.actions.list_knowledge_sections_action import ListKnowledgeSectionsAction
 from src.domain.shared.value_objects.citation import Citation
-from src.support.agent.ports import AgentMessage, KnowledgeSnippet, TurnDependencies, TurnSignals
+from src.support.agent.ports import AgentMessage, KnowledgeSnippet, TextChunk, TurnDependencies, TurnSignals
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ def _sources_text(knowledge: list[KnowledgeSnippet]) -> str:
 async def _collect_text(stream) -> str:
     text = ""
     async for chunk in stream:
-        if chunk.type == "text":
+        if isinstance(chunk, TextChunk):
             text += chunk.text
     return text
 

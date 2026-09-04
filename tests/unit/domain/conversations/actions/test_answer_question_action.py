@@ -17,7 +17,7 @@ from src.domain.conversations.actions.answer_question_action import (
 from src.domain.conversations.entities.conversation import Conversation
 from src.domain.conversations.entities.message import Message
 from src.domain.shared.value_objects.citation import Citation
-from src.support.agent.ports import AgentMessage, KnowledgeSnippet
+from src.support.agent.ports import AgentMessage, KnowledgeSnippet, TextChunk
 from src.support.core.exceptions import NotFoundError
 from tests.fakes.fake_turn_graph import FakeTurnGraph
 
@@ -104,7 +104,7 @@ async def test_new_conversation_persists_user_and_sets_title():
     assert msg_repo.appended[0].content == "qual o onboarding?"
     # drena o stream
     chunks = [c async for c in stream]
-    assert any(c.type == "text" for c in chunks)
+    assert any(isinstance(c, TextChunk) for c in chunks)
 
 
 @pytest.mark.asyncio

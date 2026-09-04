@@ -20,6 +20,8 @@ from src.support.agent.ports import (
     AgentMessage,
     AgentStreamChunk,
     KnowledgeSnippet,
+    SourcesChunk,
+    TextChunk,
     TurnDependencies,
     TurnSignals,
 )
@@ -60,7 +62,7 @@ def _token_chunk(payload) -> AgentStreamChunk | None:
     if not _is_answer_event(payload):
         return None
     text = _text_of(message)
-    return AgentStreamChunk(type="text", text=text) if text else None
+    return TextChunk(text=text) if text else None
 
 
 def _refusal_chunk(payload) -> AgentStreamChunk | None:
@@ -70,7 +72,7 @@ def _refusal_chunk(payload) -> AgentStreamChunk | None:
     update = payload.get("refuse")
     if not update or not update.get("answer"):
         return None
-    return AgentStreamChunk(type="text", text=update["answer"])
+    return TextChunk(text=update["answer"])
 
 
 def _absorb(payload, collected: dict) -> None:
@@ -233,7 +235,7 @@ async def _resume(
             _mark_first_token(signals)
             yield chunk
     _mark_engine_end(signals)
-    yield AgentStreamChunk(type="sources", citations=collected["citations"])
+    yield SourcesChunk(citations=collected["citations"])
 
 
 def get_turn_graph_runner(

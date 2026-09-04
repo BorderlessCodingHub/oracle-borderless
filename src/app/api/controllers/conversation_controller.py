@@ -20,6 +20,7 @@ from src.domain.documents.actions.search_knowledge_base_action import SearchKnow
 from src.domain.observability.actions.record_turn_trace_action import RecordTurnTraceAction
 from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
 from src.support.agent.graph import get_turn_graph_runner
+from src.support.agent.ports import SourcesChunk, TextChunk
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
 from src.support.core.context import CurrentAsyncSessionContext, CurrentRequestContext
 from src.support.core.session_scope import run_in_async_session
@@ -62,10 +63,10 @@ class ConversationController:
             failed = False
             try:
                 async for chunk in stream:
-                    if chunk.type == "text":
+                    if isinstance(chunk, TextChunk):
                         captured["text"] += chunk.text
                         yield _sse("token", {"text": chunk.text})
-                    elif chunk.type == "sources":
+                    elif isinstance(chunk, SourcesChunk):
                         captured["citations"] = chunk.citations
                         yield _sse(
                             "sources",

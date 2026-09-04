@@ -25,9 +25,9 @@ class _FailingTurnGraph:
             signals.outcome = "answer"
 
         async def _stream():
-            from src.support.agent.ports import AgentStreamChunk
+            from src.support.agent.ports import TextChunk
 
-            yield AgentStreamChunk(type="text", text="ola ")
+            yield TextChunk(text="ola ")
             raise RuntimeError("boom: engine caiu no meio do stream")
 
         return _stream()

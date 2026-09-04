@@ -8,7 +8,7 @@ from evals.models import (
     Turn,
 )
 from evals.runner import run_case
-from src.support.agent.ports import AgentStreamChunk
+from src.support.agent.ports import SourcesChunk, TextChunk
 
 
 class _FakeGraph:
@@ -41,8 +41,8 @@ class _FakeGraph:
         return self._stream()
 
     async def _stream(self):
-        yield AgentStreamChunk(type="text", text=self._answer)
-        yield AgentStreamChunk(type="sources", citations=[])
+        yield TextChunk(text=self._answer)
+        yield SourcesChunk(citations=[])
 
 
 class _RecordingSearch:
