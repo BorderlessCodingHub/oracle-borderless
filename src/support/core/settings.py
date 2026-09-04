@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     BORDERLESS_JWT_VERIFY_KEY: str | None = None  # PEM pública (RS/ES) ou segredo (HS)
     ADMIN_EMAILS: str = ""  # allowlist de admins do /ops, separada por vírgula
 
+    # --- CORS ---
+    # Vazio (default) = SPA e API no mesmo host (proxy do Vite em dev) e nenhum
+    # CORSMiddleware é montado. Preencher só quando o SPA ficar num host
+    # diferente da API. Bearer, não cookie — allow_credentials fica False.
+    CORS_ORIGINS: str = ""  # origens separadas por vírgula, ex.: https://app.borderlesscoding.com
+
     # --- Base de conhecimento: Notion via MCP ---
     NOTION_MCP_URL: str | None = None
     NOTION_MCP_TOKEN: str | None = None
@@ -139,6 +145,12 @@ class Settings(BaseSettings):
         return frozenset(
             e.strip().lower() for e in self.ADMIN_EMAILS.split(",") if e.strip()
         )
+
+    @property
+    def cors_origins(self) -> list[str]:
+        """Origens liberadas, trimmed e sem entradas vazias. Vazio = nenhum
+        CORSMiddleware montado (mesmo host / proxy de dev)."""
+        return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
 
 @lru_cache

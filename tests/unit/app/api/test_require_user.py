@@ -62,6 +62,34 @@ async def test_token_expirado_e_assinatura_errada_dao_401():
 
 
 @pytest.mark.asyncio
+async def test_token_sem_exp_da_401():
+    """Spec §4.4: validação local é assinatura + exp — sem exp não há como
+    considerar o token expirável, então tem que ser rejeitado, não aceito."""
+    import jwt as pyjwt
+
+    from src.app.api.dependencies.require_user import require_user
+    from tests.fakes.auth import TEST_JWT_ALGORITHM, TEST_JWT_SECRET
+
+    token = pyjwt.encode(
+        {"sub": "u-1", "email": "a@x.com"}, TEST_JWT_SECRET, algorithm=TEST_JWT_ALGORITHM
+    )
+    with pytest.raises(HTTPException) as exc:
+        await require_user(_request({"Authorization": f"Bearer {token}"}))
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_token_com_aud_nao_confirmada_e_aceito():
+    """Spec §9: a audience da plataforma ainda não está confirmada — um token
+    que carrega `aud` não pode 401 só por isso (verify_aud=False)."""
+    from src.app.api.dependencies.require_user import require_user
+
+    headers = auth_headers("ana@x.com", aud="algum-app")
+    user = await require_user(_request(headers))
+    assert user.email == "ana@x.com"
+
+
+@pytest.mark.asyncio
 async def test_token_sem_email_da_401():
     import jwt as pyjwt
 
