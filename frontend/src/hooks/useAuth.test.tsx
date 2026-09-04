@@ -1,130 +1,135 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AuthProvider, useAuth } from "./useAuth";
-import { clearSession, loadSession, saveSession } from "../lib/auth/session";
+import { AuthProvider, useAuth, type LoginError } from "./useAuth";
+import { loggedIn, stubAuthFetch, TEST_USER } from "../test/authFetch";
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  localStorage.clear();
-  clearSession(); // module-level memorySession (CRITICAL 2) não é resetado pelo storage.clear()
 });
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
   <AuthProvider>{children}</AuthProvider>
 );
 
-describe("useAuth", () => {
-  it("restaura sessão existente do storage", async () => {
-    saveSession({
-      user: { id: "u-1", email: "ana@x.com", name: null, username: null },
-      accessToken: "jwt-abc",
-      isAdmin: true,
-    });
+const json = (body: unknown, status: number) =>
+  new Response(JSON.stringify(body), { status });
+
+describe("useAuth — restore via /auth/me", () => {
+  it("200 popula user e isAdmin", async () => {
+    const fetchMock = stubAuthFetch(loggedIn(true));
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.status).toBe("ready"));
-    expect(result.current.user?.email).toBe("ana@x.com");
+    expect(result.current.user).toEqual(TEST_USER);
     expect(result.current.isAdmin).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/\/auth\/me$/));
   });
 
-  it("storage bloqueado vira status 'error' (terceiro estado) e retry recupera", async () => {
-    const getItemSpy = vi
-      .spyOn(Storage.prototype, "getItem")
-      .mockImplementation(() => {
-        throw new Error("blocked");
-      });
+  it("401 = deslogado (ready, sem user)", async () => {
+    stubAuthFetch(401);
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.user).toBeNull();
+    expect(result.current.isAdmin).toBe(false);
+  });
+
+  it("falha de rede vira status 'error' (terceiro estado) e retry recupera", async () => {
+    const fetchMock = stubAuthFetch("network");
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.status).toBe("error"));
     expect(result.current.user).toBeNull();
 
-    getItemSpy.mockRestore();
+    fetchMock.setMe(loggedIn());
     act(() => result.current.retry());
     await waitFor(() => expect(result.current.status).toBe("ready"));
-    expect(result.current.user).toBeNull();
-  });
-
-  it("login ok grava a sessão e devolve null", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            user: { id: "u-1", email: "ana@x.com", name: "Ana", username: "ana" },
-            access_token: "jwt-abc",
-            expires_in: 3600,
-            is_admin: false,
-          }),
-          { status: 200 }
-        )
-      )
-    );
-    const { result } = renderHook(() => useAuth(), { wrapper });
-    await waitFor(() => expect(result.current.status).toBe("ready"));
-    let code: string | null = "pending";
-    await act(async () => {
-      code = await result.current.login("ana@x.com", "s3nh4");
-    });
-    expect(code).toBeNull();
     expect(result.current.user?.email).toBe("ana@x.com");
-    expect(loadSession()?.accessToken).toBe("jwt-abc");
   });
 
-  it("login inválido devolve o código estável e não grava sessão", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        new Response(JSON.stringify({ detail: "invalid-credentials" }), { status: 401 })
-      )
-    );
+  it("5xx no /auth/me também é 'error', não deslogado", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ detail: "unavailable" }, 503)));
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("error"));
+    expect(result.current.user).toBeNull();
+  });
+});
+
+describe("useAuth — login", () => {
+  it("ok: popula user/isAdmin e devolve null (sem token no corpo)", async () => {
+    stubAuthFetch(401, () => json({ user: TEST_USER, is_admin: false }, 200));
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.status).toBe("ready"));
-    let code: string | null = null;
+    let err: LoginError | null = { code: "unavailable" };
     await act(async () => {
-      code = await result.current.login("a@x.com", "errada");
+      err = await result.current.login("ana@x.com", "s3nh4");
     });
-    expect(code).toBe("invalid-credentials");
+    expect(err).toBeNull();
+    expect(result.current.user).toEqual(TEST_USER);
+    expect(result.current.isAdmin).toBe(false);
+  });
+
+  it("inválido devolve o código estável e não popula", async () => {
+    stubAuthFetch(401, () => json({ detail: "invalid-credentials" }, 401));
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    let err: LoginError | null = null;
+    await act(async () => {
+      err = await result.current.login("a@x.com", "errada");
+    });
+    expect(err).toEqual({ code: "invalid-credentials" });
     expect(result.current.user).toBeNull();
   });
 
-  // MINOR 8: um 200 cujo corpo não bate com o contrato (proxy devolvendo
-  // HTML, ou faltando `user`/`access_token`) não pode deixar a exceção do
-  // parse escapar do login() — senão o form fica preso em "Entrando…".
-  it("200 com corpo fora do contrato vira 'unavailable' em vez de lançar", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(JSON.stringify({}), { status: 200 }))
+  it("forbidden carrega a message da plataforma", async () => {
+    stubAuthFetch(401, () =>
+      json({ detail: "forbidden", message: "Sua conta está desativada." }, 403)
     );
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.status).toBe("ready"));
-    let code: string | null = "pending";
+    let err: LoginError | null = null;
     await act(async () => {
-      code = await result.current.login("a@x.com", "s3nh4");
+      err = await result.current.login("a@x.com", "s");
     });
-    expect(code).toBe("unavailable");
+    expect(err).toEqual({ code: "forbidden", message: "Sua conta está desativada." });
+  });
+
+  it("200 com corpo fora do contrato vira 'unavailable' em vez de lançar", async () => {
+    stubAuthFetch(401, () => json({}, 200));
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    let err: LoginError | null = null;
+    await act(async () => {
+      err = await result.current.login("a@x.com", "s3nh4");
+    });
+    expect(err).toEqual({ code: "unavailable" });
     expect(result.current.user).toBeNull();
   });
 
   it("falha de rede vira 'unavailable'", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("down"); }));
+    stubAuthFetch(401, () => {
+      throw new Error("down");
+    });
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.status).toBe("ready"));
-    let code: string | null = null;
+    let err: LoginError | null = null;
     await act(async () => {
-      code = await result.current.login("a@x.com", "s");
+      err = await result.current.login("a@x.com", "s");
     });
-    expect(code).toBe("unavailable");
+    expect(err).toEqual({ code: "unavailable" });
   });
+});
 
-  it("logout limpa tudo", async () => {
-    saveSession({
-      user: { id: "u-1", email: "ana@x.com", name: null, username: null },
-      accessToken: "jwt-abc",
-      isAdmin: false,
-    });
+describe("useAuth — logout", () => {
+  it("zera o estado e chama POST /auth/logout", async () => {
+    const fetchMock = stubAuthFetch(loggedIn());
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.user).not.toBeNull());
-    act(() => result.current.logout());
+    await act(async () => {
+      await result.current.logout();
+    });
     expect(result.current.user).toBeNull();
-    expect(loadSession()).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/auth\/logout$/),
+      expect.objectContaining({ method: "POST" })
+    );
   });
 });

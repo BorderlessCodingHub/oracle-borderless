@@ -5,7 +5,7 @@ import type {
   ConversationDetail,
   ConversationSummary,
 } from "../types";
-import { apiUrl, authHeaders, getJSON, handleUnauthorized } from "./client";
+import { apiUrl, getJSON, handleUnauthorized } from "./client";
 import { parseSSE } from "./sse";
 
 interface SummaryDTO { id: string; title: string | null; updated_at: string; }
@@ -33,7 +33,7 @@ export async function getConversation(id: string): Promise<ConversationDetail> {
 export async function* askStream(input: AskInput): AsyncGenerator<AskEvent> {
   const resp = await fetch(apiUrl("/conversations/ask"), {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question: input.question, conversation_id: input.conversationId ?? null }),
   });
   if (resp.status === 401) {
