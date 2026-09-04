@@ -38,3 +38,10 @@ class UserSessionRepository:
         await self.session.execute(
             delete(UserSessionModel).where(UserSessionModel.uuid == session_id)
         )
+
+    async def delete_idle_since(self, cutoff: datetime) -> int:
+        """Apaga sessões cuja última validação é anterior a `cutoff`. Devolve quantas."""
+        result = await self.session.execute(
+            delete(UserSessionModel).where(UserSessionModel.last_platform_check_at < cutoff)
+        )
+        return int(result.rowcount or 0)

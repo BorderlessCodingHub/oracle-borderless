@@ -7,7 +7,7 @@ from uuid6 import uuid7
 
 from src.domain.users.actions.sign_out_action import SignOutAction
 from src.domain.users.entities.user_session import UserSession
-from src.domain.users.services.session_tokens import hash_session_token
+from src.support.utils.session_tokens import hash_session_token
 
 RAW = "token-cru"
 NOW = datetime(2026, 9, 4, tzinfo=timezone.utc)

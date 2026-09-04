@@ -54,3 +54,22 @@ async def test_delete_remove_a_sessao(db_session):
     created = await repo.create(_session("d" * 64))
     await repo.delete(created.uuid)
     assert await repo.get_by_token_hash("d" * 64) is None
+
+
+@pytest.mark.asyncio
+async def test_delete_idle_since_apaga_so_as_anteriores_ao_corte(db_session):
+    repo = UserSessionRepository()
+    now = datetime.now(timezone.utc)
+    velha = _session("v" * 64)
+    velha.last_platform_check_at = now - timedelta(days=8)
+    recente = _session("r" * 64)
+    recente.last_platform_check_at = now - timedelta(days=6)
+    await repo.create(velha)
+    await repo.create(recente)
+
+    removed = await repo.delete_idle_since(now - timedelta(days=7))
+    assert removed == 1
+    assert await repo.get_by_token_hash("v" * 64) is None
+    assert await repo.get_by_token_hash("r" * 64) is not None
+    # idempotente
+    assert await repo.delete_idle_since(now - timedelta(days=7)) == 0

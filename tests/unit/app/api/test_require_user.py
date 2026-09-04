@@ -66,6 +66,7 @@ async def test_sem_cookie_de_sessao_da_401_sem_consultar_nada(cookie):
         await require_user(_request(cookie))
     assert exc.value.status_code == 401
     assert exc.value.detail == "not-authenticated"
+    assert exc.value.headers is None  # nada a apagar: não veio cookie
     assert FakeResolve.seen == []
 
 
@@ -79,6 +80,10 @@ async def test_sessao_desconhecida_ou_revogada_da_401_generico():
     assert exc.value.status_code == 401
     assert exc.value.detail == "not-authenticated"
     assert CurrentRequestContext.get_user() is None
+    # Cookie morto é apagado junto com o 401 — o browser não fica replicando-o.
+    set_cookie = exc.value.headers["set-cookie"].lower()
+    assert f"{SESSION_COOKIE_NAME}=" in set_cookie
+    assert "max-age=0" in set_cookie or "expires=" in set_cookie
 
 
 @pytest.mark.asyncio

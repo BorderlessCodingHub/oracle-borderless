@@ -129,6 +129,23 @@ async def test_status_sem_envelope_cai_no_mapeamento_por_status():
         await _client(lambda _: httpx.Response(429, text="slow")).sign_in("a@x.com", "s")
     with pytest.raises(ExternalServiceUnavailableError):
         await _client(lambda _: httpx.Response(502, text="bad")).sign_in("a@x.com", "s")
+    # 403 sem envelope (proxy/WAF): não há message da plataforma para mostrar —
+    # tratar como "conta desativada" seria inventar um diagnóstico.
+    with pytest.raises(ExternalServiceUnavailableError):
+        await _client(lambda _: httpx.Response(403, text="<html>blocked</html>")).sign_in("a@x.com", "s")
+
+
+@pytest.mark.asyncio
+async def test_type_desconhecido_cai_no_mapeamento_por_status():
+    """Um `type` fora do contrato documentado não pode virar 503 para um 401
+    rotineiro: o status é o fallback também neste caso."""
+    with pytest.raises(InvalidCredentialsError):
+        await _client(lambda _: _error(401, "INVALID_EMAIL_OR_PASSWORD")).sign_in("a@x.com", "s")
+    with pytest.raises(RateLimitedError):
+        await _client(lambda _: _error(429, "RATE_LIMITED")).sign_in("a@x.com", "s")
+    with pytest.raises(ForbiddenError) as exc:
+        await _client(lambda _: _error(403, "ACCOUNT_BANNED", "Banido.")).sign_in("a@x.com", "s")
+    assert str(exc.value) == "Banido."
 
 
 @pytest.mark.asyncio
@@ -161,8 +178,11 @@ async def test_get_profile_200_manda_bearer_sem_cookie_e_parseia():
 
 
 @pytest.mark.asyncio
-async def test_get_profile_401_devolve_none():
+async def test_get_profile_401_ou_403_devolve_none():
+    """401 = sessão expirada/revogada; 403 = conta desativada/banida. Nos dois
+    a sessão do oráculo morre — 403 NÃO é 'plataforma fora' (fail-open)."""
     assert await _client(lambda _: _error(401, "UNAUTHORIZED")).get_profile("x") is None
+    assert await _client(lambda _: _error(403, "FORBIDDEN", "Conta desativada.")).get_profile("x") is None
 
 
 @pytest.mark.asyncio

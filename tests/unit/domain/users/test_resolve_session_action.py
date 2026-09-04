@@ -12,7 +12,7 @@ from src.domain.users.actions.resolve_session_action import (
     ResolveSessionAction,
 )
 from src.domain.users.entities.user_session import UserSession
-from src.domain.users.services.session_tokens import hash_session_token
+from src.support.utils.session_tokens import hash_session_token
 from src.support.clients.borderless.borderless_auth_client import PlatformProfile
 from src.support.core.exceptions import ExternalServiceUnavailableError
 from src.support.core.settings import settings

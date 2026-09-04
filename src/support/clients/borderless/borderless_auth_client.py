@@ -22,6 +22,16 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT_SECONDS = 10.0
 
+# Fallback status → `error.type` para quando o envelope não vem ou traz um type
+# fora do contrato documentado. 403 NÃO entra: sem a message da plataforma não
+# há o que mostrar ao usuário, e um 403 de proxy/WAF não é "conta desativada".
+_STATUS_FALLBACK = {
+    400: "VALIDATION",
+    401: "UNAUTHORIZED",
+    429: "TOO_MANY_REQUESTS",
+}
+_KNOWN_ERROR_TYPES = frozenset({*_STATUS_FALLBACK.values(), "FORBIDDEN"})
+
 
 @dataclass(frozen=True)
 class PlatformUser:
@@ -93,18 +103,24 @@ class BorderlessAuthClient:
 
     @staticmethod
     def _sign_in_error(response: httpx.Response) -> Exception:
-        """Mapeia por `error.type` (campo estável); cai no status quando o
-        envelope não vem. `FORBIDDEN` é o único caso que repassa a message."""
+        """Mapeia por `error.type` (campo estável). Quando o type falta ou é um
+        valor que não conhecemos, o status HTTP ainda diz o essencial — cair
+        em 503 por um 401 com type inesperado seria pior que o fallback.
+        `FORBIDDEN` é o único caso que repassa a message."""
         error_type, message = _error_envelope(response)
         status = response.status_code
+        if error_type not in _KNOWN_ERROR_TYPES:
+            error_type = _STATUS_FALLBACK.get(status)
+            if status == 403 and message:
+                # Envelope da plataforma com type inesperado, mas com a message
+                # voltada ao usuário — é ela que interessa.
+                error_type = "FORBIDDEN"
 
-        if error_type == "FORBIDDEN" or (error_type is None and status == 403):
+        if error_type == "FORBIDDEN":
             return ForbiddenError(message or "acesso negado pela plataforma")
-        if error_type in ("VALIDATION", "UNAUTHORIZED") or (
-            error_type is None and status in (400, 401)
-        ):
+        if error_type in ("VALIDATION", "UNAUTHORIZED"):
             return InvalidCredentialsError("credenciais inválidas")
-        if error_type == "TOO_MANY_REQUESTS" or (error_type is None and status == 429):
+        if error_type == "TOO_MANY_REQUESTS":
             return RateLimitedError("rate limit da plataforma")
 
         logger.error("signin da plataforma devolveu %s (type=%s)", status, error_type)
@@ -135,8 +151,10 @@ class BorderlessAuthClient:
     # --- profile (validação de sessão) ---
 
     async def get_profile(self, access_token: str) -> PlatformProfile | None:
-        """200 → perfil (sessão válida). 401 → None (expirada/revogada). Qualquer
-        outra coisa → ExternalServiceUnavailableError, para o fail-open decidir."""
+        """200 → perfil (sessão válida). 401 (expirada/revogada) ou 403 (conta
+        desativada/banida — a plataforma bloqueia a conta, não a sessão) → None:
+        nos dois casos a sessão do oráculo tem que morrer. Qualquer outra coisa
+        → ExternalServiceUnavailableError, para o fail-open decidir."""
         try:
             async with self._http() as client:
                 response = await client.get(
@@ -147,7 +165,7 @@ class BorderlessAuthClient:
             logger.warning("profile da plataforma falhou na rede: %s", type(exc).__name__)
             raise ExternalServiceUnavailableError("plataforma indisponível") from exc
 
-        if response.status_code == 401:
+        if response.status_code in (401, 403):
             return None
         if response.status_code != 200:
             logger.warning("profile da plataforma devolveu %s", response.status_code)

@@ -87,13 +87,20 @@ SPA ──(cookie ob_session vai sozinho no fetch same-origin)──► FastAPI
   cookie é httpOnly — o SPA não tem como ler; `/auth/me` é a única fonte.
 - **Logout:** `POST /auth/logout` → best-effort `POST /api/auth/signout` na
   plataforma (invalida lá — descartar só localmente deixa a sessão viva),
-  apaga a linha de `sessions`, `Set-Cookie` expirado. 204 mesmo se a
-  plataforma falhar (o log registra). A rota vive no `router` protegido: sem
-  cookie válido responde o 401 genérico — não há o que encerrar.
+  apaga a linha de `sessions`, `Set-Cookie` expirado. **Sempre 204**, mesmo se
+  a plataforma falhar (o log registra) ou se não houver cookie. A rota é
+  **pública** (autentica pelo hash do próprio cookie): precisa funcionar quando
+  o `require_user` responderia 503/401, senão o cookie sobrevive e o usuário
+  reaparece logado quando a plataforma volta.
 - **Expiração:** a plataforma renova a sessão conforme o uso (janela de 7 dias
-  deslizante). Sem refresh token: o primeiro `401` da plataforma apaga a sessão
-  local e o SPA volta ao `/login?next=…`. Não há expiração local própria — a
-  plataforma é a fonte da verdade do ciclo de vida.
+  deslizante); o cookie acompanha — `GET /auth/me` (todo boot do SPA) o reemite
+  com Max-Age cheio. Sem refresh token: o primeiro `401`/`403` da plataforma
+  apaga a sessão local (o 401 do oráculo já leva o `Set-Cookie` que apaga o
+  cookie) e o SPA volta ao `/login?next=…`. Não há expiração local própria — a
+  plataforma é a fonte da verdade do ciclo de vida. **Faxina:** o
+  `PurgeStaleSessionsJob` (diário) apaga linhas sem validação há mais de 7 dias
+  — a plataforma já as expirou por inatividade; sem isso a tabela cresceria sem
+  limite guardando tokens mortos.
 
 ---
 
@@ -192,8 +199,9 @@ apontar para split-host).
 
 ### 4.5 Rotas
 
-- `auth.py` (`public_router`): `POST /auth/login`. **`GET /auth/me` e
-  `POST /auth/logout` ficam no `router`** (autodiscovery aplica `require_user`
+- `auth.py` (`public_router`): `POST /auth/login` e `POST /auth/logout` (ver §2:
+  o logout se autentica pelo hash do cookie e não pode depender do guard).
+  **`GET /auth/me` fica no `router`** (autodiscovery aplica `require_user`
   mecanicamente — nada a fazer).
 - `/conversations/*` e `/ops/*`: sem mudança (a identidade continua vindo do
   contexto; só a origem dela mudou).

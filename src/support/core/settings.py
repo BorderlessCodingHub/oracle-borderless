@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     )
 
     # --- Ambiente ---
+    # Fora de "development" o cookie de sessão sai com `Secure` (ADR-0018): o
+    # ambiente precisa estar atrás de TLS, senão o browser descarta o cookie e
+    # o login "funciona" mas nenhuma chamada autentica.
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
     DEBUG: bool = True
     ENABLE_SCHEDULER: bool = True
@@ -47,9 +50,11 @@ class Settings(BaseSettings):
 
     # --- CORS ---
     # Vazio (default) = SPA e API no mesmo host (proxy do Vite em dev) e nenhum
-    # CORSMiddleware é montado. A sessão é cookie SameSite=Lax (ADR-0018):
-    # split-host exigiria SameSite=None + CSRF token — fora da v2. Este campo
-    # segue só para o caso same-site com subdomínios, sem credentials.
+    # CORSMiddleware é montado. ATENÇÃO (ADR-0018): a sessão é cookie e o SPA
+    # faz fetch sem `credentials` — com o SPA em OUTRA origem (mesmo subdomínio
+    # same-site) o browser descarta o Set-Cookie e a auth não funciona. Este
+    # campo só serve a clientes sem sessão (ex.: /health); split-host para o
+    # SPA exigiria SameSite=None + credentials + CSRF token — fora da v2.
     CORS_ORIGINS: str = ""  # origens separadas por vírgula, ex.: https://app.borderlesscoding.com
 
     # --- Base de conhecimento: Notion via MCP ---
@@ -136,6 +141,11 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
+
+    @property
+    def is_development(self) -> bool:
+        """Único ambiente em que o cookie de sessão sai sem `Secure` (ADR-0018)."""
+        return self.ENVIRONMENT == "development"
 
     @property
     def admin_emails(self) -> frozenset[str]:

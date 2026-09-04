@@ -13,7 +13,7 @@ from typing import Callable
 
 from src.domain.users.entities.authenticated_user import AuthenticatedUser
 from src.domain.users.repositories.user_session_repository import UserSessionRepository
-from src.domain.users.services.session_tokens import hash_session_token
+from src.support.utils.session_tokens import hash_session_token
 from src.support.clients.borderless.borderless_auth_client import BorderlessAuthClient
 from src.support.core.exceptions import ExternalServiceUnavailableError
 from src.support.core.settings import settings

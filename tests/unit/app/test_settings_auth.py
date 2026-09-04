@@ -10,6 +10,12 @@ def test_auth_settings_defaults():
     assert s.admin_emails == frozenset()
 
 
+def test_is_development_so_no_ambiente_de_dev():
+    assert Settings(_env_file=None).is_development is True
+    assert Settings(_env_file=None, ENVIRONMENT="staging").is_development is False
+    assert Settings(_env_file=None, ENVIRONMENT="production").is_development is False
+
+
 def test_envs_da_v1_nao_existem_mais():
     """ADR-0018: login é público e o token é opaco — nada de key nem JWT."""
     s = Settings(_env_file=None)

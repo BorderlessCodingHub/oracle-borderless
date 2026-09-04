@@ -8,7 +8,7 @@ inclui todo `router` com `dependencies=[Depends(require_user)]` amarrado na
 hora do `include_router` — um módulo novo que esqueça de proteger sua rota sai
 protegido mesmo assim. `public_router` é incluído como está, sem essa
 dependency extra: só use `public_router` para o que precisa mesmo ficar sem
-auth (hoje: `/health` e `POST /auth/login`).
+auth (hoje: `/health`, `POST /auth/login` e `POST /auth/logout`).
 
 Um router que já declara sua própria auth (`require_user` ou `require_admin`,
 que depende dele) não paga o preço em duplicidade: o FastAPI cacheia o

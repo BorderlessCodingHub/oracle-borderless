@@ -2,7 +2,7 @@
 localmente deixaria a sessão viva lá) e apaga a nossa linha."""
 
 from src.domain.users.repositories.user_session_repository import UserSessionRepository
-from src.domain.users.services.session_tokens import hash_session_token
+from src.support.utils.session_tokens import hash_session_token
 from src.support.clients.borderless.borderless_auth_client import BorderlessAuthClient
 
 

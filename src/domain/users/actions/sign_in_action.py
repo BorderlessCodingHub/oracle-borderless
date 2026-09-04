@@ -8,7 +8,7 @@ from src.domain.users.dtos.sign_in_result import SignInResult
 from src.domain.users.entities.user import User
 from src.domain.users.entities.user_session import UserSession
 from src.domain.users.repositories.user_session_repository import UserSessionRepository
-from src.domain.users.services.session_tokens import generate_session_token, hash_session_token
+from src.support.utils.session_tokens import generate_session_token, hash_session_token
 from src.support.clients.borderless.borderless_auth_client import BorderlessAuthClient
 from src.support.core.exceptions import InvalidCredentialsError, RateLimitedError
 from src.support.core.rate_limit import rate_limit

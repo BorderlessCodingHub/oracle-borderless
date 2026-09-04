@@ -16,7 +16,7 @@ from uuid6 import uuid7
 from src.app.api.session_cookie import SESSION_COOKIE_NAME
 from src.domain.users.entities.user_session import UserSession
 from src.domain.users.repositories.user_session_repository import UserSessionRepository
-from src.domain.users.services.session_tokens import generate_session_token, hash_session_token
+from src.support.utils.session_tokens import generate_session_token, hash_session_token
 from src.support.core.session_scope import run_in_async_session
 from src.support.core.settings import settings
 

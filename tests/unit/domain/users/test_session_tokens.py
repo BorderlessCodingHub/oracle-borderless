@@ -1,6 +1,6 @@
 """Token de sessão do oráculo (ADR-0018): aleatório no cookie, só o hash no banco."""
 
-from src.domain.users.services.session_tokens import generate_session_token, hash_session_token
+from src.support.utils.session_tokens import generate_session_token, hash_session_token
 
 
 def test_token_gerado_e_aleatorio_e_longo():

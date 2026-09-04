@@ -10,7 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
 from src.app.api.session_cookie import SESSION_COOKIE_NAME
-from src.domain.users.services.session_tokens import hash_session_token
+from src.support.utils.session_tokens import hash_session_token
 from src.support.clients.borderless.borderless_auth_client import (
     PlatformProfile,
     PlatformSignIn,
@@ -159,6 +159,10 @@ async def test_login_me_logout_fim_a_fim(api_client):
     assert me.status_code == 200
     assert me.json()["user"]["email"] == email
     assert FakePlatform.profile_calls == []
+    # Janela deslizante: o restore reemite o cookie com Max-Age cheio.
+    renovado = me.headers["set-cookie"].lower()
+    assert f"{SESSION_COOKIE_NAME}={raw.lower()}" in renovado
+    assert "max-age=604800" in renovado
 
     logout = await api_client.post("/auth/logout")
     assert logout.status_code == 204
@@ -181,11 +185,27 @@ async def test_me_sem_cookie_da_401(api_client):
 
 
 @pytest.mark.asyncio
-async def test_logout_sem_cookie_da_401(api_client):
-    """`/auth/logout` vive no `router` protegido (spec §4.5): sem sessão não há
-    o que encerrar — e o autodiscovery amarra `require_user` mecanicamente."""
-    assert (await api_client.post("/auth/logout")).status_code == 401
+async def test_logout_sem_cookie_e_204_idempotente(api_client):
+    """Logout é público e idempotente: nada a encerrar, mas o cookie é apagado."""
+    resp = await api_client.post("/auth/logout")
+    assert resp.status_code == 204
+    assert "max-age=0" in resp.headers["set-cookie"].lower()
     assert FakePlatform.signed_out == []
+
+
+@pytest.mark.asyncio
+async def test_logout_funciona_mesmo_com_a_plataforma_fora_alem_do_fail_open(api_client):
+    """O caso que motivou o logout público: `require_user` daria 503 aqui, e o
+    cookie sobreviveria — com a plataforma de volta o usuário reapareceria
+    logado. O logout tem que apagar a sessão local de qualquer jeito."""
+    FakePlatform.profile_outcome = "down"
+    muito_velha = datetime.now(timezone.utc) - timedelta(minutes=11)
+    raw = await seed_session("ana@x.com", platform_token="plat-x", checked_at=muito_velha)
+
+    resp = await api_client.post("/auth/logout", headers=cookie_headers(raw))
+    assert resp.status_code == 204
+    assert await _session_row(raw) is None
+    assert FakePlatform.signed_out == ["plat-x"]  # best-effort: o fake aceitou
 
 
 @pytest.mark.asyncio
@@ -215,6 +235,8 @@ async def test_sessao_fora_do_cache_e_revogada_na_plataforma_da_401_e_apaga(api_
     assert resp.status_code == 401
     assert FakePlatform.profile_calls == ["plat-velho"]
     assert await _session_row(raw) is None
+    # e o browser recebe a ordem de apagar o cookie morto
+    assert "max-age=0" in resp.headers["set-cookie"].lower()
 
 
 @pytest.mark.asyncio

@@ -3207,3 +3207,23 @@ Atualizar a memória `auth-brainstorm-status.md` (auto-memory do Claude): v2 imp
 **Tipos consistentes entre tasks:** `UserSession` (Task 1) usado em 3/4; `UserSessionRepository.get_by_token_hash/create/mark_platform_checked/delete` (Task 1) usados em Task 3 e nas fakes; `SignInResult.session_token` (Task 3) lido por `SessionResponse.from_result` e `set_session_cookie` (Task 4); `AuthenticatedUser.name/username` (Task 3) lidos por `SessionResponse.from_authenticated_user` (Task 4); `LoginError` (Task 6) consumido pela `LoginPage` (Task 7); `stubAuthFetch(...).setMe` (Task 6) usado em Task 7.
 
 **Placeholders:** nenhum — todo passo de código traz o código.
+
+---
+
+## Pós-execução: ajustes vindos do code review (aplicados no mesmo dia)
+
+Desvios em relação ao texto das tasks acima, todos cobertos por teste:
+
+- **`POST /auth/logout` é público** (`public_router`), não fica no `router`. Atrás do
+  `require_user`, plataforma fora além do fail-open (503) ou sessão revogada (401)
+  impediam o logout e o cookie sobrevivia. A `SignOutAction` já se autentica pelo
+  hash do cookie. Sempre 204.
+- **`get_profile` trata 403 como sessão morta** (conta desativada/banida), não como
+  "plataforma fora" — senão o banido seguia em fail-open e depois virava 503 eterno.
+- **`error.type` desconhecido cai no status** (400/401/429); 403 **sem** envelope vira
+  `unavailable` (não inventar "conta desativada" para um bloqueio de proxy).
+- **Cookie deslizante:** `GET /auth/me` reemite o cookie com Max-Age cheio.
+- **401 de sessão morta leva `Set-Cookie` que apaga o cookie** (`clearing_cookie_headers`).
+- **`PurgeStaleSessionsJob`** (diário, 05h) apaga sessões sem validação há >7 dias.
+- `session_tokens.py` vive em `src/support/utils/` (utilitário, não Domain Service);
+  `settings.is_development`; `read_session_cookie()` único ponto de leitura do cookie.

@@ -8,25 +8,26 @@ revogada). Plataforma fora além do fail-open NÃO é 401: a
 
 from fastapi import HTTPException, Request
 
-from src.app.api.session_cookie import SESSION_COOKIE_NAME
+from src.app.api.session_cookie import clearing_cookie_headers, read_session_cookie
 from src.domain.users.actions.resolve_session_action import ResolveSessionAction
 from src.domain.users.entities.authenticated_user import AuthenticatedUser
 from src.support.clients.borderless.borderless_auth_client import BorderlessAuthClient
 from src.support.core.context import CurrentRequestContext
 
 
-def _unauthorized() -> HTTPException:
-    return HTTPException(status_code=401, detail="not-authenticated")
-
-
 async def require_user(request: Request) -> AuthenticatedUser:
-    raw_token = (request.cookies.get(SESSION_COOKIE_NAME) or "").strip()
-    if not raw_token:
-        raise _unauthorized()
+    raw_token = read_session_cookie(request)
+    if raw_token is None:
+        raise HTTPException(status_code=401, detail="not-authenticated")
 
     user = await ResolveSessionAction(auth_client=BorderlessAuthClient()).execute(raw_token)
     if user is None:
-        raise _unauthorized()
+        # Cookie presente mas sessão morta (desconhecida ou revogada): o mesmo
+        # 401 genérico, só que apagando o cookie — senão o browser fica
+        # replicando um token inútil até o próximo login.
+        raise HTTPException(
+            status_code=401, detail="not-authenticated", headers=clearing_cookie_headers()
+        )
 
     CurrentRequestContext.set_user(user)
     return user

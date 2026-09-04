@@ -3,7 +3,7 @@ token cru só no resultado, isAdmin da allowlist."""
 
 import pytest
 
-from src.domain.users.services.session_tokens import hash_session_token
+from src.support.utils.session_tokens import hash_session_token
 from src.support.clients.borderless.borderless_auth_client import (
     PlatformSignIn,
     PlatformUser,

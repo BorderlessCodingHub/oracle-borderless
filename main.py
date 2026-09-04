@@ -35,7 +35,7 @@ def create_app() -> FastAPI:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=settings.cors_origins,
-            allow_credentials=False,  # cookie SameSite=Lax exige mesmo host; sem credentials cross-origin (ADR-0018)
+            allow_credentials=False,  # SPA precisa estar no MESMO host (cookie); CORS aqui não serve à auth (ADR-0018)
             allow_methods=["*"],
             allow_headers=["Authorization", "Content-Type"],
         )
