@@ -7,6 +7,7 @@ import styles from "./LoginPage.module.css";
 const ERROR_MESSAGES: Record<string, string> = {
   "invalid-credentials": "E-mail ou senha inválidos.",
   "rate-limited": "Muitas tentativas. Aguarde alguns minutos e tente de novo.",
+  forbidden: "Sua conta não pode acessar o oráculo no momento.",
   unavailable: "Não foi possível falar com a plataforma. Tente novamente em instantes.",
 };
 
@@ -29,10 +30,16 @@ export default function LoginPage() {
     if (busy) return; // token de login não é brinquedo de duplo clique
     setBusy(true);
     setError(null);
-    const code = await login(email, password);
+    const err = await login(email, password);
     setBusy(false);
-    if (code) {
-      setError(ERROR_MESSAGES[code] ?? ERROR_MESSAGES.unavailable);
+    if (err) {
+      // `forbidden` é a única mensagem da plataforma que vai à tela (spec §3):
+      // ela distingue conta desativada / banida / convite pendente.
+      setError(
+        err.code === "forbidden" && err.message
+          ? err.message
+          : ERROR_MESSAGES[err.code] ?? ERROR_MESSAGES.unavailable
+      );
       return;
     }
     navigate(safeNext(params.get("next")), { replace: true });

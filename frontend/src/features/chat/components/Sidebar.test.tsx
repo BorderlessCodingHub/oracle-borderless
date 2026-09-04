@@ -2,34 +2,36 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../../../hooks/useAuth";
-import { loadSession, saveSession } from "../../../lib/auth/session";
+import { loggedIn, stubAuthFetch } from "../../../test/authFetch";
 import { Sidebar } from "./Sidebar";
 
-afterEach(() => localStorage.clear());
+afterEach(() => vi.unstubAllGlobals());
 
 function renderSidebar() {
-  saveSession({
-    user: { id: "u-1", email: "ana@x.com", name: "Ana", username: "ana" },
-    accessToken: "jwt",
-    isAdmin: false,
-  });
-  return render(
+  const fetchMock = stubAuthFetch(loggedIn());
+  render(
     <AuthProvider>
       <MemoryRouter>
         <Sidebar conversations={[]} activeId={null} onNew={vi.fn()} onOpen={vi.fn()} />
       </MemoryRouter>
     </AuthProvider>
   );
+  return fetchMock;
 }
 
 describe("Sidebar", () => {
   it("rodapé mostra a conta logada e o sair — sem controle de tema", async () => {
-    renderSidebar();
+    const fetchMock = renderSidebar();
     expect(screen.queryByRole("group", { name: "Tema da interface" })).not.toBeInTheDocument();
-    const foot = screen.getByTestId("sidebar-foot");
-    expect(foot).toHaveTextContent("ana@x.com");
+    // O rodapé só aparece depois que /auth/me responde (restore é assíncrono).
+    expect(await screen.findByText("ana@x.com")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-foot")).toHaveTextContent("ana@x.com");
+
     fireEvent.click(screen.getByRole("button", { name: /sair/i }));
-    expect(loadSession()).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/auth\/logout$/),
+      expect.objectContaining({ method: "POST" })
+    );
   });
 
   it("lista vazia ganha um empty state em vez de espaço morto", () => {

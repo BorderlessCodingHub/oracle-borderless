@@ -3,7 +3,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { ThemeProvider } from "./hooks/useTheme";
 import { AuthProvider } from "./hooks/useAuth";
-import { clearSession, saveSession } from "./lib/auth/session";
+import { loggedIn, stubAuthFetch, type MeOutcome } from "./test/authFetch";
 import { stubMatchMedia } from "./test/matchMedia";
 import App from "./App";
 
@@ -51,30 +51,25 @@ const OPS_OVERVIEW_STUB = {
 };
 const OPS_EVAL_STUB = { status: "no_runs", report: null, history: [] };
 
-function renderAt(path: string) {
+function renderAt(path: string, me: MeOutcome = loggedIn()) {
   stubMatchMedia(true);
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
-      const url = typeof input === "string" ? input : input.toString();
-      if (/\/ops\/overview/.test(url)) {
-        return new Response(JSON.stringify(OPS_OVERVIEW_STUB), { status: 200 });
-      }
-      if (/\/ops\/turns/.test(url)) {
-        return new Response(JSON.stringify([]), { status: 200 });
-      }
-      if (/\/ops\/eval/.test(url)) {
-        return new Response(JSON.stringify(OPS_EVAL_STUB), { status: 200 });
-      }
-      if (/\/conversations\/[^/]+$/.test(url)) {
-        return new Response(
-          JSON.stringify({ id: "abc-123", title: null, messages: [] }),
-          { status: 200 }
-        );
-      }
+  stubAuthFetch(me, (url) => {
+    if (/\/ops\/overview/.test(url)) {
+      return new Response(JSON.stringify(OPS_OVERVIEW_STUB), { status: 200 });
+    }
+    if (/\/ops\/turns/.test(url)) {
       return new Response(JSON.stringify([]), { status: 200 });
-    })
-  );
+    }
+    if (/\/ops\/eval/.test(url)) {
+      return new Response(JSON.stringify(OPS_EVAL_STUB), { status: 200 });
+    }
+    if (/\/conversations\/[^/]+$/.test(url)) {
+      return new Response(JSON.stringify({ id: "abc-123", title: null, messages: [] }), {
+        status: 200,
+      });
+    }
+    return new Response(JSON.stringify([]), { status: 200 });
+  });
   return render(
     <AuthProvider>
       <ThemeProvider>
@@ -87,34 +82,15 @@ function renderAt(path: string) {
   );
 }
 
-// Sessão semeada para os testes de roteamento que esperam o chat — sem ela o
-// RequireAuth (Task 9) redireciona qualquer rota privada para /login.
-function seedSession() {
-  saveSession({
-    user: { id: "u", email: "ana@x.com", name: null, username: null },
-    accessToken: "jwt",
-    isAdmin: false,
-  });
-}
-
-function seedAdminSession() {
-  saveSession({
-    user: { id: "u-admin", email: "admin@x.com", name: null, username: null },
-    accessToken: "jwt-admin",
-    isAdmin: true,
-  });
-}
+// Sessão vem de GET /auth/me (ADR-0018) — o stub de fetch decide se o usuário está logado.
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  localStorage.clear();
-  clearSession(); // module-level memorySession (CRITICAL 2) não é resetado pelo storage.clear()
   document.documentElement.removeAttribute("data-theme");
 });
 
 describe("roteamento", () => {
   it("serve o chat na raiz", async () => {
-    seedSession();
     renderAt("/");
     expect(await screen.findByRole("textbox")).toBeInTheDocument();
     // toHaveTextContent(string) faz substring — todo pathname contém "/", o
@@ -123,28 +99,24 @@ describe("roteamento", () => {
   });
 
   it("serve o chat em /c/:id", async () => {
-    seedSession();
     renderAt("/c/abc-123");
     expect(await screen.findByRole("textbox")).toBeInTheDocument();
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/c\/abc-123$/);
   });
 
   it("redireciona /oracle para a raiz", async () => {
-    seedSession();
     renderAt("/oracle");
     await screen.findByRole("textbox");
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/$/);
   });
 
   it("redireciona /oracle/:id preservando a conversa", async () => {
-    seedSession();
     renderAt("/oracle/abc-123");
     await screen.findByRole("textbox");
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/c\/abc-123$/);
   });
 
   it("redireciona /about e /knowledge para a raiz (catch-all)", async () => {
-    seedSession();
     const about = renderAt("/about");
     await screen.findByRole("textbox");
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/$/);
@@ -156,7 +128,7 @@ describe("roteamento", () => {
   });
 
   it("sem sessão, a raiz cai no /login", async () => {
-    renderAt("/"); // sem saveSession
+    renderAt("/", 401); // /auth/me diz deslogado
     expect(await screen.findByText(/entrar no oráculo/i)).toBeInTheDocument();
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/login$/);
   });
@@ -166,8 +138,7 @@ describe("roteamento", () => {
   // nesse instante, isAdmin seria sempre false, a rota /ops nem existiria e o
   // catch-all mandaria o admin de volta para "/" antes do restore terminar.
   it("admin acessando /ops direto (deep-link) permanece em /ops após restaurar a sessão", async () => {
-    seedAdminSession();
-    renderAt("/ops");
+    renderAt("/ops", loggedIn(true));
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent(/^\/ops$/)
     );

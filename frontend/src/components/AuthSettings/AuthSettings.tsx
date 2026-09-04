@@ -2,14 +2,14 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import styles from "./AuthSettings.module.css";
 
-/** Conta logada no rodapé da sidebar: identidade + sair (ADR-0017). */
+/** Conta logada no rodapé da sidebar: identidade + sair (ADR-0017/0018). */
 export function AuthSettings() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   if (!user) return null; // atrás do RequireAuth isso não acontece; guarda barata
 
-  function signOut() {
-    logout();
+  async function signOut() {
+    await logout();
     navigate("/login");
   }
 
