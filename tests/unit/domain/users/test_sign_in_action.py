@@ -1,7 +1,9 @@
-"""SignInAction: normalização, rate limit e isAdmin da allowlist."""
+"""SignInAction v2 (ADR-0018): normalização, rate limit, cria sessão com hash,
+token cru só no resultado, isAdmin da allowlist."""
 
 import pytest
 
+from src.domain.users.services.session_tokens import hash_session_token
 from src.support.clients.borderless.borderless_auth_client import (
     PlatformSignIn,
     PlatformUser,
@@ -21,9 +23,18 @@ class FakeAuthClient:
                 id="u-1", email=email, name="Ana", username="ana",
                 career_stage="junior_transition", email_verified=True,
             ),
-            access_token="jwt-abc",
-            expires_in=3600,
+            access_token="opaque-abc",
+            expires_in=604800,
         )
+
+
+class FakeSessions:
+    def __init__(self):
+        self.created = []
+
+    async def create(self, user_session):
+        self.created.append(user_session)
+        return user_session
 
 
 @pytest.fixture(autouse=True)
@@ -37,27 +48,37 @@ def _rate_limit_liberado(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_normaliza_email_e_devolve_resultado():
+async def test_normaliza_email_cria_sessao_e_devolve_token_cru():
     from src.domain.users.actions.sign_in_action import SignInAction
 
-    fake = FakeAuthClient()
-    result = await SignInAction(auth_client=fake).execute("  Ana@X.com ", "s3nh4")
+    fake, sessions = FakeAuthClient(), FakeSessions()
+    result = await SignInAction(auth_client=fake, sessions=sessions).execute("  Ana@X.com ", "s3nh4")
+
     assert fake.calls == [("ana@x.com", "s3nh4")]
     assert result.user.email == "ana@x.com"
-    assert result.access_token == "jwt-abc"
-    assert result.expires_in == 3600
+    assert result.user.name == "Ana"
+    assert len(result.session_token) >= 40
+
+    assert len(sessions.created) == 1
+    row = sessions.created[0]
+    assert row.token_hash == hash_session_token(result.session_token)
+    assert row.token_hash != result.session_token  # o cru não persiste
+    assert row.platform_access_token == "opaque-abc"
+    assert (row.user_id, row.user_email, row.user_name, row.user_username) == ("u-1", "ana@x.com", "Ana", "ana")
+    assert row.last_platform_check_at is not None  # login = validação fresca
 
 
 @pytest.mark.asyncio
 async def test_vazios_sao_invalid_credentials_sem_ir_a_rede():
     from src.domain.users.actions.sign_in_action import SignInAction
 
-    fake = FakeAuthClient()
+    fake, sessions = FakeAuthClient(), FakeSessions()
     with pytest.raises(InvalidCredentialsError):
-        await SignInAction(auth_client=fake).execute("  ", "x")
+        await SignInAction(auth_client=fake, sessions=sessions).execute("  ", "x")
     with pytest.raises(InvalidCredentialsError):
-        await SignInAction(auth_client=fake).execute("a@x.com", "")
+        await SignInAction(auth_client=fake, sessions=sessions).execute("a@x.com", "")
     assert fake.calls == []
+    assert sessions.created == []
 
 
 @pytest.mark.asyncio
@@ -71,10 +92,11 @@ async def test_rate_limit_estourado_barra_antes_da_rede(monkeypatch):
         return False
 
     monkeypatch.setattr(sign_in_action, "rate_limit", _nao)
-    fake = FakeAuthClient()
+    fake, sessions = FakeAuthClient(), FakeSessions()
     with pytest.raises(RateLimitedError):
-        await SignInAction(auth_client=fake).execute("ana@x.com", "s")
+        await SignInAction(auth_client=fake, sessions=sessions).execute("ana@x.com", "s")
     assert fake.calls == []
+    assert sessions.created == []
 
 
 @pytest.mark.asyncio
@@ -82,8 +104,8 @@ async def test_is_admin_vem_da_allowlist(monkeypatch):
     from src.domain.users.actions.sign_in_action import SignInAction
 
     monkeypatch.setattr(settings, "ADMIN_EMAILS", "ana@x.com")
-    result = await SignInAction(auth_client=FakeAuthClient()).execute("ana@x.com", "s")
+    result = await SignInAction(auth_client=FakeAuthClient(), sessions=FakeSessions()).execute("ana@x.com", "s")
     assert result.is_admin is True
 
-    result = await SignInAction(auth_client=FakeAuthClient()).execute("beto@x.com", "s")
+    result = await SignInAction(auth_client=FakeAuthClient(), sessions=FakeSessions()).execute("beto@x.com", "s")
     assert result.is_admin is False

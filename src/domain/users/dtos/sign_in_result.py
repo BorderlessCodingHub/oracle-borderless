@@ -6,6 +6,7 @@ from src.domain.users.entities.user import User
 @dataclass(frozen=True)
 class SignInResult:
     user: User
-    access_token: str
-    expires_in: int | None
+    # Token de sessão do oráculo, CRU: só atravessa até o Set-Cookie. Nunca
+    # logar nem persistir (o banco guarda o hash).
+    session_token: str
     is_admin: bool
