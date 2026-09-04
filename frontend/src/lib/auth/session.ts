@@ -17,9 +17,18 @@ export interface Session {
 
 const KEY = "ob-session";
 
-/** Pode lançar se o storage estiver bloqueado (modo privado + extensões) —
+// Fallback em memória para quando o storage está bloqueado (modo privado +
+// extensões). Sem isto: saveSession engolia o erro ("vale só em memória até o
+// reload", dizia o comentário antigo) mas peekSession só lia do localStorage —
+// então login funcionava, a chamada seguinte ia sem Authorization, 401,
+// handleUnauthorized limpava e recarregava, e a sessão em memória (que nunca
+// existiu) sumia: loop infinito de login. Vive só neste módulo, por aba.
+let memorySession: Session | null = null;
+
+/** Pode lançar se o storage estiver bloqueado E não houver sessão em memória —
  * o AuthProvider traduz isso no estado "error" com retry (spec §5.2). */
 export function loadSession(): Session | null {
+  if (memorySession) return memorySession;
   const raw = localStorage.getItem(KEY);
   if (!raw) return null;
   try {
@@ -32,6 +41,7 @@ export function loadSession(): Session | null {
 
 /** Nunca lança — para quem só precisa do token (client HTTP). */
 export function peekSession(): Session | null {
+  if (memorySession) return memorySession;
   try {
     return loadSession();
   } catch {
@@ -40,6 +50,7 @@ export function peekSession(): Session | null {
 }
 
 export function saveSession(session: Session): void {
+  memorySession = session;
   try {
     localStorage.setItem(KEY, JSON.stringify(session));
   } catch {
@@ -48,6 +59,7 @@ export function saveSession(session: Session): void {
 }
 
 export function clearSession(): void {
+  memorySession = null;
   try {
     localStorage.removeItem(KEY);
   } catch {

@@ -1,12 +1,13 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "./useAuth";
-import { loadSession, saveSession } from "../lib/auth/session";
+import { clearSession, loadSession, saveSession } from "../lib/auth/session";
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   localStorage.clear();
+  clearSession(); // module-level memorySession (CRITICAL 2) não é resetado pelo storage.clear()
 });
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -82,6 +83,24 @@ describe("useAuth", () => {
       code = await result.current.login("a@x.com", "errada");
     });
     expect(code).toBe("invalid-credentials");
+    expect(result.current.user).toBeNull();
+  });
+
+  // MINOR 8: um 200 cujo corpo não bate com o contrato (proxy devolvendo
+  // HTML, ou faltando `user`/`access_token`) não pode deixar a exceção do
+  // parse escapar do login() — senão o form fica preso em "Entrando…".
+  it("200 com corpo fora do contrato vira 'unavailable' em vez de lançar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({}), { status: 200 }))
+    );
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    let code: string | null = "pending";
+    await act(async () => {
+      code = await result.current.login("a@x.com", "s3nh4");
+    });
+    expect(code).toBe("unavailable");
     expect(result.current.user).toBeNull();
   });
 

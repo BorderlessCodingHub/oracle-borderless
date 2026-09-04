@@ -3,6 +3,8 @@ import ChatPage from "./features/chat/ChatPage";
 import LoginPage from "./features/auth/LoginPage";
 import OpsPage from "./features/ops/OpsPage";
 import { RequireAuth } from "./components/RequireAuth/RequireAuth";
+import { SessionLoading } from "./components/RequireAuth/SessionLoading";
+import { useAuth } from "./hooks/useAuth";
 import { useCurrentUser } from "./hooks/useCurrentUser";
 
 /** Links de /oracle/:id já foram compartilhados; preservam a conversa. */
@@ -21,6 +23,15 @@ function PrivateChat() {
 
 export default function App() {
   const { isAdmin } = useCurrentUser();
+  const { status } = useAuth();
+
+  // Enquanto a sessão ainda não restaurou (primeiro render), `isAdmin` é
+  // sempre false — montar as rotas agora faria o catch-all mandar um
+  // deep-link admin (ex.: /ops) para "/" antes do restore terminar.
+  if (status === "loading") {
+    return <SessionLoading />;
+  }
+
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />

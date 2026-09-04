@@ -2,12 +2,13 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "../../hooks/useAuth";
-import { saveSession } from "../../lib/auth/session";
+import { clearSession, saveSession } from "../../lib/auth/session";
 import { RequireAuth } from "./RequireAuth";
 
 afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
+  clearSession(); // module-level memorySession (CRITICAL 2) não é resetado pelo storage.clear()
 });
 
 function renderAt(path = "/") {

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
-import { Logo } from "../Logo/Logo";
+import { SessionLoading } from "./SessionLoading";
 import styles from "./RequireAuth.module.css";
 
 /** Três estados, não dois (spec §5.2): erro transitório de sessão NÃO é
@@ -11,12 +11,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   if (status === "loading") {
-    return (
-      <div className={styles.center} aria-busy="true">
-        <Logo size={56} />
-        <p>Verificando sua sessão…</p>
-      </div>
-    );
+    return <SessionLoading />;
   }
   if (status === "error") {
     return (

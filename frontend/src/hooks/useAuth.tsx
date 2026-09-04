@@ -71,21 +71,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (detail === "invalid-credentials" || detail === "rate-limited") return detail;
       return "unavailable";
     }
-    const body = await resp.json();
-    const next: Session = {
-      user: {
-        id: body.user.id,
-        email: body.user.email,
-        name: body.user.name ?? null,
-        username: body.user.username ?? null,
-      },
-      accessToken: body.access_token,
-      isAdmin: body.is_admin === true,
-    };
-    saveSession(next);
-    setSession(next);
-    setStatus("ready");
-    return null;
+    // 200 não garante o contrato: um proxy pode devolver HTML, ou o corpo
+    // pode vir sem os campos esperados. Sem este guard, a exceção do parse
+    // subia por fora do login() e deixava o form preso em "Entrando…".
+    try {
+      const body = await resp.json();
+      const next: Session = {
+        user: {
+          id: body.user.id,
+          email: body.user.email,
+          name: body.user.name ?? null,
+          username: body.user.username ?? null,
+        },
+        accessToken: body.access_token,
+        isAdmin: body.is_admin === true,
+      };
+      saveSession(next);
+      setSession(next);
+      setStatus("ready");
+      return null;
+    } catch {
+      return "unavailable";
+    }
   }, []);
 
   const logout = useCallback(() => {

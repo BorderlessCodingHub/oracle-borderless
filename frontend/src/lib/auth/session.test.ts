@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearSession, loadSession, peekSession, saveSession, type Session } from "./session";
 
 const SAMPLE: Session = {
@@ -7,7 +7,11 @@ const SAMPLE: Session = {
   isAdmin: false,
 };
 
-afterEach(() => localStorage.clear());
+afterEach(() => {
+  vi.restoreAllMocks();
+  localStorage.clear();
+  clearSession(); // module-level memorySession não é resetado pelo storage.clear()
+});
 
 describe("session", () => {
   it("salva, carrega e limpa", () => {
@@ -21,5 +25,20 @@ describe("session", () => {
     localStorage.setItem("ob-session", "{nao-e-json");
     expect(loadSession()).toBeNull();
     expect(peekSession()).toBeNull();
+  });
+
+  // CRITICAL 2: com storage bloqueado, saveSession não pode deixar a sessão
+  // sem efeito nenhum — senão login funciona mas a chamada seguinte sai sem
+  // Authorization, 401 dispara handleUnauthorized, que limpa e recarrega, e
+  // como a "sessão em memória" nunca existiu, o login some: loop infinito.
+  it("storage bloqueado: saveSession ainda deixa a sessão disponível via memória", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+
+    saveSession(SAMPLE);
+
+    expect(peekSession()).toEqual(SAMPLE);
+    expect(loadSession()).toEqual(SAMPLE);
   });
 });
