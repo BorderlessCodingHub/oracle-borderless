@@ -9,7 +9,7 @@ runner mais tarde e reintroduzir um bug intermitente e difícil de rastrear.
 """
 
 import pytest
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
 from src.domain.conversations.services.out_of_scope_reply import (
     OUT_OF_SCOPE_OPENING_PT,
@@ -23,6 +23,10 @@ from src.support.agent.ports import (
     SourcesChunk,
     StepChunk,
     TextChunk,
+    ToolCallArgsChunk,
+    ToolCallEndChunk,
+    ToolCallResultChunk,
+    ToolCallStartChunk,
     TurnDependencies,
     TurnSignals,
 )
@@ -258,6 +262,39 @@ async def test_the_answer_step_opens_and_closes_once_even_with_a_tool_loop():
     assert _steps(chunks) == [("answer", "started"), ("answer", "finished")]
 
 
+def _tool_chunks(chunks):
+    return [
+        c for c in chunks
+        if isinstance(c, (ToolCallStartChunk, ToolCallArgsChunk, ToolCallEndChunk, ToolCallResultChunk))
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_whole_tool_call_becomes_start_args_end_then_result():
+    """Provedor sem streaming (ou fake): a AIMessage chega inteira com
+    `tool_calls`. O runner emite a sequência completa de uma vez e, quando o
+    ToolNode devolve, o result — só com status, nunca o conteúdo."""
+    executed = {"ran": False}
+    runner = TurnGraphRunner(graph=_tool_loop_graph(executed), enable_tools=False)
+    stream = await runner.start(
+        "o que é PSP?", [], _deps(_RecordingSearch([_snippet()])), TurnSignals(),
+        knowledge=[_snippet()], extra_config={"answer_model": _ToolCallingModel()},
+    )
+    chunks = await _drain(stream)
+
+    assert _tool_chunks(chunks) == [
+        ToolCallStartChunk(id="call-1", name="fake_tool"),
+        ToolCallArgsChunk(id="call-1", delta='{"query": "psp"}'),
+        ToolCallEndChunk(id="call-1"),
+        ToolCallResultChunk(id="call-1", status="ok"),
+    ]
+    assert not any("resultado da tool" in c.text for c in chunks if isinstance(c, TextChunk))
+    # ordem relativa: o result vem antes do texto final, e o texto antes de answer/finished
+    result_at = next(i for i, c in enumerate(chunks) if isinstance(c, ToolCallResultChunk))
+    final_text_at = next(i for i, c in enumerate(chunks) if isinstance(c, TextChunk) and "resposta final" in c.text)
+    assert result_at < final_text_at
+
+
 @pytest.mark.asyncio
 async def test_phase_one_buffers_every_chunk_it_produced():
     """Os passos de gate e retrieve nascem durante o `await start()`; a fase 2
@@ -486,3 +523,76 @@ async def test_a_retrieval_failure_still_breaks_inside_the_session():
         await _runner().start(
             "o que é PSP?", [], _deps(_FailingSearch()), TurnSignals(), extra_config=_models()
         )
+
+
+class TestTurnEmitterToolCalls:
+    def test_streamed_fragments_become_one_start_and_args_deltas(self):
+        """Anthropic/OpenAI mandam id+nome no primeiro fragmento e só `index`
+        nos seguintes. O runner resolve index -> id e não duplica o start."""
+        emitter = TurnEmitter(TurnSignals())
+        meta = {"langgraph_node": "answer"}
+        first = AIMessageChunk(content="", tool_call_chunks=[
+            {"name": "web_search", "args": "", "id": "call_1", "index": 0, "type": "tool_call_chunk"},
+        ])
+        second = AIMessageChunk(content="", tool_call_chunks=[
+            {"name": None, "args": '{"qu', "id": None, "index": 0, "type": "tool_call_chunk"},
+        ])
+        third = AIMessageChunk(content="", tool_call_chunks=[
+            {"name": None, "args": 'ery":"psp"}', "id": None, "index": 0, "type": "tool_call_chunk"},
+        ])
+
+        out = emitter.on_message((first, meta)) + emitter.on_message((second, meta)) + emitter.on_message((third, meta))
+
+        assert [c for c in out if not isinstance(c, StepChunk)] == [
+            ToolCallStartChunk(id="call_1", name="web_search"),
+            ToolCallArgsChunk(id="call_1", delta='{"qu'),
+            ToolCallArgsChunk(id="call_1", delta='ery":"psp"}'),
+        ]
+
+    def test_the_answer_update_closes_pending_tool_calls_once(self):
+        emitter = TurnEmitter(TurnSignals())
+        meta = {"langgraph_node": "answer"}
+        emitter.on_message((AIMessageChunk(content="", tool_call_chunks=[
+            {"name": "web_search", "args": '{"query":"psp"}', "id": "call_1", "index": 0, "type": "tool_call_chunk"},
+        ]), meta))
+        final = AIMessage(content="", tool_calls=[{"name": "web_search", "args": {"query": "psp"}, "id": "call_1"}])
+
+        out = emitter.on_update({"answer": {"messages": [final], "citations": []}})
+
+        assert out == [ToolCallEndChunk(id="call_1")]
+        # o update do nó tools não reabre nem refecha
+        result = emitter.on_update({"tools": {"messages": [
+            ToolMessage(content="<<TOOL_CONTENT>>\nresultado\n<</TOOL_CONTENT>>", tool_call_id="call_1", name="web_search"),
+        ]}})
+        assert result == [ToolCallResultChunk(id="call_1", status="ok")]
+
+    def test_a_tool_failure_wrapped_by_tools_py_becomes_status_error(self):
+        emitter = TurnEmitter(TurnSignals())
+        emitter.on_message((AIMessage(content="", tool_calls=[{"name": "web_search", "args": {}, "id": "c9"}]), {"langgraph_node": "answer"}))
+
+        out = emitter.on_update({"tools": {"messages": [
+            ToolMessage(content="<<TOOL_CONTENT>>\n(falha ao buscar na web: timeout)\n<</TOOL_CONTENT>>", tool_call_id="c9", name="web_search"),
+        ]}})
+
+        assert out == [ToolCallResultChunk(id="c9", status="error")]
+
+    def test_a_tool_message_with_error_status_becomes_status_error(self):
+        emitter = TurnEmitter(TurnSignals())
+        emitter.on_message((AIMessage(content="", tool_calls=[{"name": "web_search", "args": {}, "id": "c9"}]), {"langgraph_node": "answer"}))
+
+        out = emitter.on_update({"tools": {"messages": [
+            ToolMessage(content="Error: boom", tool_call_id="c9", name="web_search", status="error"),
+        ]}})
+
+        assert out == [ToolCallResultChunk(id="c9", status="error")]
+
+    def test_a_result_for_an_unknown_call_still_reports_status(self):
+        """Se por algum motivo o start não foi visto, o result ainda sai — a UI
+        ignora ids desconhecidos, mas o encoder não pode perder o evento."""
+        emitter = TurnEmitter(TurnSignals())
+
+        out = emitter.on_update({"tools": {"messages": [
+            ToolMessage(content="ok", tool_call_id="ghost", name="web_search"),
+        ]}})
+
+        assert out == [ToolCallResultChunk(id="ghost", status="ok")]

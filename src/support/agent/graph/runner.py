@@ -14,10 +14,11 @@ o texto: cada nó vira um `StepChunk`. A tradução para eventos AG-UI NÃO é d
 — mora em `src/app/api/streaming/`. Este módulo só fala em dataclasses do port.
 """
 
+import json
 import time
 from typing import AsyncIterator
 
-from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
 from src.domain.shared.value_objects.citation import Citation
 from src.support.agent.graph.builder import TURN_GRAPH
@@ -28,11 +29,19 @@ from src.support.agent.ports import (
     SourcesChunk,
     StepChunk,
     TextChunk,
+    ToolCallArgsChunk,
+    ToolCallEndChunk,
+    ToolCallResultChunk,
+    ToolCallStartChunk,
     TurnDependencies,
     TurnSignals,
 )
 
 _CITATION_NODES = ("answer", "refuse")
+_TOOL_CONTENT_OPEN = "<<TOOL_CONTENT>>"
+_TOOL_CONTENT_CLOSE = "<</TOOL_CONTENT>>"
+# tools.py devolve falha capturada como texto "(falha ao ...)" dentro do envelope.
+_TOOL_FAILURE_PREFIX = "(falha"
 
 
 def _text_of(message) -> str:
@@ -59,6 +68,18 @@ def _step_detail(name: str, signals: TurnSignals) -> dict | None:
     return None
 
 
+def _tool_status(message: ToolMessage) -> str:
+    """Só o status atravessa o port. O conteúdo em si fica no LangSmith (regra 4)."""
+    if getattr(message, "status", "success") == "error":
+        return "error"
+    text = _text_of(message).strip()
+    if text.startswith(_TOOL_CONTENT_OPEN):
+        text = text[len(_TOOL_CONTENT_OPEN):].strip()
+    if text.endswith(_TOOL_CONTENT_CLOSE):
+        text = text[: -len(_TOOL_CONTENT_CLOSE)].strip()
+    return "error" if text.startswith(_TOOL_FAILURE_PREFIX) else "ok"
+
+
 class TurnEmitter:
     """Traduz os eventos brutos do LangGraph (`updates` e `messages`) em chunks
     do port, guardando o pouco de estado que isso exige: quais passos já
@@ -73,6 +94,9 @@ class TurnEmitter:
         self._signals = signals
         self._steps_started: set[str] = set()
         self.citations: list[Citation] = []
+        self._tool_started: set[str] = set()
+        self._tool_ended: set[str] = set()
+        self._index_to_id: dict[int, str] = {}
 
     def step_started(self, name: str) -> list[AgentStreamChunk]:
         if name in self._steps_started:
@@ -102,6 +126,9 @@ class TurnEmitter:
                     out.append(TextChunk(text=update["answer"]))
             elif node == "answer":
                 out += self.step_started("answer")
+                out += self._tool_ends_from(update)
+            elif node == "tools":
+                out += self._tool_results_from(update)
             if node in _CITATION_NODES and update.get("citations") is not None:
                 self.citations = list(update["citations"])
         return out
@@ -120,9 +147,82 @@ class TurnEmitter:
         out = self.step_started("answer")
         if not isinstance(message, (AIMessage, AIMessageChunk)):
             return out
+        out += self._tool_calls_from(message)
         text = _text_of(message)
         if text:
             out.append(TextChunk(text=text))
+        return out
+
+    # --- tool calls -------------------------------------------------------
+
+    def _tool_start(self, tc_id: str, name: str) -> list[AgentStreamChunk]:
+        if tc_id in self._tool_started:
+            return []
+        self._tool_started.add(tc_id)
+        return [ToolCallStartChunk(id=tc_id, name=name)]
+
+    def _tool_end(self, tc_id: str) -> list[AgentStreamChunk]:
+        if tc_id not in self._tool_started or tc_id in self._tool_ended:
+            return []
+        self._tool_ended.add(tc_id)
+        return [ToolCallEndChunk(id=tc_id)]
+
+    def _tool_calls_from(self, message) -> list[AgentStreamChunk]:
+        """Tool calls de uma mensagem do modelo, em duas formas:
+
+        - fragmentos (`tool_call_chunks`, provedor em streaming): id+nome no
+          primeiro, só `index` nos seguintes — o mapa index -> id resolve;
+        - a chamada inteira (`tool_calls`, provedor sem streaming ou fake de
+          teste): start, args com o JSON completo e end de uma vez.
+        """
+        out: list[AgentStreamChunk] = []
+        fragments = getattr(message, "tool_call_chunks", None) or []
+        if fragments:
+            for frag in fragments:
+                tc_id = frag.get("id")
+                index = frag.get("index")
+                if tc_id and index is not None:
+                    self._index_to_id[index] = tc_id
+                if not tc_id and index is not None:
+                    tc_id = self._index_to_id.get(index)
+                if not tc_id:
+                    continue
+                if frag.get("name"):
+                    out += self._tool_start(tc_id, frag["name"])
+                if tc_id in self._tool_started and frag.get("args"):
+                    out.append(ToolCallArgsChunk(id=tc_id, delta=frag["args"]))
+            return out
+        for call in getattr(message, "tool_calls", None) or []:
+            tc_id = call.get("id")
+            if not tc_id or tc_id in self._tool_started:
+                continue
+            out += self._tool_start(tc_id, call.get("name") or "")
+            out.append(ToolCallArgsChunk(id=tc_id, delta=json.dumps(call.get("args") or {}, ensure_ascii=False)))
+            out += self._tool_end(tc_id)
+        return out
+
+    def _tool_ends_from(self, update: dict) -> list[AgentStreamChunk]:
+        """Update do nó answer: a AIMessage final fecha as tool calls que ainda
+        estão abertas. Passa antes por `_tool_calls_from` porque, sem streaming,
+        a chamada pode estar aparecendo aqui pela primeira vez."""
+        out: list[AgentStreamChunk] = []
+        for message in update.get("messages") or []:
+            if not isinstance(message, AIMessage):
+                continue
+            out += self._tool_calls_from(message)
+            for call in message.tool_calls or []:
+                if call.get("id"):
+                    out += self._tool_end(call["id"])
+        return out
+
+    def _tool_results_from(self, update: dict) -> list[AgentStreamChunk]:
+        """Update do nó tools: uma ToolMessage por chamada executada."""
+        out: list[AgentStreamChunk] = []
+        for message in update.get("messages") or []:
+            if not isinstance(message, ToolMessage):
+                continue
+            out += self._tool_end(message.tool_call_id)
+            out.append(ToolCallResultChunk(id=message.tool_call_id, status=_tool_status(message)))
         return out
 
     def finish(self) -> list[AgentStreamChunk]:
