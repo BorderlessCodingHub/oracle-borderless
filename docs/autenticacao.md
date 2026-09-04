@@ -1,310 +1,311 @@
-# Autenticação — spec do Oracle Borderless
+# Autenticação — spec do Oracle Borderless (v2 — BFF)
 
-**Status:** implementação concluída em 03/09/2026. Substitui o "ponto em aberto"
-de autenticação do `CLAUDE.md`. A decisão arquitetural está registrada no
-**ADR-0017** (plataforma como IdP, JWT validado localmente, sem Supabase). As
-pendências da §9 seguem em aberto para confirmação com o time — até lá, o
-`.env` de produção fica incompleto e o login devolve `unavailable`/401 nesse
-ambiente.
+**Status:** refatoração **aprovada em 04/09/2026, ainda não implementada**. A v1
+(ADR-0017: JWT validado localmente, SPA guarda o token) está implementada na branch
+`feat/autenticacao`, mas o contrato real da plataforma
+(`autenticacao_plataform.md`, verificado no código da `borderless-api` pelo tech
+lead) derrubou duas premissas dela:
 
-> Este documento nasceu do guia de replicação da auth do socratic-dev. O modelo
-> de lá foi **adaptado, não copiado**: o contrato novo da plataforma devolve um
-> `accessToken` no login, o que elimina a peça Supabase inteira (createUser sem
-> senha, magic link e `verifyOtp` só existiam porque o contrato antigo não
-> devolvia token). As lições de produção do guia que continuam válidas estão em §8.
+1. **Não existe key de app** — o login é público (§7 do doc da plataforma). As envs
+   `BORDERLESS_AUTH_API_KEY`/`BORDERLESS_AUTH_KEY_HEADER` não têm contrapartida.
+2. **O `accessToken` não é JWT** — é token de sessão **opaco** do Better Auth.
+   Validação local é impossível; validar = chamar a plataforma.
+
+A decisão da v2 está no **ADR-0018** (BFF: o token da plataforma vive só no
+servidor; o SPA recebe cookie httpOnly próprio), que substitui o mecanismo de
+validação/sessão do ADR-0017. Este documento descreve o **alvo da refatoração**;
+o §0 lista o delta exato sobre o código existente.
+
+---
+
+## 0. Delta da refatoração (v1 implementada → v2 alvo)
+
+| Peça | v1 (na branch) | v2 (alvo) |
+|---|---|---|
+| Chamada de signin | com key header | **sem key nenhuma** (login é público) |
+| Validação por request | PyJWT local (`require_user`) | `GET /api/users/profile` com o token guardado, **cache 60s** por sessão |
+| Onde vive o accessToken | localStorage do SPA (+ Bearer) | **tabela `sessions` no Postgres**; nunca chega ao browser |
+| Credencial SPA→oráculo | `Authorization: Bearer <token plataforma>` | **cookie httpOnly próprio** (`ob_session`) |
+| Restore de sessão no SPA | ler localStorage | `GET /auth/me` (cookie vai junto; 200 = user, 401 = deslogado) |
+| Logout | limpar localStorage | `POST /auth/logout` → signout na plataforma + apaga sessão + limpa cookie |
+| Erros da plataforma | mapeados por status | mapeados por **`error.type`** (§3); `403 FORBIDDEN` **repassa a `message`** |
+| Envs | `BORDERLESS_AUTH_API_KEY`, `KEY_HEADER`, `JWT_ALGORITHM`, `JWT_VERIFY_KEY` | **todas morrem**; sobram `BORDERLESS_AUTH_URL`, `ADMIN_EMAILS`, `CORS_ORIGINS` |
+| Dependência `pyjwt` | usada no require_user | **removida** do pyproject (ADR-0018 registra) |
+| Subdomínio `users/` | sem persistência | ganha **model/repository/mapper de Session** (o "se um dia precisar" chegou) |
+| Rate limit do login | 10/10min por e-mail | **mantido igual** — ainda mais importante: o limite da plataforma (100 req/min) é por IP, e no BFF todas as chamadas saem do IP do oráculo |
+| `tests/fakes/auth.py` (forja JWT) | forja HS256 | vira **fixture de sessão** (semeia linha em `sessions` + cookie) |
+| Frontend `session.ts`/`authHeaders` | localStorage + Bearer + memorySession | **removidos**; fetch same-origin leva o cookie sozinho |
+| RequireAuth 3 estados | erro só se storage bloqueado | **ganham uso real**: falha de rede no `/auth/me` = "error" + retry (a lição §8.1 do socratic-dev finalmente se aplica de verdade) |
+
+O que **não muda**: bridge no FastAPI; 401 genérico único; `/ops` por allowlist
+`ADMIN_EMAILS` com 404; ownership de conversas por e-mail com 404 (órfãs somem);
+enforcement mecânico de auth no autodiscovery de rotas; página `/login` com
+`?next=` validado; códigos de erro traduzidos no SPA.
 
 ---
 
 ## 1. O modelo em uma frase
 
-**As credenciais (e-mail + senha) vivem na plataforma Borderless
-(`api.borderlesscoding.com`). O oráculo nunca armazena senha.** O FastAPI faz o
-*bridge*: envia as credenciais ao endpoint de signin da plataforma usando uma
-**key header de app** (segredo que nunca sai do servidor) e repassa ao SPA o
-`accessToken` (JWT) que a plataforma emitiu. A partir daí, toda requisição ao
-backend leva `Authorization: Bearer <accessToken>` e o FastAPI **valida o JWT
-localmente**, sem ida à rede.
-
-Consequências:
-
-- A plataforma é a única fonte de verdade das credenciais e do token.
-- **Sem autenticação, não há pergunta**: `/conversations/*` exige usuário válido
-  (401 sem token); o frontend bloqueia o chat atrás do login.
-- O Cloudflare Access da borda **sai de cena** quando esta auth entrar — o app
-  fica no domínio borderless (deploy pendente) acessível a qualquer pessoa do
-  ecossistema com suas credenciais da plataforma.
+**As credenciais vivem na plataforma Borderless e o `accessToken` dela — opaco, 7
+dias, acesso total à conta — nunca sai do servidor do oráculo.** O FastAPI é um
+**BFF**: no login ele chama o signin da plataforma, guarda o `accessToken` numa
+linha de `sessions` e devolve ao browser um **cookie httpOnly** com um token de
+sessão próprio. A cada request, `require_user` resolve o cookie → sessão → valida
+o token da plataforma via `GET /api/users/profile` (com cache de 60s) — assim
+banimento/revogação na plataforma refletem em até um minuto.
 
 ---
 
-## 2. Fluxo de login
+## 2. Fluxos
+
+### Login
 
 ```
-┌─ SPA (Vite) ──────────────┐      ┌─ FastAPI ─────────────────────────┐      ┌─ Plataforma BL ─────┐
-│ /login (client)           │      │ POST /auth/login                  │      │                     │
-│                           │      │                                   │      │                     │
-│ 1. form email+senha ────► │────► │ 2. rate limit 'signin:<email>'    │      │                     │
-│                           │      │ 3. POST /api/auth/signin ─────────┼────► │ valida credenciais  │
-│                           │      │    x-api-key: <BORDERLESS_AUTH_   │ ◄────┤ 200 { user, token } │
-│                           │      │    API_KEY> · timeout 10s         │      │                     │
-│ 5. ◄─ { user, accessToken,│ ◄────┤ 4. monta resposta:                │      │                     │
-│        isAdmin } ─────────┤      │    user + accessToken + isAdmin   │      │                     │
-│                           │      │    (e-mail ∈ ADMIN_EMAILS)        │      │                     │
-│ 6. guarda sessão em       │      └───────────────────────────────────┘      └─────────────────────┘
-│    localStorage           │
-│ 7. router → ?next= ou /   │      Depois do login, toda chamada:
-└───────────────────────────┘      Authorization: Bearer <accessToken>
-                                   → require_user valida o JWT LOCALMENTE
-                                     (assinatura + expiração) e injeta a
-                                     identidade no request context.
+┌─ SPA ────────────────┐   ┌─ FastAPI (BFF) ─────────────────────┐   ┌─ Plataforma ────────┐
+│ /login: email+senha ─┼──►│ POST /auth/login                    │   │                     │
+│                      │   │ 1. rate limit 'signin:<email>'      │   │                     │
+│                      │   │ 2. POST /api/auth/signin ───────────┼──►│ (público, sem key)  │
+│                      │   │ ◄─── 200 { user, token } ───────────┼───┤ accessToken opaco   │
+│                      │   │ 3. cria linha em sessions           │   │ expiresIn: 604800   │
+│                      │   │    (hash do token nosso +           │   │                     │
+│                      │   │     accessToken da plataforma)      │   │                     │
+│ ◄─ 200 {user,isAdmin}│◄──┤ 4. Set-Cookie: ob_session=<token>;  │   │                     │
+│    + cookie httpOnly │   │    HttpOnly; SameSite=Lax; Path=/   │   │                     │
+└──────────────────────┘   └─────────────────────────────────────┘   └─────────────────────┘
 ```
 
-- O bridge roda no FastAPI porque a **key header é segredo de servidor** — nunca
-  pode ir para o bundle do SPA.
-- Não há refresh na v1 (a plataforma não expôs refresh): token expirado ⇒
-  qualquer chamada devolve 401 ⇒ o SPA limpa a sessão e volta ao `/login?next=…`.
+### Request autenticada
+
+```
+SPA ──(cookie ob_session vai sozinho no fetch same-origin)──► FastAPI
+  require_user: cookie → SHA-256 → sessions → sessão achada?
+    ├─ não/expirada ⇒ 401 (SPA limpa estado e vai p/ /login?next=…)
+    └─ sim ⇒ last_platform_check_at < 60s?
+        ├─ sim ⇒ segue (cache)
+        └─ não ⇒ GET /api/users/profile (Bearer <accessToken da sessão>)
+            ├─ 200 ⇒ atualiza last_platform_check_at, segue
+            ├─ 401 ⇒ apaga a sessão ⇒ 401 (revogada/expirada na plataforma)
+            └─ rede/5xx ⇒ **fail-open dentro da janela estendida**: se a última
+               validação OK tem < 10min, segue com log; senão 503 "unavailable"
+               (não derrubar todo mundo por um soluço da plataforma, sem deixar
+               sessão validar-se sozinha para sempre)
+  ⇒ AuthenticatedUser(id, email, is_admin=email ∈ ADMIN_EMAILS) no request context
+```
+
+### Restore, logout e expiração
+
+- **Restore (reload do SPA):** `GET /auth/me` → 200 `{user, is_admin}` ou 401. O
+  cookie é httpOnly — o SPA não tem como ler; `/auth/me` é a única fonte.
+- **Logout:** `POST /auth/logout` → best-effort `POST /api/auth/signout` na
+  plataforma (invalida lá — descartar só localmente deixa a sessão viva),
+  apaga a linha de `sessions`, `Set-Cookie` expirado. Sempre 204, mesmo se a
+  plataforma falhar (o log registra).
+- **Expiração:** a plataforma renova a sessão conforme o uso (janela de 7 dias
+  deslizante). Sem refresh token: o primeiro `401` da plataforma apaga a sessão
+  local e o SPA volta ao `/login?next=…`. Não há expiração local própria — a
+  plataforma é a fonte da verdade do ciclo de vida.
 
 ---
 
-## 3. Contrato com a plataforma
+## 3. Contrato com a plataforma (verificado — `autenticacao_plataform.md`)
 
-```
-POST {BORDERLESS_AUTH_URL}/api/auth/signin
-Content-Type: application/json
-x-api-key: <BORDERLESS_AUTH_API_KEY>        # nome exato do header: a confirmar (§9)
+### `POST /api/auth/signin` — público, sem key
 
-{ "email": "...", "password": "..." }
-```
+Request `{ "email", "password" }` (a API normaliza o e-mail; senha mínima 6).
+Resposta 200: `data.user {id, email, name?, emailVerified, username, careerStage?}`
+e `data.token {accessToken, expiresIn: 604800}` (fixo, 7 dias).
 
-Resposta `200 OK`:
+### `GET /api/users/profile` — validação + autorização
 
-```json
-{
-  "message": "string",
-  "data": {
-    "user": {
-      "id": "string",
-      "email": "hello@example.com",
-      "name": "string",
-      "emailVerified": true,
-      "username": "string",
-      "careerStage": "junior_transition"
-    },
-    "token": {
-      "accessToken": "string",
-      "expiresIn": 1
-    }
-  }
-}
-```
+`Authorization: Bearer <accessToken>`. 200 = sessão válida (devolve também
+`membership` e `communityRole` — ver §8); 401 = expirada/revogada. **Não enviar
+cookie junto com Authorization.**
 
-Erros (`400 | 401 | 403 | 429 | 500`) vêm como:
+### `POST /api/auth/signout`
 
-```json
-{
-  "error": {
-    "code": "string", "type": "string", "domain": "string",
-    "message": "string", "timestamp": "string",
-    "details": { "propertyName*": "anything" }
-  }
-}
-```
+`Authorization: Bearer <accessToken>`. Invalida a sessão na plataforma.
 
-Mapeamento no bridge (o SPA nunca vê o erro cru):
+### Erros — mapear por `error.type` (campo estável), nunca por `message`
 
-| Plataforma | Código devolvido ao SPA |
-|---|---|
-| `429` | `rate-limited` |
-| `5xx`, timeout, erro de rede | `unavailable` |
-| demais `4xx` (400/401/403) | `invalid-credentials` |
+| `error.type` (status) | Código devolvido ao SPA | Observação |
+|---|---|---|
+| `VALIDATION` (400), `UNAUTHORIZED` (401) | `invalid-credentials` (401) | |
+| `FORBIDDEN` (403) | `forbidden` (403) **com a `message` da API** | é o único caso em que a mensagem da plataforma vai à tela — ela distingue desativado/banido/convite pendente |
+| `TOO_MANY_REQUESTS` (429) | `rate-limited` (429) | backoff, nunca retry em loop |
+| `INTERNAL` (500), timeout, rede, corpo fora do contrato | `unavailable` (503) | |
+
+O envelope de erro é `{"error": {"code", "type", "domain", "message", "timestamp",
+"details"}}`. Docs completas: `https://api.borderlesscoding.com/api/docs`.
 
 ---
 
 ## 4. Backend (FastAPI)
 
-### 4.1 Client — `src/support/clients/borderless/borderless_auth_client.py`
+### 4.1 Tabela e subdomínio — `sessions` nasce em `src/domain/users/`
 
-`BorderlessAuthClient.sign_in(email, password)`. Integração externa ⇒ Client em
-`support/clients` (regra do CLAUDE.md). Obrigatório:
+Agora há persistência: entity `Session` (dataclass pura), `SessionModel`
+(SQLAlchemy), `SessionMapper`, `SessionRepository` — o padrão completo do
+CLAUDE.md. Migration nova.
 
-- `timeout` de 10s; sem cache; key header vinda de `Settings`.
-- Normalizar `email.strip().lower()` antes de enviar; rejeitar vazios antes da rede.
-- Mapear erros conforme §3; **nunca logar senha nem accessToken** (logar só o
-  objeto de erro/status).
+Colunas de `sessions`:
 
-### 4.2 Subdomínio `src/domain/users/` (enxuto)
+- `uuid` (HasUUID) + timestamps (HasTimestamps)
+- `token_hash` — SHA-256 do token de sessão do oráculo, **unique, indexed**. O
+  token cru (`secrets.token_urlsafe(32)`) só existe no cookie; o banco guarda o
+  hash (vazamento de dump não vira sessão).
+- `platform_access_token` — o accessToken da Borderless (opaco). Fica em claro na
+  nossa base (é o BFF; cifrar aqui só mudaria o problema de lugar para a chave).
+- `user_id`, `user_email`, `user_name`, `user_username` — snapshot do login para
+  `/auth/me` sem ida à rede.
+- `last_platform_check_at` — o cache de validação (§2).
 
-- `entities/user.py` — `@dataclass User`: `id`, `email`, `name`, `username`,
-  `career_stage`, `email_verified`. Puro, sem SQLAlchemy.
-- `actions/sign_in_action.py` — `SignInAction.execute(email, password)`:
-  rate limit → client → montar `SignInResult` (user + access_token +
-  expires_in + is_admin). Lança exceções de domínio; o controller traduz.
-- `dtos/` — `SignInResult` (dataclass interna).
-- **Sem `models/`, `repositories/`, `mappers/`**: nada persiste — admin é
-  allowlist (§4.4) e a identidade por requisição vem do JWT. Se um dia o oráculo
-  precisar de dados próprios por usuário, aí nasce a tabela (fora da v1).
+`is_admin` **não** persiste: computado por request de `settings.admin_emails`
+(mudar a allowlist vale imediatamente).
 
-### 4.3 Rate limit durável — `src/support/core/rate_limit/`
+### 4.2 Client — `BorderlessAuthClient` (reescrito)
 
-Janela fixa em Postgres (tabela `rate_limits`: `key`, `window_start`, `count`),
-atualizada num único upsert atômico; migration própria. Uso no login:
-`rate_limit(f"signin:{email}", limit=10, window_ms=600_000)` → 10 tentativas por
-e-mail a cada 10 minutos.
+- `sign_in(email, password) -> PlatformSignIn` — **sem key header**; mapeia erros
+  por `error.type` (§3). `FORBIDDEN` vira exceção nova `ForbiddenError(message)`
+  carregando a mensagem da plataforma.
+- `get_profile(access_token) -> PlatformProfile | None` — `None`/exceção
+  distinguindo 401 (inválida) de erro de rede (para o fail-open do §2).
+- `sign_out(access_token) -> None` — best-effort, engole erro com log.
+- Mantém: timeout 10s, nunca logar senha/token, e-mail normalizado.
 
-- **Fail-open**: erro de banco devolve `True` (indisponibilidade transitória do
-  Postgres não pode derrubar o login inteiro).
-- Em memória **não** serve: multi-worker/serverless reseta e fragmenta o
-  contador (lição paga no socratic-dev).
+### 4.3 Actions (`src/domain/users/actions/`)
 
-### 4.4 Dependencies — `src/app/api/dependencies/`
+- `SignInAction.execute(email, password) -> SignInResult` — rate limit (igual v1)
+  → `client.sign_in` → cria `Session` via repository (gera token cru + hash) →
+  devolve `SignInResult(user, session_token_cru, is_admin)`. O token cru **não é
+  logado nem persistido** — só atravessa até o Set-Cookie.
+- `SignOutAction.execute(session: Session)` — signout na plataforma (best-effort)
+  + `repository.delete`.
+- `GetCurrentUserAction` fica dispensável: `/auth/me` lê do `AuthenticatedUser` do
+  contexto + snapshot da sessão (controller fino chama uma action só se houver
+  lógica; se for só projeção, response schema direto do contexto).
 
-- `require_user.py` — lê `Authorization: Bearer`, valida o JWT **localmente**
-  (assinatura + `exp`; algoritmo e origem da chave: §9), injeta a identidade
-  (`sub`, e-mail) no request context (ContextVar, padrão do projeto). Sem
-  header/JWT inválido/expirado ⇒ **401**.
-- `require_admin.py` — deixa de ser no-op: exige `require_user` e
-  `email ∈ settings.ADMIN_EMAILS`; caso contrário levanta `NotFoundError` ⇒
-  **404** (a página de ops não revela que existe — como o comentário atual do
-  arquivo já determina). O lado do frontend (`useCurrentUser().isAdmin`) é só UI.
+### 4.4 `require_user` (reescrito) e `require_admin` (igual)
+
+`require_user`: lê o cookie `ob_session` (sem cookie ⇒ 401 genérico) → hash →
+`SessionRepository.get_by_token_hash` (miss ⇒ 401) → validação com cache/fail-open
+do §2 → injeta `AuthenticatedUser` no `CurrentRequestContext`. O 401 continua
+único e indistinguível. `require_admin` não muda (allowlist ⇒ 404).
+
+**Cookie:** `ob_session`, `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` quando
+`ENVIRONMENT != development`, `Max-Age` 7 dias. **CSRF:** SameSite=Lax bloqueia
+POST cross-site; o oráculo não usa CORS com credenciais. **Pré-requisito de
+deploy: SPA e API no MESMO host** (path routing) — split-host exigiria
+`SameSite=None` + CSRF token, que está fora da v2 (registrar no §8 se o deploy
+apontar para split-host).
 
 ### 4.5 Rotas
 
-- `src/app/api/routes/auth.py` — `public_router`, `POST /auth/login` (única rota
-  pública além de health). Controller fino: request schema → `SignInAction` →
-  response schema.
-- `src/app/api/routes/conversations.py` — deixa de ser pública: `router` com
-  dependency `require_user`.
-- `src/app/api/routes/ops.py` — dependency `require_admin` (agora real).
+- `auth.py` (`public_router`): `POST /auth/login`. **`GET /auth/me` e
+  `POST /auth/logout` ficam no `router`** (autodiscovery aplica `require_user`
+  mecanicamente — nada a fazer).
+- `/conversations/*` e `/ops/*`: sem mudança (a identidade continua vindo do
+  contexto; só a origem dela mudou).
 
-### 4.6 Ownership das conversas
+### 4.6 Envs
 
-`ConversationModel.user_email` já existe (nullable). Com auth:
+Morrem: `BORDERLESS_AUTH_API_KEY`, `BORDERLESS_AUTH_KEY_HEADER`,
+`BORDERLESS_JWT_ALGORITHM`, `BORDERLESS_JWT_VERIFY_KEY`. Ficam:
+`BORDERLESS_AUTH_URL`, `ADMIN_EMAILS`, `CORS_ORIGINS` (segue existindo para o
+caso same-site com subdomínios; irrelevante no same-host). Novas: nenhuma
+obrigatória (`SESSION_PLATFORM_CHECK_TTL_S=60` e `SESSION_FAIL_OPEN_MAX_S=600`
+podem ser constantes; virar env só se precisarmos calibrar).
 
-- `ask` carimba o `user_email` do token na conversa criada.
-- `list`/`get` filtram por `user_email` do usuário autenticado; `get` de conversa
-  alheia ⇒ **404** (não 403 — não revelar existência).
-- Conversas antigas com `user_email` null somem das listagens — **deliberado**
-  (eram do período sem auth).
-
-### 4.7 Env novas (`Settings`)
-
-```env
-BORDERLESS_AUTH_URL=https://api.borderlesscoding.com
-BORDERLESS_AUTH_API_KEY=            # segredo de servidor — NUNCA no frontend
-BORDERLESS_JWT_ALGORITHM=           # a confirmar (§9)
-BORDERLESS_JWT_PUBLIC_KEY=          # ou BORDERLESS_JWT_SECRET / JWKS_URL — a confirmar (§9)
-ADMIN_EMAILS=                       # lista separada por vírgula
-```
-
-Validação do JWT exige lib (ex.: `pyjwt`) — **dependência nova, passa pela regra
-do `pyproject.toml`** e fica registrada no ADR-0017.
+**Dev funciona sem nenhum segredo**: basta a plataforma estar acessível e um
+usuário real de teste (§8).
 
 ---
 
 ## 5. Frontend (SPA)
 
-### 5.1 Sessão
-
-`localStorage` + header `Bearer` (escolha aprovada): API e SPA podem ficar em
-hosts distintos do domínio borderless, o SSE já é `fetch` (aceita header) e
-evita CSRF de cookie. Chave única no storage com `{ user, accessToken, isAdmin
-}`.
-
-**Desvio deliberado da v1:** `expiresAt` **não** é armazenado. A unidade do
-`expiresIn` da plataforma (segundos? horas?) é pendência do §9 — gravar um
-`expiresAt` calculado errado seria pior que não ter um. Na prática isso não
-falta: a expiração é detectada pelo jeito que já funciona hoje — qualquer 401
-global limpa a sessão e volta ao `/login?next=…` (§5.3). Quando o §9 confirmar
-a unidade do `expiresIn`, `expiresAt` entra como campo adicional da sessão,
-sem mudar o mecanismo de detecção.
-
-### 5.2 `AuthProvider` / `useUser` — três estados, não dois
-
-`{ user, loading, error }` — lição do socratic-dev (§8.1): falha transitória ao
-restaurar/validar a sessão é `error` (tela "não foi possível verificar sua
-sessão" + retry), **nunca** tratada como deslogado. Só `!user && !error`
-redireciona para `/login?next=…`.
-
-### 5.3 Peças
-
-- **`/login`** — formulário e-mail+senha; erros por código traduzido
-  (`invalid-credentials`, `rate-limited`, `unavailable`), nunca o erro cru;
-  guard de duplo submit; validação do `?next=` (**só paths relativos**:
-  `next.startsWith("/") && !next.startsWith("//")`, senão `/`).
-- **`RequireAuth`** — envolve o chat (raiz e `/c/:id`); três estados do §5.2.
-- **`useCurrentUser`** — deixa de ser placeholder: lê a sessão; `isAdmin` vem do
-  login (uso só de UI — quem manda é o 404 do backend).
-- **`apiFetch`/SSE** — injetam `Authorization: Bearer`; **qualquer 401 ⇒ limpa a
-  sessão ⇒ `/login?next=<rota atual>`** (cobre expiração sem refresh).
-- **`AuthSettings`** (rodapé da sidebar, slot já criado) — vira real: e-mail do
-  usuário + botão "Sair" (limpa storage, volta ao `/login`).
+- **Morre**: `lib/auth/session.ts` (localStorage/memorySession), `authHeaders()`,
+  qualquer menção a Bearer. O cookie viaja sozinho (`fetch` same-origin envia
+  cookies por padrão; não é preciso `credentials` explícito no same-host).
+- **`useAuth`**: `login()` chama `POST /auth/login` (o Set-Cookie acontece na
+  resposta) e guarda `{user, isAdmin}` **só em memória/estado React**; restore =
+  `GET /auth/me` no boot — 200 popula, 401 = deslogado, **falha de
+  rede/5xx = status "error" com retry** (os três estados do RequireAuth agora têm
+  o caso real que motivou o desenho). `logout()` chama `POST /auth/logout` e
+  zera o estado.
+- **Códigos de erro do login**: os três existentes + **`forbidden`** — neste
+  caso a resposta do backend traz a mensagem da plataforma e o SPA a exibe
+  (única exceção à regra "nunca o erro cru": é mensagem voltada a usuário,
+  contrato do doc da plataforma).
+- **401 global**: igual (limpa estado → `/login?next=…`), só que sem storage a
+  limpar.
+- **Demo mode**: igual (sessão fake em memória, sem rede).
 
 ---
 
 ## 6. Segurança
 
-- Key header e validação de JWT só no servidor; senha nunca persiste nem
-  aparece em log (nem no SPA, nem no FastAPI).
-- Nada de permissão/valor em dados graváveis pelo cliente: `isAdmin` no
-  localStorage é UI — o backend recalcula da allowlist a cada request de ops.
-- Rate limit no login (§4.3) — protege a plataforma e o bridge.
-- `?next=` validado no frontend (open redirect).
-- 404 (não 403) para ops sem admin e para conversa de outro usuário.
-- CORS: settings-driven via `CORS_ORIGINS` (`Settings.cors_origins`, .env,
-  vazio por padrão = mesmo host/proxy de dev, sem `CORSMiddleware` montado).
-  Se SPA e API ficarem em hosts distintos, preencher só com o(s) domínio(s)
-  do app (nada de `*`); `allow_credentials=False` — é Bearer, não cookie.
+- accessToken da plataforma **nunca** no browser, em log ou em resposta de API.
+- Cookie httpOnly + SameSite=Lax + Secure (fora de dev); token de sessão em hash
+  no banco.
+- 401 único e genérico; 404 (nunca 403) para ops sem admin e conversa alheia —
+  **exceto** o `forbidden` do login, que deliberadamente repassa a mensagem.
+- Rate limit próprio no login preserva o limite compartilhado por IP da
+  plataforma.
+- Validação com cache de 60s: banimento/revogação refletem em ≤60s; fail-open
+  limitado a 10min de última validação boa.
 
-## 7. Fora de escopo (v1)
+## 7. Fora de escopo (v2)
 
-- Refresh de token (a plataforma não expôs; expirar ⇒ logar de novo).
-- "Esqueci minha senha" / cadastro — assunto da plataforma.
-- Tabela `users` local / perfil próprio do oráculo.
-- Roles além de admin-por-allowlist.
+Signup, reset de senha (endpoints da plataforma; não duplicar), gate de conteúdo
+por `membership`/entitlements (§8), sessões multi-dispositivo gerenciáveis,
+CSRF token para split-host.
 
-## 8. Lições herdadas do socratic-dev que continuam valendo
-
-1. **Três estados no guard do client** (loading / erro transitório / deslogado) —
-   sem isso, um erro de rede momentâneo derruba usuário logado para o login.
-2. **Rate limit em memória não existe** em multi-worker — Postgres.
-3. **Erros por código traduzido**, nunca o erro cru da plataforma na tela.
-4. **Open redirect no `?next=`** — validar em todo lugar que o lê.
-5. **Nada que valha permissão/dinheiro em storage gravável pelo cliente.**
-6. **Nunca logar senha/token** — logar só objeto de erro/status.
-
-## 9. A confirmar com o time (bloqueiam implementação parcial, não o desenho)
+## 8. Pendências com o time Borderless (do checklist §9 do doc da plataforma)
 
 | Pendência | Impacto |
 |---|---|
-| Algoritmo do JWT e origem da chave (pública/JWKS/segredo compartilhado) | implementação do `require_user` |
-| Nome exato do header da key de app (`x-api-key`?) e como recebê-la | client do bridge |
-| Unidade do `expiresIn` (segundos? horas?) | `expiresAt` no SPA |
-| Claims presentes no JWT (`sub`? e-mail? nome?) | o que o request context carrega; se faltar e-mail no token, `require_user` precisa de outra fonte p/ ownership e allowlist |
+| Usuário de teste em staging | destrava validação manual do contrato (passo 1 do doc) |
+| `emailVerified: false` pode usar o oráculo? | se não: bloquear no login com código próprio |
+| `membership` basta ou precisa endpoint de entitlements? | só se o oráculo for gatear conteúdo por plano (hoje não gateia) |
+| Rate limit 100 req/min por IP é suficiente? | o BFF concentra todas as chamadas num IP; com cache de 60s por sessão a pressão é ~1 req/min/usuário ativo + logins |
+| **CORS na plataforma: NÃO precisa** | o browser nunca fala com a plataforma no BFF — retirar o pedido de `CORS_EXTRA_ORIGINS` se foi feito |
 
-## 10. Testes
+## 9. O que remover da v1 (checklist de limpeza)
 
-- **Unit (backend):** `SignInAction` (rate limit, mapeamento de erros do client,
-  isAdmin da allowlist); `require_user` com JWT forjado (válido, expirado,
-  assinatura errada, sem header ⇒ 401); `require_admin` (não-admin ⇒ 404);
-  rate limit (janela, fail-open).
-- **Integração (backend):** `/conversations/ask` sem token ⇒ 401; com token ⇒
-  conversa carimbada com o e-mail; `list` não vaza conversa alheia; `get` de
-  conversa de outro usuário ⇒ 404; `/ops` sem admin ⇒ 404.
-- **Frontend:** `RequireAuth` três estados; redirect com `?next=` validado;
-  `apiFetch` injeta Bearer e trata 401; login traduz códigos de erro;
-  `AuthSettings` mostra usuário e sai.
+- [ ] `pyjwt[crypto]` do `pyproject.toml` (e do ADR — o 0018 registra)
+- [ ] Validação JWT em `require_user.py` (o arquivo é reescrito, não deletado)
+- [ ] Envs `BORDERLESS_AUTH_API_KEY/KEY_HEADER/JWT_*` de `Settings` e `.env.example`
+- [ ] Key header no `BorderlessAuthClient`
+- [ ] `tests/fakes/auth.py` (forja JWT) → substituir por fixture de sessão
+- [ ] `frontend/src/lib/auth/session.ts`, `authHeaders()`/Bearer no `client.ts` e
+      no `askStream`, e os testes correspondentes
+- [ ] §5.1 antigo do spec (localStorage) — este documento já o substitui
 
-## 11. Checklist de implementação
+## 10. Testes (delta)
 
-- [x] ADR-0017 (plataforma como IdP, JWT local, sem Supabase; registra a dep nova de JWT)
-- [x] Env novas em `Settings` + `.env.example`
-- [x] `BorderlessAuthClient` (timeout, mapeamento de erros, sem log sensível)
-- [x] Migration + `rate_limits` (upsert atômico, fail-open)
-- [x] `src/domain/users/` (entity, `SignInAction`, DTOs)
-- [x] `POST /auth/login` (controller + request/response schemas + rota pública)
-- [x] `require_user` (JWT local) + `require_admin` (allowlist ⇒ 404)
-- [x] `/conversations/*` protegidas + ownership (carimbo e filtro por `user_email`)
-- [x] Frontend: sessão/`AuthProvider`, `/login`, `RequireAuth`, `apiFetch`/SSE com Bearer + 401 global, `AuthSettings` real
-- [x] CORS settings-driven (`CORS_ORIGINS`; vazio por padrão = sem `CORSMiddleware`)
-- [x] Testes do §10
-- [ ] Desligar Cloudflare Access na borda (após deploy com auth ativa)
-- [x] Atualizar `CLAUDE.md` (auth deixa de ser ponto em aberto)
+- **Unit:** client novo (signin sem key, erros por `type`, `FORBIDDEN` carrega
+  message; get_profile 200/401/rede; signout best-effort); `SignInAction` v2
+  (cria sessão, token cru não persiste); `require_user` (sem cookie/cookie
+  inválido ⇒ 401; cache de 60s não chama a plataforma; 401 da plataforma apaga
+  sessão; fail-open dentro/fora da janela).
+- **Integração:** login seta cookie e cria linha; `/auth/me` com/sem cookie;
+  `/conversations` com cookie válido/ausente; logout apaga sessão e invalida o
+  cookie nas chamadas seguintes; ownership/ops inalterados (só trocam o header
+  Bearer forjado pela fixture de cookie).
+- **Frontend:** useAuth restore via `/auth/me` (200/401/erro de rede — os três
+  estados); login `forbidden` mostra a mensagem; logout; 401 global sem storage.
+
+## 11. Checklist de implementação (ordem sugerida)
+
+- [ ] Validar o contrato manualmente (curl do §3 com usuário de teste) — passo 1
+      do doc da plataforma; destrava tudo
+- [ ] ADR-0018 já escrito — revisar e manter
+- [ ] Migration + Session (entity/model/mapper/repository)
+- [ ] `BorderlessAuthClient` v2 + exceção `ForbiddenError` + handler (403 com message)
+- [ ] `SignInAction` v2 + `SignOutAction`
+- [ ] `POST /auth/login` (Set-Cookie) + `GET /auth/me` + `POST /auth/logout`
+- [ ] `require_user` v2 (cookie → sessão → cache/fail-open)
+- [ ] Limpeza da v1 (§9) + fixtures de teste novas
+- [ ] Frontend: useAuth v2 (restore /me), remoção do session.ts/Bearer, forbidden
+- [ ] CLAUDE.md: linha da stack de auth passa a descrever o BFF (fazer NO commit
+      da implementação — hoje ela descreve a v1, que é o que o código da branch faz)
+- [ ] Suíte completa + prospector + build
