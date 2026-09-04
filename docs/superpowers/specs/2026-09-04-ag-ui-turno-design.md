@@ -119,7 +119,7 @@ HTTP 422, nunca evento):
 
 | campo | regra |
 |---|---|
-| `threadId` | UUID obrigatório. É o id da conversa: existe e é do usuário → continua; não existe → cria com esse id; é de outro usuário → 403 (`ConversationAccessPolicy`, como hoje). |
+| `threadId` | UUID obrigatório. É o id da conversa: existe e é do usuário → continua; não existe → cria com esse id; é de outro usuário → **404** (`ConversationAccessPolicy` nunca revela que a conversa existe, ADR-0017). |
 | `runId` | UUID obrigatório. Vira `run_id` do LangSmith e `langsmith_run_id` do trace. |
 | `messages[-1]` | `role == "user"` e conteúdo não vazio. É a pergunta. O restante do histórico do cliente é ignorado: a recência continua vindo do Postgres por orçamento de tokens. |
 | `tools`, `context`, `state`, `forwardedProps`, `resume`, `parentRunId` | aceitos e ignorados. |
@@ -284,8 +284,8 @@ No fim do stream, `_resume` emite `StepChunk("answer", "finished")` se o
 `execute(question, conversation_id: UUID, user_email)` — o id passa a ser
 obrigatório e vem do `threadId`:
 
-- `get_by_id` encontra → `ConversationAccessPolicy.assert_can_access` (403 se
-  for de outro usuário), continua;
+- `get_by_id` encontra → `ConversationAccessPolicy.assert_can_access` (404 se
+  for de outro usuário — a policy nunca revela que a conversa existe), continua;
 - não encontra → `create` com `uuid=conversation_id`, título = pergunta
   truncada, como hoje.
 
@@ -418,7 +418,7 @@ conversa nova continua no mesmo efeito, só que o id chega mais cedo.
 |---|---|
 | body inválido | 422, sem stream |
 | sem cookie | 401, sem stream; frontend já trata (`handleUnauthorized`) |
-| `threadId` de outro usuário | 403, sem stream |
+| `threadId` de outro usuário | 404, sem stream (ADR-0017: não revelar que existe) |
 | gate/retrieval quebram (fase 1) | 500, sem stream; rollback do `DBSessionMiddleware` (inalterado, ADR-0016) |
 | estágio de resposta quebra (fase 2) | `RUN_ERROR` genérico; trace com `outcome=error`; resposta não persistida (inalterado) |
 | tool falha | **não é erro do run**: `TOOL_CALL_RESULT status=error`, o modelo segue respondendo (inalterado no backend) |
@@ -466,7 +466,7 @@ Backend:
   inválido, última mensagem não é `user`, conteúdo vazio → 422.
 - `tests/integration/api/test_ask_endpoint.py` e
   `test_ask_trace_persistence.py`: body `RunAgentInput`, parse de `data:`;
-  casos novos: find-or-create por `threadId`, 403 para thread alheia,
+  casos novos: find-or-create por `threadId`, 404 para thread alheia,
   `langsmith_run_id == runId`, `RUN_ERROR` persiste trace e não persiste
   resposta, `RUN_FINISHED` ausente após `RUN_ERROR`.
 - `tests/unit/support/agent/test_domain_boundary.py`: `src/domain` e
@@ -520,7 +520,7 @@ servidor fale AG-UI e o cliente fale o contrato antigo. Deploy conjunto.
 - Nenhum evento carrega conteúdo de tool, `page_id`, e-mail ou
   `<<TOOL_CONTENT>>`.
 - `curl` com `RunAgentInput` válido devolve `data:` JSON conforme a seção 1.2;
-  body inválido devolve 422; `threadId` alheio devolve 403.
+  body inválido devolve 422; `threadId` alheio devolve 404.
 - Reabrir a conversa mostra texto + fontes; `agent_traces.langsmith_run_id`
   bate com o `runId` enviado.
 - `pytest`, `npm test`, `alembic check` e `prospector` verdes; nenhuma
