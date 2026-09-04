@@ -28,6 +28,12 @@ class InvalidCredentialsError(DomainError):
     """Login recusado pela plataforma (credenciais inválidas)."""
 
 
+class ForbiddenError(DomainError):
+    """Login recusado pela plataforma por estado da conta (desativada, banida,
+    convite pendente). A mensagem É da plataforma e VAI ao usuário — única
+    exceção deliberada à regra "nunca erro cru" (ADR-0018)."""
+
+
 class RateLimitedError(DomainError):
     """Muitas tentativas — janela de rate limit estourada."""
 

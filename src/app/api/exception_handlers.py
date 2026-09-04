@@ -7,6 +7,7 @@ from src.support.core.exceptions import (
     DomainConflictError,
     DomainError,
     ExternalServiceUnavailableError,
+    ForbiddenError,
     InvalidCredentialsError,
     NotFoundError,
     RateLimitedError,
@@ -37,6 +38,12 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(InvalidCredentialsError)
     async def _invalid_credentials(request: Request, exc: InvalidCredentialsError):
         return JSONResponse(status_code=401, content={"detail": "invalid-credentials"})
+
+    @app.exception_handler(ForbiddenError)
+    async def _forbidden(request: Request, exc: ForbiddenError):
+        return JSONResponse(
+            status_code=403, content={"detail": "forbidden", "message": str(exc)}
+        )
 
     @app.exception_handler(RateLimitedError)
     async def _rate_limited(request: Request, exc: RateLimitedError):
