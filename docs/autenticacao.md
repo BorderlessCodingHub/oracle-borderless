@@ -206,8 +206,16 @@ do `pyproject.toml`** e fica registrada no ADR-0017.
 
 `localStorage` + header `Bearer` (escolha aprovada): API e SPA podem ficar em
 hosts distintos do domínio borderless, o SSE já é `fetch` (aceita header) e
-evita CSRF de cookie. Chave única no storage com `{ user, accessToken, isAdmin,
-expiresAt }`.
+evita CSRF de cookie. Chave única no storage com `{ user, accessToken, isAdmin
+}`.
+
+**Desvio deliberado da v1:** `expiresAt` **não** é armazenado. A unidade do
+`expiresIn` da plataforma (segundos? horas?) é pendência do §9 — gravar um
+`expiresAt` calculado errado seria pior que não ter um. Na prática isso não
+falta: a expiração é detectada pelo jeito que já funciona hoje — qualquer 401
+global limpa a sessão e volta ao `/login?next=…` (§5.3). Quando o §9 confirmar
+a unidade do `expiresIn`, `expiresAt` entra como campo adicional da sessão,
+sem mudar o mecanismo de detecção.
 
 ### 5.2 `AuthProvider` / `useUser` — três estados, não dois
 
@@ -241,8 +249,10 @@ redireciona para `/login?next=…`.
 - Rate limit no login (§4.3) — protege a plataforma e o bridge.
 - `?next=` validado no frontend (open redirect).
 - 404 (não 403) para ops sem admin e para conversa de outro usuário.
-- CORS: se SPA e API ficarem em hosts distintos, liberar só o domínio do app
-  (nada de `*` com credenciais).
+- CORS: settings-driven via `CORS_ORIGINS` (`Settings.cors_origins`, .env,
+  vazio por padrão = mesmo host/proxy de dev, sem `CORSMiddleware` montado).
+  Se SPA e API ficarem em hosts distintos, preencher só com o(s) domínio(s)
+  do app (nada de `*`); `allow_credentials=False` — é Bearer, não cookie.
 
 ## 7. Fora de escopo (v1)
 
@@ -285,15 +295,16 @@ redireciona para `/login?next=…`.
 
 ## 11. Checklist de implementação
 
-- [ ] ADR-0017 (plataforma como IdP, JWT local, sem Supabase; registra a dep nova de JWT)
-- [ ] Env novas em `Settings` + `.env.example`
-- [ ] `BorderlessAuthClient` (timeout, mapeamento de erros, sem log sensível)
-- [ ] Migration + `rate_limits` (upsert atômico, fail-open)
-- [ ] `src/domain/users/` (entity, `SignInAction`, DTOs)
-- [ ] `POST /auth/login` (controller + request/response schemas + rota pública)
-- [ ] `require_user` (JWT local) + `require_admin` (allowlist ⇒ 404)
-- [ ] `/conversations/*` protegidas + ownership (carimbo e filtro por `user_email`)
-- [ ] Frontend: sessão/`AuthProvider`, `/login`, `RequireAuth`, `apiFetch`/SSE com Bearer + 401 global, `AuthSettings` real
-- [ ] Testes do §10
+- [x] ADR-0017 (plataforma como IdP, JWT local, sem Supabase; registra a dep nova de JWT)
+- [x] Env novas em `Settings` + `.env.example`
+- [x] `BorderlessAuthClient` (timeout, mapeamento de erros, sem log sensível)
+- [x] Migration + `rate_limits` (upsert atômico, fail-open)
+- [x] `src/domain/users/` (entity, `SignInAction`, DTOs)
+- [x] `POST /auth/login` (controller + request/response schemas + rota pública)
+- [x] `require_user` (JWT local) + `require_admin` (allowlist ⇒ 404)
+- [x] `/conversations/*` protegidas + ownership (carimbo e filtro por `user_email`)
+- [x] Frontend: sessão/`AuthProvider`, `/login`, `RequireAuth`, `apiFetch`/SSE com Bearer + 401 global, `AuthSettings` real
+- [x] CORS settings-driven (`CORS_ORIGINS`; vazio por padrão = sem `CORSMiddleware`)
+- [x] Testes do §10
 - [ ] Desligar Cloudflare Access na borda (após deploy com auth ativa)
-- [ ] Atualizar `CLAUDE.md` (auth deixa de ser ponto em aberto)
+- [x] Atualizar `CLAUDE.md` (auth deixa de ser ponto em aberto)

@@ -6,6 +6,10 @@ restrito a erros de banco: uma indisponibilidade transitória do Postgres não
 pode derrubar o login inteiro. Erros de programação/wiring (window_ms
 inválido, sessão ausente do contexto) propagam normalmente — não são
 mascarados como "permitido".
+
+Janela fixa (não deslizante): uma rajada na fronteira entre duas janelas pode
+passar até 2x o limite (ex.: 10 tentativas no fim de uma janela + 10 no início
+da próxima) — aceitável para o caso de uso atual (signin, 10/10min).
 """
 
 import logging

@@ -454,6 +454,7 @@ ADRs atuais (em `docs/adr/`):
 - **ADR-0005** — Usar SQLAlchemy 2.0 em vez de SQLModel
 - **ADR-0006** — Sessão DB via ContextVar + middleware
 - **ADR-0016** — Framework do agente = LangGraph, observabilidade fina no LangSmith (substitui o ADR-0007)
+- **ADR-0017** — Plataforma Borderless como IdP; JWT local; sem Supabase
 
 Índice completo em `docs/adr/README.md`.
 
