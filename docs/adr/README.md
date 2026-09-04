@@ -24,7 +24,7 @@ por `---`. Fluxo recomendado:
 | [0006](0006-sessao-db-via-contextvar.md) | Sessão DB via ContextVar + middleware | *referenciado — a formalizar* |
 | [0007](0007-agent-framework-pydantic-ai.md) | Framework do agente = Pydantic AI (agnóstico de provedor) | *substituído pelo 0016* |
 | [0008](0008-rag-hibrido-pgvector-mcp.md) | RAG híbrido (pgvector + MCP) e embeddings OpenAI | Aceito |
-| [0009](0009-streaming-sse.md) | Streaming das respostas do chat via SSE | Aceito |
+| [0009](0009-streaming-sse.md) | Streaming das respostas do chat via SSE | *contrato substituído pelo 0019 (transporte SSE mantido)* |
 | [0010](0010-transporte-mcp-notion.md) | Transporte do Notion: MCP server via cliente `mcp` (não SDK REST) | Aceito |
 | [0011](0011-kb-restrita-root-notion.md) | Base de conhecimento restrita ao subtree de um root configurável do Notion | *substituído pelo 0015* |
 | [0012](0012-escopo-kb-aplicado-na-recuperacao.md) | Escopo da KB aplicado também na recuperação, não só na descoberta | *parcialmente substituído pelo 0015* |
@@ -34,6 +34,7 @@ por `---`. Fluxo recomendado:
 | [0016](0016-agent-framework-langgraph.md) | Framework do agente = LangGraph, observabilidade fina no LangSmith | Aceito |
 | [0017](0017-auth-plataforma-como-idp.md) | Plataforma Borderless como IdP; JWT local; sem Supabase | *validação/sessão substituídas pelo 0018* |
 | [0018](0018-auth-bff-token-opaco.md) | Auth vira BFF: token opaco da plataforma vive só no servidor | Aceito |
+| [0019](0019-contrato-ag-ui-do-turno.md) | O turno do oráculo é entregue como eventos AG-UI | Aceito |
 
 > ADR-0001–0006 são citados pelo `CLAUDE.md` mas ainda não foram escritos como arquivo.
 > As regras já estão em vigor (ver `CLAUDE.md` → "Regras inegociáveis"). Backfill quando
