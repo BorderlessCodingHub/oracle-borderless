@@ -1,122 +1,100 @@
-"""Guards: JWT local (401 em tudo que não prova identidade) e admin (404)."""
+"""Guards (ADR-0018): cookie → ResolveSessionAction; 401 único em tudo que não
+prova identidade; admin por allowlist (404)."""
 
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
+from src.app.api.session_cookie import SESSION_COOKIE_NAME
+from src.domain.users.entities.authenticated_user import AuthenticatedUser
 from src.support.core.context import CurrentRequestContext
-from src.support.core.exceptions import NotFoundError
+from src.support.core.exceptions import ExternalServiceUnavailableError, NotFoundError
 from src.support.core.settings import settings
-from tests.fakes.auth import auth_headers, forge_token
+
+ANA = AuthenticatedUser(id="u-1", email="ana@x.com", is_admin=False, name="Ana", username="ana")
 
 
-def _request(headers: dict[str, str] | None = None) -> Request:
-    raw = [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]
-    return Request({"type": "http", "method": "GET", "path": "/", "headers": raw})
+def _request(cookie: str | None = None) -> Request:
+    headers = [(b"cookie", cookie.encode())] if cookie else []
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": headers})
+
+
+class FakeResolve:
+    """Substitui ResolveSessionAction no módulo: registra o token recebido e
+    devolve/lança o que o teste mandar."""
+
+    seen: list[str] = []
+    outcome = None
+
+    def __init__(self, auth_client=None, **kw):
+        pass
+
+    async def execute(self, raw_token):
+        FakeResolve.seen.append(raw_token)
+        if isinstance(FakeResolve.outcome, Exception):
+            raise FakeResolve.outcome
+        return FakeResolve.outcome
 
 
 @pytest.fixture(autouse=True)
-def _clear_context():
+def _wire(monkeypatch):
+    import src.app.api.dependencies.require_user as mod
+
+    FakeResolve.seen, FakeResolve.outcome = [], None
+    monkeypatch.setattr(mod, "ResolveSessionAction", FakeResolve)
     yield
     CurrentRequestContext.clear()
 
 
 @pytest.mark.asyncio
-async def test_token_valido_devolve_user_e_preenche_o_contexto():
+async def test_cookie_valido_devolve_user_e_preenche_o_contexto():
     from src.app.api.dependencies.require_user import require_user
 
-    user = await require_user(_request(auth_headers("Ana@X.com")))
-    assert user.email == "ana@x.com"  # normalizado
-    assert CurrentRequestContext.get_user() is user
+    FakeResolve.outcome = ANA
+    user = await require_user(_request(f"{SESSION_COOKIE_NAME}=tok-123; outro=x"))
+    assert user is ANA
+    assert FakeResolve.seen == ["tok-123"]
+    assert CurrentRequestContext.get_user() is ANA
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "headers",
-    [
-        None,
-        {"Authorization": "Bearer "},
-        {"Authorization": "Basic abc"},
-        {"Authorization": "Bearer nao-e-jwt"},
-    ],
-)
-async def test_sem_bearer_valido_da_401(headers):
+@pytest.mark.parametrize("cookie", [None, "outro=x", f"{SESSION_COOKIE_NAME}=", f"{SESSION_COOKIE_NAME}=   "])
+async def test_sem_cookie_de_sessao_da_401_sem_consultar_nada(cookie):
     from src.app.api.dependencies.require_user import require_user
 
     with pytest.raises(HTTPException) as exc:
-        await require_user(_request(headers))
+        await require_user(_request(cookie))
     assert exc.value.status_code == 401
+    assert exc.value.detail == "not-authenticated"
+    assert FakeResolve.seen == []
 
 
 @pytest.mark.asyncio
-async def test_token_expirado_e_assinatura_errada_dao_401():
+async def test_sessao_desconhecida_ou_revogada_da_401_generico():
     from src.app.api.dependencies.require_user import require_user
 
-    expirado = {"Authorization": f"Bearer {forge_token('a@x.com', expires_in=-10)}"}
-    with pytest.raises(HTTPException):
-        await require_user(_request(expirado))
-
-    forjado = {"Authorization": f"Bearer {forge_token('a@x.com', secret='outro')}"}
-    with pytest.raises(HTTPException):
-        await require_user(_request(forjado))
-
-
-@pytest.mark.asyncio
-async def test_token_sem_exp_da_401():
-    """Spec §4.4: validação local é assinatura + exp — sem exp não há como
-    considerar o token expirável, então tem que ser rejeitado, não aceito."""
-    import jwt as pyjwt
-
-    from src.app.api.dependencies.require_user import require_user
-    from tests.fakes.auth import TEST_JWT_ALGORITHM, TEST_JWT_SECRET
-
-    token = pyjwt.encode(
-        {"sub": "u-1", "email": "a@x.com"}, TEST_JWT_SECRET, algorithm=TEST_JWT_ALGORITHM
-    )
+    FakeResolve.outcome = None
     with pytest.raises(HTTPException) as exc:
-        await require_user(_request({"Authorization": f"Bearer {token}"}))
+        await require_user(_request(f"{SESSION_COOKIE_NAME}=nao-existe"))
     assert exc.value.status_code == 401
+    assert exc.value.detail == "not-authenticated"
+    assert CurrentRequestContext.get_user() is None
 
 
 @pytest.mark.asyncio
-async def test_token_com_aud_nao_confirmada_e_aceito():
-    """Spec §9: a audience da plataforma ainda não está confirmada — um token
-    que carrega `aud` não pode 401 só por isso (verify_aud=False)."""
+async def test_plataforma_fora_alem_do_fail_open_propaga_unavailable():
+    """Não é 401 (o usuário não fez nada errado): a exceção de domínio sobe e o
+    exception handler traduz em 503 `unavailable`."""
     from src.app.api.dependencies.require_user import require_user
 
-    headers = auth_headers("ana@x.com", aud="algum-app")
-    user = await require_user(_request(headers))
-    assert user.email == "ana@x.com"
-
-
-@pytest.mark.asyncio
-async def test_token_sem_email_da_401():
-    import jwt as pyjwt
-
-    from src.app.api.dependencies.require_user import require_user
-    from tests.fakes.auth import TEST_JWT_ALGORITHM, TEST_JWT_SECRET
-
-    token = pyjwt.encode(
-        {"sub": "u-1", "exp": 4_000_000_000}, TEST_JWT_SECRET, algorithm=TEST_JWT_ALGORITHM
-    )
-    with pytest.raises(HTTPException):
-        await require_user(_request({"Authorization": f"Bearer {token}"}))
-
-
-@pytest.mark.asyncio
-async def test_verify_key_ausente_da_503(monkeypatch):
-    from src.app.api.dependencies.require_user import require_user
-
-    monkeypatch.setattr(settings, "BORDERLESS_JWT_VERIFY_KEY", None)
-    with pytest.raises(HTTPException) as exc:
-        await require_user(_request(auth_headers("a@x.com")))
-    assert exc.value.status_code == 503
+    FakeResolve.outcome = ExternalServiceUnavailableError("down")
+    with pytest.raises(ExternalServiceUnavailableError):
+        await require_user(_request(f"{SESSION_COOKIE_NAME}=tok"))
 
 
 @pytest.mark.asyncio
 async def test_require_admin_404_para_nao_admin(monkeypatch):
     from src.app.api.dependencies.require_admin import require_admin
-    from src.domain.users.entities.authenticated_user import AuthenticatedUser
 
     monkeypatch.setattr(settings, "ADMIN_EMAILS", "admin@x.com")
     with pytest.raises(NotFoundError):

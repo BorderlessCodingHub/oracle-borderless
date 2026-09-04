@@ -119,7 +119,7 @@ async def test_trace_row_exists_after_a_successful_ask(monkeypatch):
         resp = await client.post(
             "/conversations/ask",
             json={"question": "o que é o PSP?"},
-            headers=auth_headers("asker@x.com"),
+            headers=await auth_headers("asker@x.com"),
         )
         assert resp.status_code == 200
         body = resp.text
@@ -150,7 +150,7 @@ async def test_failed_turn_is_traced_even_though_the_answer_is_not_persisted(mon
         resp = await client.post(
             "/conversations/ask",
             json={"question": "vai falhar"},
-            headers=auth_headers("asker@x.com"),
+            headers=await auth_headers("asker@x.com"),
         )
         body = resp.text
         assert "event: error" in body
@@ -194,7 +194,7 @@ async def test_refusal_leaves_engine_ms_and_first_token_ms_null(monkeypatch):
         resp = await client.post(
             "/conversations/ask",
             json={"question": "qual a capital da Austrália?"},
-            headers=auth_headers("asker@x.com"),
+            headers=await auth_headers("asker@x.com"),
         )
         body = resp.text
         assert "Não encontrei informações sobre isso na base de conhecimento." in _concat_tokens(body)

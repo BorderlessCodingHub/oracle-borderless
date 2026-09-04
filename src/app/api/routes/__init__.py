@@ -3,7 +3,7 @@
 Cada módulo em `src/app/api/routes/` que expõe uma variável `router` ou
 `public_router` é registrado automaticamente — basta criar o arquivo, nada a
 registrar manualmente. A distinção não é mais só convenção: a exigência de
-`require_user` é **mecânica** (ADR-0017, fail-closed). `register_routes`
+`require_user` é **mecânica** (ADR-0017/0018, fail-closed). `register_routes`
 inclui todo `router` com `dependencies=[Depends(require_user)]` amarrado na
 hora do `include_router` — um módulo novo que esqueça de proteger sua rota sai
 protegido mesmo assim. `public_router` é incluído como está, sem essa

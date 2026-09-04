@@ -1,55 +1,32 @@
-"""Identidade por request: valida o JWT da plataforma LOCALMENTE (ADR-0017)."""
+"""Identidade por request (ADR-0018): cookie `ob_session` → sessão → validação
+na plataforma (cache 60s / fail-open 10min) → AuthenticatedUser no contexto.
 
-import logging
+O 401 é único e indistinguível (sem cookie, cookie desconhecido, sessão
+revogada). Plataforma fora além do fail-open NÃO é 401: a
+`ExternalServiceUnavailableError` sobe e o handler responde 503.
+"""
 
-import jwt
 from fastapi import HTTPException, Request
 
+from src.app.api.session_cookie import SESSION_COOKIE_NAME
+from src.domain.users.actions.resolve_session_action import ResolveSessionAction
 from src.domain.users.entities.authenticated_user import AuthenticatedUser
+from src.support.clients.borderless.borderless_auth_client import BorderlessAuthClient
 from src.support.core.context import CurrentRequestContext
-from src.support.core.settings import settings
 
-logger = logging.getLogger(__name__)
 
-_WWW_AUTH = {"WWW-Authenticate": "Bearer"}
+def _unauthorized() -> HTTPException:
+    return HTTPException(status_code=401, detail="not-authenticated")
 
 
 async def require_user(request: Request) -> AuthenticatedUser:
-    verify_key = settings.BORDERLESS_JWT_VERIFY_KEY
-    if not verify_key:
-        # Misconfig de servidor, não culpa do usuário — não confundir com 401.
-        raise HTTPException(status_code=503, detail="unavailable")
+    raw_token = (request.cookies.get(SESSION_COOKIE_NAME) or "").strip()
+    if not raw_token:
+        raise _unauthorized()
 
-    scheme, _, token = request.headers.get("authorization", "").partition(" ")
-    if scheme.lower() != "bearer" or not token.strip():
-        raise HTTPException(status_code=401, detail="not-authenticated", headers=_WWW_AUTH)
+    user = await ResolveSessionAction(auth_client=BorderlessAuthClient()).execute(raw_token)
+    if user is None:
+        raise _unauthorized()
 
-    try:
-        claims = jwt.decode(
-            token.strip(),
-            verify_key,
-            algorithms=[settings.BORDERLESS_JWT_ALGORITHM],
-            options={"require": ["exp"], "verify_aud": False},
-        )
-    except jwt.PyJWTError as exc:
-        # Inválido, expirado, sem `exp` ou assinatura errada — mesmo 401
-        # genérico (não vaza qual). `verify_aud=False` porque o `aud` da
-        # plataforma ainda não está confirmado (spec §9) — um token com essa
-        # claim não pode 401 só por isso. NUNCA logar o token em si.
-        logger.warning("jwt rejeitado: %s", type(exc).__name__)
-        raise HTTPException(
-            status_code=401, detail="not-authenticated", headers=_WWW_AUTH
-        ) from exc
-
-    email = str(claims.get("email") or "").strip().lower()
-    if not email:
-        # §9 do spec: sem claim de e-mail não há ownership nem allowlist.
-        raise HTTPException(status_code=401, detail="not-authenticated", headers=_WWW_AUTH)
-
-    user = AuthenticatedUser(
-        id=str(claims.get("sub") or ""),
-        email=email,
-        is_admin=email in settings.admin_emails,
-    )
     CurrentRequestContext.set_user(user)
     return user

@@ -1,5 +1,5 @@
 """IMPORTANT 6: a exigência de auth em `router` deixou de ser convenção e virou
-mecânica (ADR-0017) — `_include_module_routers` amarra `Depends(require_user)`
+mecânica (ADR-0017/0018) — `_include_module_routers` amarra `Depends(require_user)`
 em qualquer módulo que exponha `router`, mesmo que o módulo tenha esquecido de
 declarar isso sozinho."""
 
@@ -10,6 +10,7 @@ import pytest_asyncio
 from fastapi import APIRouter, FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from src.app.api.middlewares import DBSessionMiddleware
 from src.app.api.routes import _include_module_routers
 
 
@@ -36,6 +37,9 @@ async def test_router_de_um_modulo_hipotetico_sai_protegido_mesmo_sem_dependency
     dummy_module = SimpleNamespace(router=dummy_router)
 
     app = FastAPI()
+    # require_user v2 (ADR-0018) resolve o cookie contra a tabela `sessions`:
+    # o app hipotético precisa da mesma sessão de banco por request do app real.
+    app.add_middleware(DBSessionMiddleware)
     _include_module_routers(app, dummy_module, "dummy_module")
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -44,7 +48,7 @@ async def test_router_de_um_modulo_hipotetico_sai_protegido_mesmo_sem_dependency
 
         from tests.fakes.auth import auth_headers
 
-        com_token = await client.get("/dummy-hipotetico", headers=auth_headers("a@x.com"))
+        com_token = await client.get("/dummy-hipotetico", headers=await auth_headers("a@x.com"))
         assert com_token.status_code == 200
 
 

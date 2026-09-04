@@ -24,7 +24,7 @@ async def ops_client(monkeypatch):
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
-        headers=auth_headers("admin@x.com"),
+        headers=await auth_headers("admin@x.com"),
     ) as client:
         yield client
 
@@ -78,7 +78,7 @@ async def test_eval_reports_no_runs_when_there_is_no_report(ops_client, tmp_path
 
 
 @pytest.mark.asyncio
-async def test_ops_sem_token_da_401():
+async def test_ops_sem_cookie_da_401():
     from main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
@@ -93,5 +93,5 @@ async def test_ops_para_nao_admin_da_404(monkeypatch):
 
     monkeypatch.setattr(settings, "ADMIN_EMAILS", "admin@x.com")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        resp = await c.get("/ops/overview?window=24h", headers=auth_headers("comum@x.com"))
+        resp = await c.get("/ops/overview?window=24h", headers=await auth_headers("comum@x.com"))
         assert resp.status_code == 404

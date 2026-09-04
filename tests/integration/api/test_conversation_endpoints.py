@@ -56,7 +56,7 @@ async def test_list_and_get_conversation():
     from main import app
 
     transport = ASGITransport(app=app)
-    headers = auth_headers(email)
+    headers = await auth_headers(email)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         listing = await client.get("/conversations", headers=headers)
         assert listing.status_code == 200
@@ -91,12 +91,12 @@ async def test_get_missing_conversation_returns_404():
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get(f"/conversations/{uuid4()}", headers=auth_headers("qualquer@x.com"))
+        resp = await client.get(f"/conversations/{uuid4()}", headers=await auth_headers("qualquer@x.com"))
         assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_sem_token_tudo_da_401():
+async def test_sem_cookie_tudo_da_401():
     from main import app
 
     transport = ASGITransport(app=app)
@@ -114,7 +114,7 @@ async def test_conversa_de_outro_usuario_da_404():
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get(f"/conversations/{cid}", headers=auth_headers("intrusa@x.com"))
+        resp = await client.get(f"/conversations/{cid}", headers=await auth_headers("intrusa@x.com"))
         assert resp.status_code == 404
 
     # cleanup

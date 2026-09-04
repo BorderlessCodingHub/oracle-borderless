@@ -1,5 +1,6 @@
 """Configuração global de testes."""
 
+import asyncio
 import os
 
 import pytest
@@ -14,9 +15,10 @@ def setup_test_env():
     if not os.getenv("ANTHROPIC_API_KEY"):
         os.environ["ANTHROPIC_API_KEY"] = "sk-test-dummy-key"
 
-    # JWT de teste (ADR-0017): HS256 com segredo fixo, forjado por tests/fakes/auth.py
-    from src.support.core.settings import settings
-    from tests.fakes.auth import TEST_JWT_ALGORITHM, TEST_JWT_SECRET
+    yield
 
-    settings.BORDERLESS_JWT_ALGORITHM = TEST_JWT_ALGORITHM
-    settings.BORDERLESS_JWT_VERIFY_KEY = TEST_JWT_SECRET
+    # Sessões semeadas por tests/fakes/auth.py (ADR-0018) não podem acumular
+    # no banco de dev entre execuções.
+    from tests.fakes.auth import purge_seeded_sessions
+
+    asyncio.run(purge_seeded_sessions())
