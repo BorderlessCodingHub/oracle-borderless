@@ -8,6 +8,10 @@ durante o `await start()`, dentro do escopo do request.
 `start()` dirige o grafo até a ENTRADA do nó de resposta e devolve o gerador do
 restante. Dali em diante só há token de LLM e tool HTTP — a mesma invariante que
 o motor anterior mantinha por convenção, agora explícita na estrutura.
+
+Desde o ADR-0019 o runner não esconde mais o que o grafo faz entre a pergunta e
+o texto: cada nó vira um `StepChunk`. A tradução para eventos AG-UI NÃO é daqui
+— mora em `src/app/api/streaming/`. Este módulo só fala em dataclasses do port.
 """
 
 import time
@@ -15,18 +19,20 @@ from typing import AsyncIterator
 
 from langchain_core.messages import AIMessage, AIMessageChunk
 
+from src.domain.shared.value_objects.citation import Citation
 from src.support.agent.graph.builder import TURN_GRAPH
 from src.support.agent.ports import (
     AgentMessage,
     AgentStreamChunk,
     KnowledgeSnippet,
     SourcesChunk,
+    StepChunk,
     TextChunk,
     TurnDependencies,
     TurnSignals,
 )
 
-_TEXT_NODES = ("answer", "refuse")
+_CITATION_NODES = ("answer", "refuse")
 
 
 def _text_of(message) -> str:
@@ -43,43 +49,89 @@ def _is_answer_event(payload) -> bool:
     return metadata.get("langgraph_node") == "answer"
 
 
-def _token_chunk(payload) -> AgentStreamChunk | None:
-    """stream_mode="messages" emite TODA mensagem nova encontrada na saída de
-    QUALQUER nó — não só as do modelo de resposta. Isso inclui a `ToolMessage`
-    que o `ToolNode` devolve depois de rodar uma tool (ex.: web_search,
-    fetch_notion_page), com conteúdo bruto embrulhado em `<<TOOL_CONTENT>>`, e
-    também o próprio prompt (System/Human) que o nó de resposta devolve no state.
+def _step_detail(name: str, signals: TurnSignals) -> dict | None:
+    """O que a UI mostra ao lado do passo. Lido dos `signals`, que o nó já
+    escreveu quando o seu update chega."""
+    if name == "gate":
+        return {"retrieve": signals.gate_retrieve, "degraded": signals.gate_degraded}
+    if name == "retrieve":
+        return {"kept": signals.retrieval_kept}
+    return None
 
-    O contrato SSE só transporta texto do modelo de resposta: por isso o
-    filtro dobrado — tipo da mensagem (só AIMessage/AIMessageChunk, nunca
-    ToolMessage) E nó de origem (só "answer", nunca "gate", "tools" etc.).
-    Texto de preâmbulo antes de uma tool call (AIMessage com content textual +
-    tool_calls) continua passando — é paridade com o motor antigo.
+
+class TurnEmitter:
+    """Traduz os eventos brutos do LangGraph (`updates` e `messages`) em chunks
+    do port, guardando o pouco de estado que isso exige: quais passos já
+    abriram e as citações coletadas. Um por run.
+
+    `updates` chega no FIM de cada nó, por isso o `started` de um passo é
+    sintetizado no primeiro sinal do nó — o próprio update, ou (só para
+    `answer`) o primeiro evento de `messages` vindo dele.
     """
-    message, _ = payload
-    if not isinstance(message, (AIMessage, AIMessageChunk)):
-        return None
-    if not _is_answer_event(payload):
-        return None
-    text = _text_of(message)
-    return TextChunk(text=text) if text else None
 
+    def __init__(self, signals: TurnSignals) -> None:
+        self._signals = signals
+        self._steps_started: set[str] = set()
+        self.citations: list[Citation] = []
 
-def _refusal_chunk(payload) -> AgentStreamChunk | None:
-    """O nó refuse é determinístico: não passa por LLM, então nunca aparece em
-    stream_mode="messages". O texto chega pelo "updates" e o chunk é sintetizado
-    aqui — é o que mantém a recusa instantânea."""
-    update = payload.get("refuse")
-    if not update or not update.get("answer"):
-        return None
-    return TextChunk(text=update["answer"])
+    def step_started(self, name: str) -> list[AgentStreamChunk]:
+        if name in self._steps_started:
+            return []
+        self._steps_started.add(name)
+        return [StepChunk(name=name, phase="started")]
 
+    def step_finished(self, name: str) -> list[AgentStreamChunk]:
+        return [
+            *self.step_started(name),
+            StepChunk(name=name, phase="finished", detail=_step_detail(name, self._signals)),
+        ]
 
-def _absorb(payload, collected: dict) -> None:
-    for node in _TEXT_NODES:
-        update = payload.get(node)
-        if update and update.get("citations") is not None:
-            collected["citations"] = list(update["citations"])
+    def on_update(self, payload: dict) -> list[AgentStreamChunk]:
+        """Um payload de stream_mode="updates": {nó: saída do nó}."""
+        out: list[AgentStreamChunk] = []
+        for node, update in payload.items():
+            update = update or {}
+            if node in ("gate", "retrieve"):
+                out += self.step_finished(node)
+            elif node == "refuse":
+                # O nó refuse é determinístico: não passa por LLM, então nunca
+                # aparece em "messages". O texto chega por aqui e o chunk é
+                # sintetizado — é o que mantém a recusa instantânea.
+                out += self.step_finished("refuse")
+                if update.get("answer"):
+                    out.append(TextChunk(text=update["answer"]))
+            elif node == "answer":
+                out += self.step_started("answer")
+            if node in _CITATION_NODES and update.get("citations") is not None:
+                self.citations = list(update["citations"])
+        return out
+
+    def on_message(self, payload) -> list[AgentStreamChunk]:
+        """Um payload de stream_mode="messages": (mensagem, metadata).
+
+        Só o nó `answer` interessa, e dele só texto de AIMessage/AIMessageChunk:
+        a ToolMessage que o ToolNode devolve (conteúdo bruto em <<TOOL_CONTENT>>)
+        e o próprio prompt (System/Human) que o nó devolve no state nunca viram
+        texto. Preâmbulo antes de uma tool call continua passando.
+        """
+        message, _ = payload
+        if not _is_answer_event(payload):
+            return []
+        out = self.step_started("answer")
+        if not isinstance(message, (AIMessage, AIMessageChunk)):
+            return out
+        text = _text_of(message)
+        if text:
+            out.append(TextChunk(text=text))
+        return out
+
+    def finish(self) -> list[AgentStreamChunk]:
+        """Fim do stream: fecha o passo de resposta (se abriu) e entrega as fontes."""
+        out: list[AgentStreamChunk] = []
+        if "answer" in self._steps_started:
+            out.append(StepChunk(name="answer", phase="finished"))
+        out.append(SourcesChunk(citations=list(self.citations)))
+        return out
 
 
 def _mark_first_token(signals: TurnSignals) -> None:
@@ -153,7 +205,7 @@ class TurnGraphRunner:
         knowledge: list[KnowledgeSnippet] | None = None,
         extra_config: dict | None = None,
     ) -> AsyncIterator[AgentStreamChunk]:
-        collected = {"citations": []}
+        emitter = TurnEmitter(signals)
         agen = self._graph.astream(
             _initial_state(question, history, knowledge),
             stream_mode=["updates", "messages"],
@@ -168,25 +220,26 @@ class TurnGraphRunner:
         # answer -> tools -> answer inteiro rodaria aqui dentro, segurando a
         # conexão Postgres do request durante chamadas HTTP externas. O critério
         # é o PRIMEIRO evento "messages" do nó `answer` — mesmo que ele não
-        # renda texto (o `first` vai None para o `_resume`, como já ia).
+        # renda texto.
         #
-        # Gate e retrieve precedem estritamente o `answer` no grafo, então a
-        # invariante de sessão não só se mantém como fica mais apertada.
-        first = None
+        # Tudo que a fase 1 produz (passos de gate/retrieve, o refuse com seu
+        # texto, o `answer started`, o primeiro token se houver) vai para
+        # `buffered`; a fase 2 reproduz a lista antes de continuar.
+        buffered: list[AgentStreamChunk] = []
         deferred: Exception | None = None
         try:
             async for mode, payload in agen:
                 if mode == "updates":
-                    _absorb(payload, collected)
-                    first = _refusal_chunk(payload)
-                    if first is not None:
+                    buffered += emitter.on_update(payload)
+                    if "refuse" in payload:
                         break
                     continue
                 if not _is_answer_event(payload):
                     continue
-                first = _token_chunk(payload)
-                if first is not None:
+                chunks = emitter.on_message(payload)
+                if any(isinstance(c, TextChunk) for c in chunks):
                     _mark_first_token(signals)
+                buffered += chunks
                 break
         except Exception as exc:
             # Revisão I3 — de onde veio a falha decide quem a trata:
@@ -199,21 +252,20 @@ class TurnGraphRunner:
             #   o middleware faria rollback (perdendo a mensagem do usuário) e
             #   NENHUMA linha de agent_traces com outcome="error" seria gravada
             #   — justamente o trace mais valioso. Adiando, cai no `except` que
-            #   o controller já tem: evento SSE de erro + trace persistido, com
-            #   a mensagem do usuário já commitada. É a paridade com o motor
-            #   antigo, onde a chamada ao LLM era preguiçosa dentro do corpo SSE.
+            #   o controller já tem: RUN_ERROR + trace persistido, com a
+            #   mensagem do usuário já commitada.
             if signals.answer_started_at is None:
                 raise
             deferred = exc
 
         # FASE 2 — devolvida ao controller, consumida fora do escopo da sessão.
-        return _resume(first, agen, collected, signals, deferred)
+        return _resume(buffered, agen, emitter, signals, deferred)
 
 
 async def _resume(
-    first,
+    buffered: list[AgentStreamChunk],
     agen,
-    collected: dict,
+    emitter: TurnEmitter,
     signals: TurnSignals,
     deferred: Exception | None = None,
 ) -> AsyncIterator[AgentStreamChunk]:
@@ -221,21 +273,17 @@ async def _resume(
     # (revisão I3), para que ela chegue ao `except` do controller.
     if deferred is not None:
         raise deferred
-    if first is not None:
-        yield first
+    for chunk in buffered:
+        yield chunk
     async for mode, payload in agen:
-        if mode == "updates":
-            _absorb(payload, collected)
-            chunk = _refusal_chunk(payload)
-            if chunk is not None:
-                yield chunk
-            continue
-        chunk = _token_chunk(payload)
-        if chunk is not None:
-            _mark_first_token(signals)
+        chunks = emitter.on_update(payload) if mode == "updates" else emitter.on_message(payload)
+        for chunk in chunks:
+            if isinstance(chunk, TextChunk):
+                _mark_first_token(signals)
             yield chunk
     _mark_engine_end(signals)
-    yield SourcesChunk(citations=collected["citations"])
+    for chunk in emitter.finish():
+        yield chunk
 
 
 def get_turn_graph_runner(

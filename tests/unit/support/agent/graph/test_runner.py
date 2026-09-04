@@ -17,8 +17,15 @@ from src.domain.conversations.services.out_of_scope_reply import (
 )
 from src.domain.shared.value_objects.citation import Citation
 from src.support.agent.graph.builder import build_turn_graph
-from src.support.agent.graph.runner import TurnGraphRunner, _token_chunk
-from src.support.agent.ports import KnowledgeSnippet, SourcesChunk, TextChunk, TurnDependencies, TurnSignals
+from src.support.agent.graph.runner import TurnEmitter, TurnGraphRunner
+from src.support.agent.ports import (
+    KnowledgeSnippet,
+    SourcesChunk,
+    StepChunk,
+    TextChunk,
+    TurnDependencies,
+    TurnSignals,
+)
 
 
 def _snippet(text="PSP é um programa do ecossistema"):
@@ -178,33 +185,127 @@ async def test_preset_knowledge_skips_the_gate_entirely():
     assert chunks[-1].citations[0].title == "(injected)"
 
 
-class Test_token_chunk:
-    """stream_mode="messages" emite QUALQUER mensagem nova de QUALQUER nó —
-    inclusive a ToolMessage que o ToolNode devolve depois de rodar uma tool,
-    com conteúdo bruto embrulhado em <<TOOL_CONTENT>>. O contrato SSE só
-    transporta texto do nó de resposta; estes testes travam esse filtro."""
+def _steps(chunks):
+    return [(c.name, c.phase) for c in chunks if isinstance(c, StepChunk)]
 
-    def test_a_tool_message_never_becomes_a_chunk(self):
+
+@pytest.mark.asyncio
+async def test_steps_are_emitted_in_pipeline_order_with_their_details():
+    signals = TurnSignals()
+    stream = await _runner().start(
+        "o que é PSP?", [], _deps(_RecordingSearch([_snippet()])), signals, extra_config=_models()
+    )
+    chunks = await _drain(stream)
+
+    assert _steps(chunks) == [
+        ("gate", "started"),
+        ("gate", "finished"),
+        ("retrieve", "started"),
+        ("retrieve", "finished"),
+        ("answer", "started"),
+        ("answer", "finished"),
+    ]
+    by_name = {c.name: c for c in chunks if isinstance(c, StepChunk) and c.phase == "finished"}
+    assert by_name["gate"].detail == {"retrieve": True, "degraded": False}
+    assert by_name["retrieve"].detail == {"kept": 1}
+    assert by_name["answer"].detail is None
+    # o passo answer fecha logo antes das fontes, nunca antes do último texto
+    assert isinstance(chunks[-1], SourcesChunk)
+    assert chunks[-2] == StepChunk(name="answer", phase="finished")
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_emits_the_refuse_step_before_its_text_and_no_answer_step():
+    stream = await _runner().start(
+        "quanto custa um carro?", [], _deps(_RecordingSearch([])), TurnSignals(), extra_config=_models()
+    )
+    chunks = await _drain(stream)
+
+    assert _steps(chunks) == [
+        ("gate", "started"),
+        ("gate", "finished"),
+        ("retrieve", "started"),
+        ("retrieve", "finished"),
+        ("refuse", "started"),
+        ("refuse", "finished"),
+    ]
+    refuse_at = next(i for i, c in enumerate(chunks) if isinstance(c, StepChunk) and c.name == "refuse" and c.phase == "finished")
+    first_text_at = next(i for i, c in enumerate(chunks) if isinstance(c, TextChunk))
+    assert refuse_at < first_text_at
+
+
+@pytest.mark.asyncio
+async def test_preset_knowledge_emits_only_the_answer_step():
+    stream = await _runner().start(
+        "resuma", [], _deps(_RecordingSearch([])), TurnSignals(),
+        knowledge=[_snippet()], extra_config=_models(),
+    )
+    chunks = await _drain(stream)
+
+    assert _steps(chunks) == [("answer", "started"), ("answer", "finished")]
+
+
+@pytest.mark.asyncio
+async def test_the_answer_step_opens_and_closes_once_even_with_a_tool_loop():
+    executed = {"ran": False}
+    runner = TurnGraphRunner(graph=_tool_loop_graph(executed), enable_tools=False)
+    stream = await runner.start(
+        "o que é PSP?", [], _deps(_RecordingSearch([_snippet()])), TurnSignals(),
+        knowledge=[_snippet()], extra_config={"answer_model": _ToolCallingModel()},
+    )
+    chunks = await _drain(stream)
+
+    assert _steps(chunks) == [("answer", "started"), ("answer", "finished")]
+
+
+@pytest.mark.asyncio
+async def test_phase_one_buffers_every_chunk_it_produced():
+    """Os passos de gate e retrieve nascem durante o `await start()`; a fase 2
+    tem que reproduzi-los antes de qualquer token, na ordem."""
+    stream = await _runner().start(
+        "o que é PSP?", [], _deps(_RecordingSearch([_snippet()])), TurnSignals(),
+        extra_config=_models(answer=_ChatModel("PSP é um programa")),
+    )
+    chunks = await _drain(stream)
+
+    first_text_at = next(i for i, c in enumerate(chunks) if isinstance(c, TextChunk))
+    assert _steps(chunks[:first_text_at]) == [
+        ("gate", "started"), ("gate", "finished"),
+        ("retrieve", "started"), ("retrieve", "finished"),
+        ("answer", "started"),
+    ]
+
+
+class TestTurnEmitterOnMessage:
+    """stream_mode="messages" emite QUALQUER mensagem nova de QUALQUER nó —
+    inclusive a ToolMessage que o ToolNode devolve, com conteúdo bruto em
+    <<TOOL_CONTENT>>. Só texto do nó de resposta vira TextChunk."""
+
+    def test_a_tool_message_never_becomes_text(self):
+        emitter = TurnEmitter(TurnSignals())
         payload = (
             ToolMessage(content="<<TOOL_CONTENT>>\nsegredo do tool\n<</TOOL_CONTENT>>", tool_call_id="x"),
             {"langgraph_node": "tools"},
         )
 
-        assert _token_chunk(payload) is None
+        assert emitter.on_message(payload) == []
 
-    def test_an_ai_message_from_the_answer_node_becomes_a_chunk(self):
+    def test_an_ai_message_from_the_answer_node_opens_the_step_and_yields_text(self):
+        emitter = TurnEmitter(TurnSignals())
         payload = (AIMessage(content="olá"), {"langgraph_node": "answer"})
 
-        chunk = _token_chunk(payload)
+        chunks = emitter.on_message(payload)
 
-        assert chunk is not None
-        assert isinstance(chunk, TextChunk)
-        assert chunk.text == "olá"
+        assert chunks == [StepChunk(name="answer", phase="started"), TextChunk(text="olá")]
+        # segunda mensagem do mesmo nó: o passo não reabre
+        assert emitter.on_message((AIMessage(content=" mundo"), {"langgraph_node": "answer"})) == [
+            TextChunk(text=" mundo")
+        ]
 
-    def test_an_ai_message_from_another_node_never_becomes_a_chunk(self):
-        payload = (AIMessage(content="x"), {"langgraph_node": "gate"})
+    def test_an_ai_message_from_another_node_is_ignored(self):
+        emitter = TurnEmitter(TurnSignals())
 
-        assert _token_chunk(payload) is None
+        assert emitter.on_message((AIMessage(content="x"), {"langgraph_node": "gate"})) == []
 
 
 class _SlowChatModel:
