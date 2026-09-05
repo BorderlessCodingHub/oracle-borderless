@@ -131,7 +131,12 @@ export default function ChatPage() {
       }
       return next;
     });
-    await stream.ask({ question: lastQuestion, conversationId });
+    // F3: reuse the threadId the hook already learned at run_started, even
+    // though the route's conversationId is still undefined after a
+    // first-question failure — otherwise a retry mints a fresh threadId and
+    // lands in a second conversation (spec §7: retry reuses the threadId with
+    // a new runId).
+    await stream.ask({ question: lastQuestion, conversationId: stream.conversationId ?? conversationId });
   }
 
   function newConversation() {

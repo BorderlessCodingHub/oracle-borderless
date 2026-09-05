@@ -11,6 +11,8 @@ trace via `_absorb_engine_metrics` no controller, testado em
 `tests/integration/api/test_ask_trace_persistence.py`.
 """
 
+from uuid import uuid4
+
 import pytest
 
 from src.domain.conversations.actions.answer_question_action import AnswerQuestionAction
@@ -67,7 +69,7 @@ async def test_history_tokens_are_estimated_from_the_loaded_recency():
             return [AgentMessage(role="user", content="a" * 400)]
 
     action.messages = _WithHistory()
-    _, stream, draft = await action.execute("oi", None, None)
+    _, stream, draft = await action.execute("oi", uuid4(), None)
     [c async for c in stream]
 
     assert draft.history_messages == 1
@@ -81,7 +83,7 @@ async def test_signals_is_assigned_to_the_draft_before_the_graph_runs():
     nós escreveram (`_absorb_engine_metrics`)."""
     action = _make_action(graph=FakeTurnGraph(outcome="refusal", retrieve=True, retrieval_kept=0))
 
-    _, stream, draft = await action.execute("como faço bolo de cenoura?", None, None)
+    _, stream, draft = await action.execute("como faço bolo de cenoura?", uuid4(), None)
     [c async for c in stream]
 
     assert draft.signals is not None

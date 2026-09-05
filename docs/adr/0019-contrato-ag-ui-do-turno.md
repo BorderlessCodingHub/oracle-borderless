@@ -20,8 +20,11 @@ eventos do chat). O transporte SSE do 0009 permanece; muda o que trafega nele.
   outro cliente ao oráculo.
 - **Regra prática:** o protocolo não entra em `src/domain/` nem em
   `src/support/agent/` (teste de fronteira). `TOOL_CALL_RESULT` carrega só
-  `{"status": ...}` — nunca o conteúdo da tool (regra 4). Nada da linha do
-  tempo é persistido: `messages` continua guardando só texto + fontes.
+  `{"status": ...}` — nunca o conteúdo da tool (regra 4). `TOOL_CALL_ARGS` só é
+  emitido para tools cujos argumentos são exibíveis (`web_search`);
+  `fetch_notion_page` não emite `ARGS` (regra 4) — o `page_id` nunca cruza o
+  port. Nada da linha do tempo é persistido: `messages` continua guardando só
+  texto + fontes.
 
 ---
 

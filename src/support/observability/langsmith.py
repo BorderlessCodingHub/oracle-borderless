@@ -11,7 +11,6 @@ expor identidade. O endereço em claro fica em `agent_traces`, que é nosso.
 import hashlib
 import logging
 import os
-from uuid import uuid4
 
 from src.support.core.settings import settings
 
@@ -37,11 +36,6 @@ def hash_email(email: str | None) -> str | None:
     if not email:
         return None
     return hashlib.sha256(email.encode("utf-8")).hexdigest()[:_HASH_LEN]
-
-
-def new_run_id() -> str:
-    """Id gerado por nós e passado ao grafo, para o trace poder referenciá-lo."""
-    return str(uuid4())
 
 
 def run_url(run_id: str | None) -> str | None:

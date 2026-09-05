@@ -65,3 +65,16 @@ def test_empty_messages_are_rejected():
 def test_blank_question_is_rejected():
     with pytest.raises(ValidationError, match="vazia"):
         RunAgentRequest.model_validate(_body(messages=[{"id": "m1", "role": "user", "content": "   "}]))
+
+
+def test_ids_are_canonicalised():
+    """F4: um UUID válido mas não-canônico (sem dashes, ou com case diferente)
+    tem que virar a forma canônica — é o que entra no run_id do LangSmith e no
+    agent_traces.langsmith_run_id."""
+    req = RunAgentRequest.model_validate(_body(
+        runId="123e4567e89b12d3a456426614174000",
+        threadId="123E4567-E89B-12D3-A456-426614174001",
+    ))
+
+    assert req.run_id == "123e4567-e89b-12d3-a456-426614174000"
+    assert req.thread_id == "123e4567-e89b-12d3-a456-426614174001"

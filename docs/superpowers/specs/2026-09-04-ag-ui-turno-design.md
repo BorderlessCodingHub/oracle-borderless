@@ -138,7 +138,7 @@ servidor (UUID v7). Ordem:
 | abertura do corpo | `RUN_STARTED {threadId, runId}` |
 | nó gate / retrieve / refuse / answer | `STEP_STARTED {stepName}` … `STEP_FINISHED {stepName}` |
 | detalhe de passo com dado útil | `CUSTOM {name: "oracle.step", value: {step, …}}` imediatamente após o `STEP_FINISHED` |
-| modelo pede tool | `TOOL_CALL_START {toolCallId, toolCallName, parentMessageId}` → `TOOL_CALL_ARGS {toolCallId, delta}` (fragmentos do JSON dos argumentos) → `TOOL_CALL_END {toolCallId}` |
+| modelo pede tool | `TOOL_CALL_START {toolCallId, toolCallName, parentMessageId}` → `TOOL_CALL_ARGS {toolCallId, delta}` (fragmentos do JSON dos argumentos) → `TOOL_CALL_END {toolCallId}`. `TOOL_CALL_ARGS` só sai para tools cujos argumentos são exibíveis (`web_search`); `fetch_notion_page` nunca emite `ARGS` — o `page_id` não cruza o port (regra 4). |
 | tool devolveu | `TOOL_CALL_RESULT {messageId, toolCallId, content}` com `content` = `{"status":"ok"}` ou `{"status":"error"}`. **Nunca o conteúdo da tool.** |
 | primeiro texto | `TEXT_MESSAGE_START {messageId, role: "assistant"}` |
 | cada token | `TEXT_MESSAGE_CONTENT {messageId, delta}` |

@@ -283,7 +283,7 @@ async def test_a_whole_tool_call_becomes_start_args_end_then_result():
     chunks = await _drain(stream)
 
     assert _tool_chunks(chunks) == [
-        ToolCallStartChunk(id="call-1", name="fake_tool"),
+        ToolCallStartChunk(id="call-1", name="web_search"),
         ToolCallArgsChunk(id="call-1", delta='{"query": "psp"}'),
         ToolCallEndChunk(id="call-1"),
         ToolCallResultChunk(id="call-1", status="ok"),
@@ -344,6 +344,29 @@ class TestTurnEmitterOnMessage:
 
         assert emitter.on_message((AIMessage(content="x"), {"langgraph_node": "gate"})) == []
 
+    def test_preamble_text_comes_before_tool_calls_of_the_same_message(self):
+        """F5: quando content + tool_calls chegam na MESMA AIMessage, o texto
+        que precede a chamada (o preâmbulo) tem que sair antes no fio — senão a
+        UI mostra TOOL_CALL_* antes do TEXT_MESSAGE_START do mesmo turno."""
+        emitter = TurnEmitter(TurnSignals())
+        payload = (
+            AIMessage(
+                content="vou buscar",
+                tool_calls=[{"name": "web_search", "args": {"query": "psp"}, "id": "c1"}],
+            ),
+            {"langgraph_node": "answer"},
+        )
+
+        chunks = emitter.on_message(payload)
+
+        assert chunks == [
+            StepChunk(name="answer", phase="started"),
+            TextChunk(text="vou buscar"),
+            ToolCallStartChunk(id="c1", name="web_search"),
+            ToolCallArgsChunk(id="c1", delta='{"query": "psp"}'),
+            ToolCallEndChunk(id="c1"),
+        ]
+
 
 class _SlowChatModel:
     """Demora `delay` segundos ANTES de responder — é o que separa "medido a
@@ -393,7 +416,7 @@ class _ToolCallingModel:
         if self.calls == 1:
             return AIMessage(
                 content="",
-                tool_calls=[{"name": "fake_tool", "args": {"query": "psp"}, "id": "call-1"}],
+                tool_calls=[{"name": "web_search", "args": {"query": "psp"}, "id": "call-1"}],
             )
         return AIMessage(content="resposta final")
 
@@ -402,7 +425,10 @@ def _tool_loop_graph(executed: dict):
     """Grafo mínimo answer -> tools -> answer, com uma tool FAKE (sem rede).
 
     O grafo real embute `ToolNode(build_tools())`, cujas tools batem na web e no
-    Notion; aqui só interessa saber SE o loop rodou, então a tool é local."""
+    Notion; aqui só interessa saber SE o loop rodou, então a tool é local.
+    Registrada como "web_search" (não "fake_tool"): é o nome que está na
+    allowlist de ARGS exibíveis (F1) — testes que checam ToolCallArgsChunk
+    dependem disso."""
     from langchain_core.tools import tool
     from langgraph.graph import END, START, StateGraph
     from langgraph.prebuilt import ToolNode, tools_condition
@@ -410,7 +436,7 @@ def _tool_loop_graph(executed: dict):
     from src.support.agent.graph.nodes import answer_node
     from src.support.agent.graph.state import TurnState
 
-    @tool
+    @tool("web_search")
     def fake_tool(query: str) -> str:
         """Tool falsa: só registra que foi executada."""
         executed["ran"] = True
@@ -502,7 +528,11 @@ async def test_an_answer_stage_failure_is_deferred_to_the_generator():
     """Revisão I3: se a falha do modelo subisse pelo `await start()`, o
     middleware faria rollback (perdendo a mensagem do usuário) e o turno viraria
     um 500 seco, SEM linha de agent_traces com outcome="error" — o trace mais
-    valioso de todos. Adiada, ela cai no `except` do controller."""
+    valioso de todos. Adiada, ela cai no `except` do controller.
+
+    F2: os passos da fase 1 (gate/retrieve/answer started) não podem se perder
+    — a spec (§1.2) exige RUN_STARTED + os passos que rodaram + RUN_ERROR, não
+    um erro seco sem nada antes."""
     stream = await _runner().start(
         "o que é PSP?",
         [],
@@ -511,8 +541,19 @@ async def test_an_answer_stage_failure_is_deferred_to_the_generator():
         extra_config=_models(answer=_ExplodingChatModel()),
     )
 
+    collected = []
     with pytest.raises(RuntimeError, match="provider caiu"):
-        await _drain(stream)
+        async for chunk in stream:
+            collected.append(chunk)
+
+    assert StepChunk(name="gate", phase="started") in collected
+    assert any(
+        c == StepChunk(name="gate", phase="finished", detail=c.detail)
+        for c in collected
+        if isinstance(c, StepChunk) and c.name == "gate"
+    )
+    assert any(isinstance(c, StepChunk) and c.name == "retrieve" for c in collected)
+    assert StepChunk(name="answer", phase="started") in collected
 
 
 @pytest.mark.asyncio
@@ -596,3 +637,40 @@ class TestTurnEmitterToolCalls:
         ]}})
 
         assert out == [ToolCallResultChunk(id="ghost", status="ok")]
+
+    def test_fetch_notion_page_args_never_leave_the_port(self):
+        """F1: page_id é o argumento do fetch_notion_page — regra 4 / spec §12
+        proíbem qualquer evento com page_id. START/END continuam saindo para
+        toda tool; só ARGS é restrito à allowlist de tools exibíveis."""
+        emitter = TurnEmitter(TurnSignals())
+        message = AIMessage(
+            content="",
+            tool_calls=[{"name": "fetch_notion_page", "args": {"page_id": "abc-secret"}, "id": "n1"}],
+        )
+
+        out = emitter.on_message((message, {"langgraph_node": "answer"}))
+
+        assert [c for c in out if not isinstance(c, StepChunk)] == [
+            ToolCallStartChunk(id="n1", name="fetch_notion_page"),
+            ToolCallEndChunk(id="n1"),
+        ]
+        assert "abc-secret" not in repr(out)
+
+    def test_fetch_notion_page_streamed_fragments_emit_no_args(self):
+        emitter = TurnEmitter(TurnSignals())
+        meta = {"langgraph_node": "answer"}
+        first = AIMessageChunk(content="", tool_call_chunks=[
+            {"name": "fetch_notion_page", "args": "", "id": "n1", "index": 0, "type": "tool_call_chunk"},
+        ])
+        second = AIMessageChunk(content="", tool_call_chunks=[
+            {"name": None, "args": '{"page_i', "id": None, "index": 0, "type": "tool_call_chunk"},
+        ])
+        third = AIMessageChunk(content="", tool_call_chunks=[
+            {"name": None, "args": 'd":"abc-secret"}', "id": None, "index": 0, "type": "tool_call_chunk"},
+        ])
+
+        out = emitter.on_message((first, meta)) + emitter.on_message((second, meta)) + emitter.on_message((third, meta))
+
+        assert [c for c in out if not isinstance(c, StepChunk)] == [
+            ToolCallStartChunk(id="n1", name="fetch_notion_page"),
+        ]

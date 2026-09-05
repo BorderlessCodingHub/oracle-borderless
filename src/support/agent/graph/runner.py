@@ -42,6 +42,10 @@ _TOOL_CONTENT_OPEN = "<<TOOL_CONTENT>>"
 _TOOL_CONTENT_CLOSE = "<</TOOL_CONTENT>>"
 # tools.py devolve falha capturada como texto "(falha ao ...)" dentro do envelope.
 _TOOL_FAILURE_PREFIX = "(falha"
+# F1 / regra 4 / spec §12: nenhum evento pode carregar o page_id do Notion.
+# START/END/RESULT saem para toda tool (só o status, nunca conteúdo); ARGS só
+# sai para tools cujos argumentos são exibíveis na UI — hoje, só web_search.
+_ARGS_VISIBLE_TOOLS = frozenset({"web_search"})
 
 
 def _text_of(message) -> str:
@@ -97,6 +101,7 @@ class TurnEmitter:
         self._tool_started: set[str] = set()
         self._tool_ended: set[str] = set()
         self._index_to_id: dict[int, str] = {}
+        self._tool_names: dict[str, str] = {}
 
     def step_started(self, name: str) -> list[AgentStreamChunk]:
         if name in self._steps_started:
@@ -147,10 +152,13 @@ class TurnEmitter:
         out = self.step_started("answer")
         if not isinstance(message, (AIMessage, AIMessageChunk)):
             return out
-        out += self._tool_calls_from(message)
+        # F5: o preâmbulo (texto que acompanha uma tool call na MESMA
+        # AIMessage) tem que sair antes da tool call no fio — senão a UI vê
+        # TOOL_CALL_* antes do TEXT_MESSAGE_START do mesmo turno.
         text = _text_of(message)
         if text:
             out.append(TextChunk(text=text))
+        out += self._tool_calls_from(message)
         return out
 
     # --- tool calls -------------------------------------------------------
@@ -159,6 +167,7 @@ class TurnEmitter:
         if tc_id in self._tool_started:
             return []
         self._tool_started.add(tc_id)
+        self._tool_names[tc_id] = name
         return [ToolCallStartChunk(id=tc_id, name=name)]
 
     def _tool_end(self, tc_id: str) -> list[AgentStreamChunk]:
@@ -189,15 +198,21 @@ class TurnEmitter:
                     continue
                 if frag.get("name"):
                     out += self._tool_start(tc_id, frag["name"])
-                if tc_id in self._tool_started and frag.get("args"):
+                if (
+                    tc_id in self._tool_started
+                    and frag.get("args")
+                    and self._tool_names.get(tc_id) in _ARGS_VISIBLE_TOOLS
+                ):
                     out.append(ToolCallArgsChunk(id=tc_id, delta=frag["args"]))
             return out
         for call in getattr(message, "tool_calls", None) or []:
             tc_id = call.get("id")
             if not tc_id or tc_id in self._tool_started:
                 continue
-            out += self._tool_start(tc_id, call.get("name") or "")
-            out.append(ToolCallArgsChunk(id=tc_id, delta=json.dumps(call.get("args") or {}, ensure_ascii=False)))
+            name = call.get("name") or ""
+            out += self._tool_start(tc_id, name)
+            if name in _ARGS_VISIBLE_TOOLS:
+                out.append(ToolCallArgsChunk(id=tc_id, delta=json.dumps(call.get("args") or {}, ensure_ascii=False)))
             out += self._tool_end(tc_id)
         return out
 
@@ -356,6 +371,13 @@ class TurnGraphRunner:
             #   mensagem do usuário já commitada.
             if signals.answer_started_at is None:
                 raise
+            # F2: o nó `answer` carimbou `answer_started_at` (nodes.py) antes de
+            # chamar o modelo — então o passo REALMENTE começou, mesmo que
+            # nenhum evento "messages" tenha chegado a tempo (provider que
+            # quebra antes do primeiro token). `buffered` precisa desse
+            # StepChunk para a spec (seção 1.2): passos que rodaram sobrevivem
+            # ao erro, mesmo sem texto nenhum.
+            buffered += emitter.step_started("answer")
             deferred = exc
 
         # FASE 2 — devolvida ao controller, consumida fora do escopo da sessão.
@@ -369,12 +391,16 @@ async def _resume(
     signals: TurnSignals,
     deferred: Exception | None = None,
 ) -> AsyncIterator[AgentStreamChunk]:
-    # Primeira coisa: relançar a falha do estágio de resposta capturada na fase 1
-    # (revisão I3), para que ela chegue ao `except` do controller.
-    if deferred is not None:
-        raise deferred
+    # F2: primeiro reproduz o que a fase 1 já produziu (gate/retrieve/answer
+    # started) — spec §1.2: um run que morre antes do primeiro token ainda
+    # emite RUN_STARTED + os passos que rodaram + RUN_ERROR, nunca um erro seco
+    # sem nada antes. Só DEPOIS relança a falha do estágio de resposta
+    # capturada na fase 1 (revisão I3), para que ela chegue ao `except` do
+    # controller.
     for chunk in buffered:
         yield chunk
+    if deferred is not None:
+        raise deferred
     async for mode, payload in agen:
         chunks = emitter.on_update(payload) if mode == "updates" else emitter.on_message(payload)
         for chunk in chunks:

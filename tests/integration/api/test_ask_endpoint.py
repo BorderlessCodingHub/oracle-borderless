@@ -29,8 +29,9 @@ class _FailingTurnGraph:
             signals.outcome = "answer"
 
         async def _stream():
-            from src.support.agent.ports import TextChunk
+            from src.support.agent.ports import StepChunk, TextChunk
 
+            yield StepChunk(name="answer", phase="started")
             yield TextChunk(text="ola ")
             raise RuntimeError("boom: engine caiu no meio do stream")
 
@@ -164,6 +165,8 @@ async def test_ask_failure_emits_run_error_without_run_finished_and_does_not_per
     assert evs[-1]["message"] == "erro ao gerar a resposta"
     # o texto parcial que abriu foi fechado antes do erro
     assert types.index("TEXT_MESSAGE_END") < types.index("RUN_ERROR")
+    # F2: os passos da fase 1 sobrevivem ao erro — RUN_STARTED + passos + RUN_ERROR
+    assert types.index("STEP_STARTED") < types.index("RUN_ERROR")
 
     assert await _roles(UUID(body["threadId"])) == ["user"]
 

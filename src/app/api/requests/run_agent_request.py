@@ -16,9 +16,12 @@ from ag_ui.core import RunAgentInput, UserMessage
 from pydantic import model_validator
 
 
-def _require_uuid(value: str, field: str) -> None:
+def _canonical_uuid(value: str, field: str) -> str:
+    """Valida e devolve a forma canônica (minúscula, com hífens) — F4: sem
+    isso, um UUID válido mas escrito diferente (sem hífen, maiúsculo) flui sem
+    normalização até o run_id do LangSmith e o agent_traces.langsmith_run_id."""
     try:
-        UUID(str(value))
+        return str(UUID(str(value)))
     except (ValueError, AttributeError, TypeError) as exc:
         raise ValueError(f"{field} deve ser um UUID") from exc
 
@@ -33,8 +36,8 @@ def _text_of(message: UserMessage) -> str:
 class RunAgentRequest(RunAgentInput):
     @model_validator(mode="after")
     def _oracle_rules(self):
-        _require_uuid(self.thread_id, "threadId")
-        _require_uuid(self.run_id, "runId")
+        self.thread_id = _canonical_uuid(self.thread_id, "threadId")
+        self.run_id = _canonical_uuid(self.run_id, "runId")
         if not self.messages:
             raise ValueError("messages não pode ser vazio")
         last = self.messages[-1]
