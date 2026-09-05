@@ -188,14 +188,12 @@ class TurnRun(Protocol):
         via `deps`: consumir ATÉ O FIM dentro de um escopo de sessão, antes de
         `stream()`. Emite StepChunk ao vivo (started na entrada do nó, finished
         no update). Numa recusa, emite também o TextChunk canônico."""
-        ...
 
     def stream(self) -> AsyncIterator[AgentStreamChunk]:
         """Fase 2: o restante — texto, tool calls, `answer finished`,
         SourcesChunk. Não toca o banco; deve rodar FORA de escopo de sessão.
         Chamar antes de `prelude()` esgotar é erro de programação
         (RuntimeError)."""
-        ...
 
 
 class TurnGraphPort(Protocol):
