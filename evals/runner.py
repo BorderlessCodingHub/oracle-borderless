@@ -19,9 +19,14 @@ def _sources_text(knowledge: list[KnowledgeSnippet]) -> str:
     return "\n\n".join(f"[{s.citation.title}] {s.content}" for s in knowledge)
 
 
-async def _collect_text(stream) -> str:
+async def _collect_text(run) -> str:
+    """As duas fases, na ordem. O harness inteiro já roda dentro de um escopo de
+    sessão (evals/__main__.py), então não há troca de escopo entre elas aqui."""
     text = ""
-    async for chunk in stream:
+    async for chunk in run.prelude():
+        if isinstance(chunk, TextChunk):
+            text += chunk.text
+    async for chunk in run.stream():
         if isinstance(chunk, TextChunk):
             text += chunk.text
     return text
@@ -54,8 +59,8 @@ async def run_case(case: EvalCase, *, graph, search, judge) -> CaseResult:
         refusal=build_out_of_scope_reply,
         nearest=None,
     )
-    stream = await graph.start(case.question, history, deps, signals, knowledge=knowledge)
-    answer = await _collect_text(stream)
+    run = graph.run(case.question, history, deps, signals, knowledge=knowledge)
+    answer = await _collect_text(run)
 
     sources = knowledge if knowledge is not None else []
     if knowledge is None and signals.retrieval_ran:

@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from tests.fakes.ag_ui_stream import event_types, events, run_input, sources_of, text_of
 from tests.fakes.auth import auth_headers
-from tests.fakes.fake_turn_graph import FakeTurnGraph
+from tests.fakes.fake_turn_graph import FailingInStreamTurnGraph, FakeTurnGraph
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -19,23 +19,6 @@ async def _dispose_db_engine_between_tests():
     from src.support.core.database import engine
 
     await engine.dispose()
-
-
-class _FailingTurnGraph:
-    """Emite um token e quebra no meio do stream — para o teste de erro."""
-
-    async def start(self, question, history, deps=None, signals=None, knowledge=None, extra_config=None):
-        if signals is not None:
-            signals.outcome = "answer"
-
-        async def _stream():
-            from src.support.agent.ports import StepChunk, TextChunk
-
-            yield StepChunk(name="answer", phase="started")
-            yield TextChunk(text="ola ")
-            raise RuntimeError("boom: engine caiu no meio do stream")
-
-        return _stream()
 
 
 def _patch(monkeypatch, graph=None):
@@ -150,7 +133,7 @@ async def test_ask_with_an_invalid_body_is_422(monkeypatch, mutate):
 
 @pytest.mark.asyncio
 async def test_ask_failure_emits_run_error_without_run_finished_and_does_not_persist_assistant(monkeypatch):
-    _patch(monkeypatch, graph=_FailingTurnGraph())
+    _patch(monkeypatch, graph=FailingInStreamTurnGraph())
     from main import app
 
     body = run_input("o que é o onboarding?")

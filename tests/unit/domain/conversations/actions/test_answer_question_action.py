@@ -124,25 +124,11 @@ async def test_known_conversation_id_is_reused_not_recreated():
     assert conversation_id == existing.uuid
 
 
-class _HistoryCapturingGraph(FakeTurnGraph):
-    """`FakeTurnGraph` não guarda `history` — só `question`/`knowledge` (é o
-    contrato do Step 1 do brief). Este subclasse local acrescenta a captura só
-    para este teste, sem tocar no fake compartilhado."""
-
-    def __init__(self):
-        super().__init__()
-        self.received_history = None
-
-    async def start(self, question, history, deps=None, signals=None, knowledge=None, extra_config=None):
-        self.received_history = history
-        return await super().start(question, history, deps, signals, knowledge, extra_config)
-
-
 @pytest.mark.asyncio
 async def test_recency_loaded_before_appending_current_message():
     now = datetime(2026, 7, 10, tzinfo=timezone.utc)
     existing = Conversation(uuid4(), "a@x.com", "T", now, now, None)
-    graph, msg_repo = _HistoryCapturingGraph(), _FakeMsgRepo()
+    graph, msg_repo = FakeTurnGraph(), _FakeMsgRepo()
     # turno ANTERIOR já persistido antes deste execute()
     msg_repo.appended.append(_msg("turno anterior", conversation_id=existing.uuid))
     action = _make(graph, _FakeSearch(), _FakeConvRepo(existing=existing), msg_repo)
@@ -269,26 +255,12 @@ async def test_nearest_distance_adapter_returns_none_when_chunks_repo_says_so():
     assert distance is None
 
 
-class _DepsCapturingGraph(FakeTurnGraph):
-    """`FakeTurnGraph` não guarda `deps` (não precisa, para o resto da suíte) —
-    este subclasse local captura só para provar que a Action monta
-    `TurnDependencies.nearest` com um adapter de verdade, não `None`."""
-
-    def __init__(self):
-        super().__init__()
-        self.received_deps = None
-
-    async def start(self, question, history, deps=None, signals=None, knowledge=None, extra_config=None):
-        self.received_deps = deps
-        return await super().start(question, history, deps, signals, knowledge, extra_config)
-
-
 @pytest.mark.asyncio
 async def test_action_wires_turn_dependencies_with_a_working_nearest_adapter():
     """Sem isto, `TurnDependencies.nearest=None` chegaria ao grafo e o nó de
     recusa perderia a medição de distância silenciosamente — nenhum teste do
     grafo pegaria isso porque o grafo confia no que a Action lhe entrega."""
-    graph = _DepsCapturingGraph()
+    graph = FakeTurnGraph()
     action = _make(graph, _FakeSearch(), _FakeConvRepo(), _FakeMsgRepo())
 
     _, stream, _ = await action.execute("oi", uuid4(), "a@x.com")

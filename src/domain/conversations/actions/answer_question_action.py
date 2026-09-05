@@ -109,7 +109,16 @@ class AnswerQuestionAction:
             nearest=_NearestDistance(self.search, self.chunks),
         )
 
-        # O await abaixo executa gate e retrieval AQUI, com a sessão viva. Depois
-        # dele o gerador só produz token de LLM e tool HTTP — ver spec, seção 5.
-        stream = await self.graph.start(question, history, deps, signals)
-        return conversation.uuid, stream, draft
+        # TRANSITÓRIO (Task 3 do plano de 05/09): o prelúdio ainda roda aqui,
+        # dentro do request, até o controller passar a abrir o escopo 2 no corpo
+        # SSE. Esta Action é substituída por OpenTurnAction + RunTurnAction.
+        run = self.graph.run(question, history, deps, signals)
+        buffered = [chunk async for chunk in run.prelude()]
+        return conversation.uuid, _chain(buffered, run.stream()), draft
+
+
+async def _chain(buffered: list[AgentStreamChunk], rest: AsyncIterator[AgentStreamChunk]) -> AsyncIterator[AgentStreamChunk]:
+    for chunk in buffered:
+        yield chunk
+    async for chunk in rest:
+        yield chunk

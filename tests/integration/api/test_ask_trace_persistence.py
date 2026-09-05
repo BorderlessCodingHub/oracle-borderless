@@ -15,7 +15,7 @@ from sqlalchemy import text
 
 from tests.fakes.ag_ui_stream import events, run_input, text_of
 from tests.fakes.auth import auth_headers
-from tests.fakes.fake_turn_graph import FakeTurnGraph
+from tests.fakes.fake_turn_graph import FailingInStreamTurnGraph, FakeTurnGraph
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -24,23 +24,6 @@ async def _dispose_db_engine_between_tests():
     from src.support.core.database import engine
 
     await engine.dispose()
-
-
-class _FailingTurnGraph:
-    """Emite um token e quebra no meio do stream — para o teste de erro."""
-
-    async def start(self, question, history, deps=None, signals=None, knowledge=None, extra_config=None):
-        if signals is not None:
-            signals.outcome = "answer"
-
-        async def _stream():
-            from src.support.agent.ports import StepChunk, TextChunk
-
-            yield StepChunk(name="answer", phase="started")
-            yield TextChunk(text="ola ")
-            raise RuntimeError("boom: engine caiu no meio do stream")
-
-        return _stream()
 
 
 def _patch_controller(monkeypatch, graph=None):
@@ -118,7 +101,7 @@ async def test_trace_row_exists_after_a_successful_ask(monkeypatch):
 @pytest.mark.asyncio
 async def test_failed_turn_is_traced_even_though_the_answer_is_not_persisted(monkeypatch):
     """Invariante da spec: turno que quebrou é o que mais interessa no trace."""
-    _patch_controller(monkeypatch, graph=_FailingTurnGraph())
+    _patch_controller(monkeypatch, graph=FailingInStreamTurnGraph())
     from main import app
 
     body = run_input("vai falhar")
