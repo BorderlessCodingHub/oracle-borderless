@@ -18,7 +18,6 @@ from src.domain.documents.actions.search_knowledge_base_action import SearchKnow
 from src.domain.documents.repositories.document_chunk_repository import DocumentChunkRepository
 from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
 from src.support.agent.ports import AgentStreamChunk, TurnDependencies, TurnGraphPort, TurnSignals
-from src.support.core.exceptions import NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -62,15 +61,19 @@ class AnswerQuestionAction:
         self.messages = MessageRepository()
 
     async def execute(
-        self, question: str, conversation_id: UUID | None, user_email: str | None
+        self, question: str, conversation_id: UUID, user_email: str | None
     ) -> tuple[UUID, AsyncIterator[AgentStreamChunk], TurnTraceDraft]:
         now = datetime.now(timezone.utc)
         draft = TurnTraceDraft(question=question, user_email=user_email)
 
-        if conversation_id is None:
+        # ADR-0019: o id vem do cliente (threadId do AG-UI). Conhecido e do
+        # usuário → continua; desconhecido → nasce com ESSE id; de outro
+        # usuário → a policy responde 404 (nunca revela que existe).
+        conversation = await self.conversations.get_by_id(conversation_id)
+        if conversation is None:
             conversation = await self.conversations.create(
                 Conversation(
-                    uuid=uuid7(),
+                    uuid=conversation_id,
                     user_email=user_email,
                     title=question[:_TITLE_MAX],
                     created_at=now,
@@ -79,9 +82,6 @@ class AnswerQuestionAction:
                 )
             )
         else:
-            conversation = await self.conversations.get_by_id(conversation_id)
-            if conversation is None:
-                raise NotFoundError(f"conversa {conversation_id} não encontrada")
             ConversationAccessPolicy.assert_can_access(conversation, user_email)
 
         # Recência = turnos ANTERIORES (antes de gravar a pergunta atual, que já

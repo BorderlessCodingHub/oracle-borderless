@@ -90,28 +90,38 @@ def _make(graph, search, conv_repo, msg_repo):
 
 
 @pytest.mark.asyncio
-async def test_new_conversation_persists_user_and_sets_title():
+async def test_unknown_conversation_id_creates_the_conversation_with_that_id():
+    """ADR-0019: o threadId vem do cliente. Se não existe, a conversa nasce com
+    ESSE id — nunca com um novo — para o cliente conseguir continuar o fio."""
     graph, conv_repo, msg_repo = FakeTurnGraph(), _FakeConvRepo(), _FakeMsgRepo()
     action = _make(graph, _FakeSearch(), conv_repo, msg_repo)
+    given = uuid4()
 
-    conversation_id, stream, _ = await action.execute("qual o onboarding?", None, "a@x.com")
+    conversation_id, stream, _ = await action.execute("qual o onboarding?", given, "a@x.com")
 
     assert conv_repo.created is not None
+    assert conv_repo.created.uuid == given
+    assert conversation_id == given
     assert conv_repo.created.title == "qual o onboarding?"
     assert conv_repo.created.user_email == "a@x.com"
-    assert conversation_id == conv_repo.created.uuid
     assert msg_repo.appended[0].role == "user"
     assert msg_repo.appended[0].content == "qual o onboarding?"
-    # drena o stream
     chunks = [c async for c in stream]
     assert any(isinstance(c, TextChunk) for c in chunks)
 
 
 @pytest.mark.asyncio
-async def test_missing_conversation_id_raises_not_found():
-    action = _make(FakeTurnGraph(), _FakeSearch(), _FakeConvRepo(existing=None), _FakeMsgRepo())
-    with pytest.raises(NotFoundError):
-        await action.execute("oi", uuid4(), "a@x.com")
+async def test_known_conversation_id_is_reused_not_recreated():
+    now = datetime(2026, 7, 10, tzinfo=timezone.utc)
+    existing = Conversation(uuid4(), "a@x.com", "T", now, now, None)
+    conv_repo = _FakeConvRepo(existing=existing)
+    action = _make(FakeTurnGraph(), _FakeSearch(), conv_repo, _FakeMsgRepo())
+
+    conversation_id, stream, _ = await action.execute("segunda pergunta", existing.uuid, "a@x.com")
+    [c async for c in stream]
+
+    assert conv_repo.created is None
+    assert conversation_id == existing.uuid
 
 
 class _HistoryCapturingGraph(FakeTurnGraph):
@@ -165,7 +175,7 @@ async def test_long_question_title_is_truncated_to_80_chars():
     action = _make(graph, _FakeSearch(), conv_repo, msg_repo)
 
     long_question = "x" * 200
-    _, stream, _ = await action.execute(long_question, None, "a@x.com")
+    _, stream, _ = await action.execute(long_question, uuid4(), "a@x.com")
     [c async for c in stream]
 
     assert len(conv_repo.created.title) == 80
@@ -179,7 +189,7 @@ async def test_signals_is_the_same_object_the_graph_receives():
     graph = FakeTurnGraph(tool_calls=2, input_tokens=123, output_tokens=45)
     action = _make(graph, _FakeSearch(), _FakeConvRepo(), _FakeMsgRepo())
 
-    _, stream, draft = await action.execute("oi", None, "a@x.com")
+    _, stream, draft = await action.execute("oi", uuid4(), "a@x.com")
     async for _ in stream:
         pass  # consome o stream para o fake de fato escrever em `signals`
 
@@ -281,7 +291,7 @@ async def test_action_wires_turn_dependencies_with_a_working_nearest_adapter():
     graph = _DepsCapturingGraph()
     action = _make(graph, _FakeSearch(), _FakeConvRepo(), _FakeMsgRepo())
 
-    _, stream, _ = await action.execute("oi", None, "a@x.com")
+    _, stream, _ = await action.execute("oi", uuid4(), "a@x.com")
     async for _ in stream:
         pass
 

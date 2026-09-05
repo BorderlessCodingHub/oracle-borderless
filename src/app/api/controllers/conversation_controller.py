@@ -4,6 +4,7 @@ from typing import AsyncIterator
 from uuid import UUID
 
 from fastapi.responses import StreamingResponse
+from uuid6 import uuid7
 
 from src.app.api.requests.ask_question_request import AskQuestionRequest
 from src.app.api.responses.conversation_responses import (
@@ -50,7 +51,7 @@ class ConversationController:
 
         # Conversa + user message são gravadas aqui (sessão do request viva).
         conversation_id, stream, draft = await action.execute(
-            data.question, data.conversation_id, user_email
+            data.question, data.conversation_id or uuid7(), user_email
         )
         # Gravado sempre — coluna barata; o link só aparece na UI quando
         # LANGSMITH_PROJECT_URL está configurado (ver run_url).
