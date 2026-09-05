@@ -84,9 +84,13 @@ export const ARCHITECTURE_MAP: MapBand[] = [
     boxes: [
       {
         id: "ask",
-        label: "Pergunta",
-        description: "POST /conversations/ask, resposta em SSE.",
-        files: ["src/app/api/controllers/conversation_controller.py"],
+        label: "Pergunta (AG-UI)",
+        description: "POST /conversations/ask recebe RunAgentInput e responde eventos AG-UI: passos do grafo, tool calls, texto e fontes. Tradução chunk → evento na camada app.",
+        files: [
+          "src/app/api/controllers/conversation_controller.py",
+          "src/app/api/requests/run_agent_request.py",
+          "src/app/api/streaming/ag_ui_encoder.py",
+        ],
       },
       {
         id: "recency",

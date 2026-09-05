@@ -13,6 +13,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
+from tests.fakes.ag_ui_stream import events, run_input, text_of
 from tests.fakes.auth import auth_headers
 from tests.fakes.fake_turn_graph import FakeTurnGraph
 
@@ -39,29 +40,6 @@ class _FailingTurnGraph:
             raise RuntimeError("boom: engine caiu no meio do stream")
 
         return _stream()
-
-
-def _parse_conversation_id(body: str) -> str:
-    import json
-
-    for block in body.split("\n\n"):
-        if "event: conversation" in block:
-            data_line = next(l for l in block.split("\n") if l.startswith("data:"))
-            return json.loads(data_line[5:].strip())["id"]
-    raise AssertionError("evento 'conversation' não emitido")
-
-
-def _concat_tokens(body: str) -> str:
-    """`FakeTurnGraph` emite um `event: token` por palavra — reconstrói o texto
-    completo para comparar com a frase esperada."""
-    import json
-
-    text = ""
-    for b in body.split("\n\n"):
-        if b.startswith("event: token"):
-            data_line = next(l for l in b.split("\n") if l.startswith("data:"))
-            text += json.loads(data_line[5:].strip())["text"]
-    return text
 
 
 def _patch_controller(monkeypatch, graph=None):
@@ -115,17 +93,13 @@ async def test_trace_row_exists_after_a_successful_ask(monkeypatch):
     _patch_controller(monkeypatch, graph=graph)
     from main import app
 
+    body = run_input("o que é o PSP?")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post(
-            "/conversations/ask",
-            json={"question": "o que é o PSP?"},
-            headers=await auth_headers("asker@x.com"),
-        )
+        resp = await client.post("/conversations/ask", json=body, headers=await auth_headers("asker@x.com"))
         assert resp.status_code == 200
-        body = resp.text
-        assert "event: done" in body
+        assert events(resp.text)[-1]["type"] == "RUN_FINISHED"
 
-    trace = await _fetch_trace(UUID(_parse_conversation_id(body)))
+    trace = await _fetch_trace(UUID(body["threadId"]))
     assert trace["question"] == "o que é o PSP?"
     assert trace["outcome"] == "answer"
     assert trace["gate_retrieve"] is True
@@ -135,9 +109,9 @@ async def test_trace_row_exists_after_a_successful_ask(monkeypatch):
     assert trace["tool_calls"] == 2
     assert trace["input_tokens"] == 123
     assert trace["output_tokens"] == 45
-    # O controller gera o run_id antes de chamar a Action e grava a referência
-    # sempre — a sequência passo-a-passo em si vive no LangSmith, não aqui.
-    assert trace["langsmith_run_id"] is not None
+    # ADR-0019: o runId do cliente É o run do LangSmith — um turno da tela liga
+    # ao trace sem intermediário.
+    assert trace["langsmith_run_id"] == body["runId"]
 
 
 @pytest.mark.asyncio
@@ -146,16 +120,12 @@ async def test_failed_turn_is_traced_even_though_the_answer_is_not_persisted(mon
     _patch_controller(monkeypatch, graph=_FailingTurnGraph())
     from main import app
 
+    body = run_input("vai falhar")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post(
-            "/conversations/ask",
-            json={"question": "vai falhar"},
-            headers=await auth_headers("asker@x.com"),
-        )
-        body = resp.text
-        assert "event: error" in body
+        resp = await client.post("/conversations/ask", json=body, headers=await auth_headers("asker@x.com"))
+        assert events(resp.text)[-1]["type"] == "RUN_ERROR"
 
-    conversation_id = UUID(_parse_conversation_id(body))
+    conversation_id = UUID(body["threadId"])
 
     from src.support.core.database import AsyncSessionLocal
 
@@ -190,16 +160,12 @@ async def test_refusal_leaves_engine_ms_and_first_token_ms_null(monkeypatch):
     )
     from main import app
 
+    body = run_input("qual a capital da Austrália?")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post(
-            "/conversations/ask",
-            json={"question": "qual a capital da Austrália?"},
-            headers=await auth_headers("asker@x.com"),
-        )
-        body = resp.text
-        assert "Não encontrei informações sobre isso na base de conhecimento." in _concat_tokens(body)
+        resp = await client.post("/conversations/ask", json=body, headers=await auth_headers("asker@x.com"))
+        assert "Não encontrei informações sobre isso na base de conhecimento." in text_of(events(resp.text))
 
-    trace = await _fetch_trace(UUID(_parse_conversation_id(body)))
+    trace = await _fetch_trace(UUID(body["threadId"]))
     assert trace["outcome"] == "refusal"
     assert trace["engine_ms"] is None
     assert trace["first_token_ms"] is None

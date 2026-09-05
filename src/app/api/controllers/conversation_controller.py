@@ -1,15 +1,22 @@
-import json
 import logging
 from typing import AsyncIterator
 from uuid import UUID
 
 from fastapi.responses import StreamingResponse
-from uuid6 import uuid7
 
-from src.app.api.requests.ask_question_request import AskQuestionRequest
+from src.app.api.requests.run_agent_request import RunAgentRequest
 from src.app.api.responses.conversation_responses import (
     ConversationDetailResponse,
     ConversationSummaryResponse,
+)
+from src.app.api.streaming.ag_ui_encoder import (
+    CONTENT_TYPE,
+    RunContext,
+    encode,
+    run_error,
+    run_finished,
+    run_started,
+    to_events,
 )
 from src.domain.conversations.actions.answer_question_action import AnswerQuestionAction
 from src.domain.conversations.actions.append_assistant_message_action import (
@@ -25,25 +32,22 @@ from src.support.agent.ports import SourcesChunk, TextChunk
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
 from src.support.core.context import CurrentAsyncSessionContext, CurrentRequestContext
 from src.support.core.session_scope import run_in_async_session
-from src.support.observability.langsmith import hash_email, new_run_id
+from src.support.observability.langsmith import hash_email
 
 logger = logging.getLogger(__name__)
 
 
-def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
-def _citation_payload(c) -> dict:
-    return {"source_type": c.source_type, "title": c.title, "url": c.url, "snippet": c.snippet}
-
-
 class ConversationController:
     @staticmethod
-    async def ask(data: AskQuestionRequest) -> StreamingResponse:
+    async def ask(data: RunAgentRequest) -> StreamingResponse:
+        """POST /conversations/ask — AG-UI (ADR-0019).
+
+        Body é o `RunAgentInput`; resposta é a sequência de eventos do protocolo
+        em `data: {json}`. `threadId` é a conversa, `runId` é o run do LangSmith.
+        """
         user_email = CurrentRequestContext.get_user().email
         search = SearchKnowledgeBaseAction(embeddings=get_embeddings_client())
-        run_id = new_run_id()
+        run_id = data.run_id
         action = AnswerQuestionAction(
             graph=get_turn_graph_runner(run_id=run_id, user_hash=hash_email(user_email)),
             search=search,
@@ -51,36 +55,35 @@ class ConversationController:
 
         # Conversa + user message são gravadas aqui (sessão do request viva).
         conversation_id, stream, draft = await action.execute(
-            data.question, data.conversation_id or uuid7(), user_email
+            data.question, data.conversation_id, user_email
         )
         # Gravado sempre — coluna barata; o link só aparece na UI quando
         # LANGSMITH_PROJECT_URL está configurado (ver run_url).
         draft.langsmith_run_id = run_id
 
+        ctx = RunContext(thread_id=str(conversation_id), run_id=run_id)
         captured: dict = {"text": "", "citations": []}
 
         async def event_source() -> AsyncIterator[str]:
-            yield _sse("conversation", {"id": str(conversation_id)})
+            yield encode(run_started(ctx))
             failed = False
             try:
                 async for chunk in stream:
                     if isinstance(chunk, TextChunk):
                         captured["text"] += chunk.text
-                        yield _sse("token", {"text": chunk.text})
                     elif isinstance(chunk, SourcesChunk):
                         captured["citations"] = chunk.citations
-                        yield _sse(
-                            "sources",
-                            {"citations": [_citation_payload(c) for c in chunk.citations]},
-                        )
+                    for event in to_events(chunk, ctx):
+                        yield encode(event)
             except Exception as exc:
                 failed = True
                 logger.exception("stream falhou durante /conversations/ask")
                 draft.outcome = "error"
-                # A mensagem ao usuário (evento SSE) continua genérica; só o
+                # A mensagem ao usuário (RUN_ERROR) continua genérica; só o
                 # trace fica informativo. Truncado em 512: é o tamanho da coluna.
                 draft.error = f"{type(exc).__name__}: {exc}"[:512]
-                yield _sse("error", {"message": "erro ao gerar a resposta"})
+                for event in run_error(ctx, "erro ao gerar a resposta"):
+                    yield encode(event)
 
             draft.citations_count = len(captured["citations"])
             _absorb_engine_metrics(draft)
@@ -97,9 +100,13 @@ class ConversationController:
             except Exception:
                 logger.exception("falha ao persistir turno (resposta e/ou trace)")
 
-            yield _sse("done", {})
+            # RUN_FINISHED só depois de persistir: quando o cliente o recebe, a
+            # conversa já está gravada e a sidebar pode recarregar. Depois de
+            # RUN_ERROR não há RUN_FINISHED — é o protocolo.
+            if not failed:
+                yield encode(run_finished(ctx))
 
-        return StreamingResponse(event_source(), media_type="text/event-stream")
+        return StreamingResponse(event_source(), media_type=CONTENT_TYPE)
 
     @staticmethod
     async def list() -> list[ConversationSummaryResponse]:
