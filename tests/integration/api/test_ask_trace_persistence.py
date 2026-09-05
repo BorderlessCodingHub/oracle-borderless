@@ -15,7 +15,7 @@ from sqlalchemy import text
 
 from tests.fakes.ag_ui_stream import events, run_input, text_of
 from tests.fakes.auth import auth_headers
-from tests.fakes.fake_turn_graph import FailingInStreamTurnGraph, FakeTurnGraph
+from tests.fakes.fake_turn_graph import FailingInPreludeTurnGraph, FailingInStreamTurnGraph, FakeTurnGraph
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -153,3 +153,22 @@ async def test_refusal_leaves_engine_ms_and_first_token_ms_null(monkeypatch):
     assert trace["outcome"] == "refusal"
     assert trace["engine_ms"] is None
     assert trace["first_token_ms"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_prelude_failure_is_traced_with_outcome_error_and_what_the_gate_wrote(monkeypatch):
+    """D2: o turno que quebrou em gate/retrieve agora deixa linha em
+    agent_traces — era justamente o trace que o 500 antigo perdia."""
+    _patch_controller(monkeypatch, graph=FailingInPreludeTurnGraph())
+    from main import app
+
+    body = run_input("vai quebrar no retrieve")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/conversations/ask", json=body, headers=await auth_headers("asker@x.com"))
+        assert events(resp.text)[-1]["type"] == "RUN_ERROR"
+
+    trace = await _fetch_trace(UUID(body["threadId"]))
+    assert trace["outcome"] == "error"
+    assert trace["gate_retrieve"] is True  # o que o gate escreveu antes da falha sobrevive
+    assert trace["error"] == "RuntimeError: boom: pgvector caiu no prelúdio"
+    assert trace["engine_ms"] is None and trace["first_token_ms"] is None

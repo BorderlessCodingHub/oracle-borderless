@@ -18,20 +18,20 @@ from src.app.api.streaming.ag_ui_encoder import (
     run_started,
     to_events,
 )
-from src.domain.conversations.actions.answer_question_action import AnswerQuestionAction
 from src.domain.conversations.actions.append_assistant_message_action import (
     AppendAssistantMessageAction,
 )
 from src.domain.conversations.actions.get_conversation_action import GetConversationAction
 from src.domain.conversations.actions.list_conversations_action import ListConversationsAction
-from src.domain.documents.actions.search_knowledge_base_action import SearchKnowledgeBaseAction
+from src.domain.conversations.actions.open_turn_action import OpenTurnAction
+from src.domain.conversations.actions.run_turn_action import RunTurnAction
 from src.domain.observability.actions.record_turn_trace_action import RecordTurnTraceAction
 from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
 from src.support.agent.graph import get_turn_graph_runner
 from src.support.agent.ports import SourcesChunk, TextChunk
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
 from src.support.core.context import CurrentAsyncSessionContext, CurrentRequestContext
-from src.support.core.session_scope import run_in_async_session
+from src.support.core.session_scope import async_session_scope, run_in_async_session
 from src.support.observability.langsmith import hash_email
 
 logger = logging.getLogger(__name__)
@@ -40,44 +40,64 @@ logger = logging.getLogger(__name__)
 class ConversationController:
     @staticmethod
     async def ask(data: RunAgentRequest) -> StreamingResponse:
-        """POST /conversations/ask — AG-UI (ADR-0019).
+        """POST /conversations/ask — AG-UI (ADR-0019) em três escopos de sessão (ADR-0020).
 
         Body é o `RunAgentInput`; resposta é a sequência de eventos do protocolo
         em `data: {json}`. `threadId` é a conversa, `runId` é o run do LangSmith.
+
+        - Escopo 1 (request, sessão do middleware): OpenTurnAction grava conversa
+          e pergunta. Tudo que vira status HTTP (401/404/422/500) acontece aqui.
+        - Escopo 2 (corpo SSE, `async_session_scope`): RunTurnAction monta os
+          deps e o prelúdio do grafo roda — gate, retrieve, recusa — emitindo os
+          passos ao vivo. Fecha na entrada do nó de resposta.
+        - Sem sessão: `stream()` — texto, tool calls, fontes.
+        - Escopo 3 (`_persist_turn`): trace + resposta do assistente.
+
+        Duas Actions num endpoint é a exceção registrada no ADR-0020 à regra 5:
+        cada uma pertence a um escopo de sessão diferente.
         """
         user_email = CurrentRequestContext.get_user().email
-        search = SearchKnowledgeBaseAction(embeddings=get_embeddings_client())
         run_id = data.run_id
-        action = AnswerQuestionAction(
-            graph=get_turn_graph_runner(run_id=run_id, user_hash=hash_email(user_email)),
-            search=search,
-        )
 
-        # Conversa + user message são gravadas aqui (sessão do request viva).
-        conversation_id, stream, draft = await action.execute(
-            data.question, data.conversation_id, user_email
-        )
+        turn = await OpenTurnAction().execute(data.question, data.conversation_id, user_email)
+        draft = turn.draft
         # Gravado sempre — coluna barata; o link só aparece na UI quando
         # LANGSMITH_PROJECT_URL está configurado (ver run_url).
         draft.langsmith_run_id = run_id
 
-        ctx = RunContext(thread_id=str(conversation_id), run_id=run_id)
+        graph = get_turn_graph_runner(run_id=run_id, user_hash=hash_email(user_email))
+        # Client HTTP, não captura sessão: pode nascer no request. Quem não pode
+        # é SearchKnowledgeBaseAction — nasce em RunTurnAction, dentro do escopo 2.
+        embeddings = get_embeddings_client()
+
+        ctx = RunContext(thread_id=str(turn.conversation_id), run_id=run_id)
         captured: dict = {"text": "", "citations": []}
 
+        def capture(chunk) -> list[str]:
+            """Guarda texto/fontes para a persistência e traduz o chunk em linhas SSE."""
+            if isinstance(chunk, TextChunk):
+                captured["text"] += chunk.text
+            elif isinstance(chunk, SourcesChunk):
+                captured["citations"] = chunk.citations
+            return [encode(event) for event in to_events(chunk, ctx)]
+
         async def event_source() -> AsyncIterator[str]:
+            # Primeiro byte do corpo ANTES de qualquer trabalho do grafo: é o que
+            # faz a linha do tempo nascer vazia e preencher passo a passo.
             yield encode(run_started(ctx))
             failed = False
             try:
-                async for chunk in stream:
-                    if isinstance(chunk, TextChunk):
-                        captured["text"] += chunk.text
-                    elif isinstance(chunk, SourcesChunk):
-                        captured["citations"] = chunk.citations
-                    for event in to_events(chunk, ctx):
-                        yield encode(event)
+                async with async_session_scope():
+                    run = RunTurnAction(graph, embeddings).execute(turn)
+                    async for chunk in run.prelude():
+                        for line in capture(chunk):
+                            yield line
+                async for chunk in run.stream():
+                    for line in capture(chunk):
+                        yield line
             except Exception as exc:
                 failed = True
-                logger.exception("stream falhou durante /conversations/ask")
+                logger.exception("turno falhou durante /conversations/ask")
                 draft.outcome = "error"
                 # A mensagem ao usuário (RUN_ERROR) continua genérica; só o
                 # trace fica informativo. Truncado em 512: é o tamanho da coluna.
@@ -92,7 +112,7 @@ class ConversationController:
             # gravado SEMPRE — turno que quebrou é o que mais interessa no trace.
             try:
                 await _persist_turn(
-                    conversation_id,
+                    turn.conversation_id,
                     draft,
                     captured["text"] if (not failed and captured["text"]) else None,
                     captured["citations"],
@@ -147,13 +167,11 @@ def _absorb_engine_metrics(draft: TurnTraceDraft) -> None:
     draft.tool_calls = s.tool_calls
     draft.input_tokens = s.input_tokens
     draft.output_tokens = s.output_tokens
-    # first_token_ms/engine_ms vêm MEDIDOS do grafo (revisão I2). O controller
-    # não pode cronometrá-los: com o consumo em duas fases o primeiro token já
-    # nasceu durante o `await start()`, antes de este corpo SSE começar a
-    # iterar — medir daqui dava ~0 no primeiro token e deixava de fora a fatia
-    # dominante do engine_ms. `_engine_ran` segue como filtro: a recusa é texto
-    # canônico e não entra nas médias do motor. Podem chegar None (turno que
-    # quebrou antes do fim do stream); a coluna é nullable.
+    # first_token_ms/engine_ms vêm MEDIDOS do grafo (revisão I2): o nó `answer`
+    # carimba a entrada, o runner fecha as contas. Medir daqui somaria gate +
+    # retrieval ao primeiro token. `_engine_ran` segue como filtro: a recusa é
+    # texto canônico e não entra nas médias do motor. Podem chegar None (turno
+    # que quebrou antes do fim do stream); a coluna é nullable.
     if _engine_ran(draft):
         draft.first_token_ms = s.first_token_ms
         draft.engine_ms = s.engine_ms

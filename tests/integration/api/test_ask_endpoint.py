@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from tests.fakes.ag_ui_stream import event_types, events, run_input, sources_of, text_of
 from tests.fakes.auth import auth_headers
-from tests.fakes.fake_turn_graph import FailingInStreamTurnGraph, FakeTurnGraph
+from tests.fakes.fake_turn_graph import FailingInPreludeTurnGraph, FailingInStreamTurnGraph, FakeTurnGraph
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -176,3 +176,51 @@ async def test_ask_streams_refusal_with_empty_sources_and_persists_both_turns(mo
     assert event_types(evs)[-1] == "RUN_FINISHED"
 
     assert await _roles(UUID(body["threadId"])) == ["user", "assistant"]
+
+
+@pytest.mark.asyncio
+async def test_prelude_runs_inside_its_own_session_scope_and_stream_runs_without_one(monkeypatch):
+    """ADR-0020, os três escopos: a fase 1 vê uma sessão async aberta (a do
+    escopo 2, não a do request — que já fechou quando o corpo começa); a fase 2
+    vê None. Se `stream()` visse sessão, alguém moveu banco para o streaming."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    graph = FakeTurnGraph(answer="resposta de teste")
+    _patch(monkeypatch, graph=graph)
+    from main import app
+
+    body = run_input("o que é o PSP?")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/conversations/ask", json=body, headers=await auth_headers("asker@x.com"))
+        assert resp.status_code == 200
+        assert event_types(events(resp.text))[-1] == "RUN_FINISHED"
+
+    assert isinstance(graph.last_run.prelude_session, AsyncSession)
+    assert graph.last_run.stream_session is None
+    assert await _roles(UUID(body["threadId"])) == ["user", "assistant"]
+
+
+@pytest.mark.asyncio
+async def test_a_prelude_failure_emits_run_error_after_the_steps_that_ran_and_keeps_the_question(monkeypatch):
+    """D2 / spec §8: falha em gate/retrieve não é mais um 500 com rollback da
+    pergunta — vira RUN_ERROR depois dos passos já emitidos, a pergunta fica
+    gravada e a resposta não é persistida."""
+    _patch(monkeypatch, graph=FailingInPreludeTurnGraph())
+    from main import app
+
+    body = run_input("vai quebrar no retrieve")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/conversations/ask", json=body, headers=await auth_headers("asker@x.com"))
+        assert resp.status_code == 200  # headers já foram: o erro é no corpo
+        evs = events(resp.text)
+
+    types = event_types(evs)
+    assert types[0] == "RUN_STARTED"
+    assert types[-1] == "RUN_ERROR"
+    assert "RUN_FINISHED" not in types
+    assert "TEXT_MESSAGE_START" not in types
+    gate_steps = [e for e in evs if e["type"] in ("STEP_STARTED", "STEP_FINISHED") and e["stepName"] == "gate"]
+    assert [e["type"] for e in gate_steps] == ["STEP_STARTED", "STEP_FINISHED"]
+    assert evs[-1]["message"] == "erro ao gerar a resposta"
+
+    assert await _roles(UUID(body["threadId"])) == ["user"]
