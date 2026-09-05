@@ -430,6 +430,8 @@ protocolo espera. Como hoje, retry grava outra mensagem de usuário.
 
 ## 8. Limitação conhecida
 
+> **Resolvido em 2026-09-05** pela [spec do turno ao vivo](2026-09-05-turno-ao-vivo-design.md) / ADR-0020: a fase 1 passou a rodar no corpo SSE em escopo de sessão próprio e os passos chegam ao vivo. O texto abaixo é histórico.
+
 Por causa do consumo em duas fases, o corpo SSE só começa **depois** que gate
 e retrieval terminaram. `RUN_STARTED` e os passos `gate` e `retrieve` chegam ao
 navegador numa rajada junto com o primeiro token (ou com o `refuse`). A linha

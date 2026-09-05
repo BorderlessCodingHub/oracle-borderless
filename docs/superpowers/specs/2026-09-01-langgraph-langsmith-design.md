@@ -232,6 +232,8 @@ trace, sem estado global e sem recompilar.
 
 ## 5. Consumo em duas fases
 
+> **Revisado em 2026-09-05** pelo ADR-0020: as duas fases continuam, mas a fase 1 roda no corpo SSE (não mais no request) e o corte é o evento `task` do nó `answer`. `start()` não existe mais; ver `TurnGraphPort.run()`.
+
 ```python
 # runner.py
 async def start(self, question, history, config) -> AsyncIterator[AgentStreamChunk]:
