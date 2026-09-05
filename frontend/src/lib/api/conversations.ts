@@ -6,7 +6,7 @@ import type {
   ConversationSummary,
 } from "../types";
 import { apiUrl, getJSON, handleUnauthorized } from "./client";
-import { parseSSE } from "./sse";
+import { buildRunAgentInput, parseAgUiStream, toAskEvents } from "./agui";
 
 interface SummaryDTO { id: string; title: string | null; updated_at: string; }
 interface MessageDTO { role: "user" | "assistant"; content: string; sources?: Citation[] | null; }
@@ -33,8 +33,8 @@ export async function getConversation(id: string): Promise<ConversationDetail> {
 export async function* askStream(input: AskInput): AsyncGenerator<AskEvent> {
   const resp = await fetch(apiUrl("/conversations/ask"), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question: input.question, conversation_id: input.conversationId ?? null }),
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify(buildRunAgentInput(input.question, input.conversationId)),
   });
   if (resp.status === 401) {
     handleUnauthorized();
@@ -45,16 +45,5 @@ export async function* askStream(input: AskInput): AsyncGenerator<AskEvent> {
     yield { type: "error", message: `Falha na requisição (${resp.status})` };
     return;
   }
-  for await (const { event, data } of parseSSE(resp.body)) {
-    const payload = safeParse(data);
-    if (event === "conversation") yield { type: "conversation", id: payload.id };
-    else if (event === "token") yield { type: "token", text: payload.text };
-    else if (event === "sources") yield { type: "sources", citations: payload.citations ?? [] };
-    else if (event === "error") yield { type: "error", message: payload.message ?? "erro" };
-    else if (event === "done") yield { type: "done" };
-  }
-}
-
-function safeParse(data: string): any {
-  try { return JSON.parse(data); } catch { return {}; }
+  yield* toAskEvents(parseAgUiStream(resp.body));
 }

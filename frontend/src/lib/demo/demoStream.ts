@@ -9,20 +9,27 @@ function delay(ms: number): Promise<void> {
 
 export async function* demoStream(input: AskInput): AsyncGenerator<AskEvent> {
   const conversationId = input.conversationId ?? "demo-new";
-  yield { type: "conversation", id: conversationId };
+  yield { type: "run_started", conversationId };
 
   if (input.question.includes(ERROR_SENTINEL)) {
     await delay(400);
     yield { type: "error", message: "Não consegui gerar a resposta agora. Tente novamente." };
-    yield { type: "done" };
     return;
   }
 
-  await delay(500); // "thinking" window before first token
+  yield { type: "step", name: "gate", phase: "started" };
+  await delay(300);
+  yield { type: "step", name: "gate", phase: "finished", detail: { retrieve: true, degraded: false } };
+  yield { type: "step", name: "retrieve", phase: "started" };
+  await delay(300);
+  yield { type: "step", name: "retrieve", phase: "finished", detail: { kept: DEMO_ANSWER_CITATIONS.length } };
+  yield { type: "step", name: "answer", phase: "started" };
+  await delay(200);
   for (const word of DEMO_ANSWER.split(" ")) {
     yield { type: "token", text: word + " " };
     await delay(40);
   }
+  yield { type: "step", name: "answer", phase: "finished" };
   yield { type: "sources", citations: DEMO_ANSWER_CITATIONS };
   yield { type: "done" };
 }
