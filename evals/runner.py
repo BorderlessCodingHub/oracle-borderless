@@ -1,6 +1,6 @@
 """Runner do harness de eval: monta o pipeline REAL por caso (grafo LangGraph),
 coleta a resposta e as fontes usadas, e chama o juiz. NÃO persiste nada
-(sem AnswerQuestionAction, sem escrita em conversations/messages)."""
+(não persiste nada: sem Actions de conversa, sem escrita em conversations/messages)."""
 
 import logging
 

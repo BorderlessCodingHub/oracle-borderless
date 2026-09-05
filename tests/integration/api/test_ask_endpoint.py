@@ -196,6 +196,8 @@ async def test_prelude_runs_inside_its_own_session_scope_and_stream_runs_without
         assert event_types(events(resp.text))[-1] == "RUN_FINISHED"
 
     assert isinstance(graph.last_run.prelude_session, AsyncSession)
+    # não é a sessão do request (já fechada pelo middleware): é uma sessão viva do escopo 2
+    assert graph.last_run.prelude_session.is_active
     assert graph.last_run.stream_session is None
     assert await _roles(UUID(body["threadId"])) == ["user", "assistant"]
 

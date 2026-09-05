@@ -668,7 +668,7 @@ schedule.call(CleanupConversationsJob).daily(hour=3)
 
 ## Trace do turno
 
-Cada turno do oráculo acumula seu próprio rastro num coletor em memória — `TurnTraceDraft`, em `src/domain/observability/dtos/` — que a `OpenTurnAction` preenche com recência (o resto — gate, retrieval, recusa, motor — chega pelos `TurnSignals` que o grafo escreve), e a fase do engine (primeiro token, duração, tokens, tool calls) vem medida do próprio grafo, via `TurnSignals`, que o gerador SSE do controller apenas absorve.
+Cada turno do oráculo acumula seu próprio rastro num coletor em memória — `TurnTraceDraft`, em `src/domain/observability/dtos/` — que a `OpenTurnAction` preenche com recência; gate, retrieval, recusa e a fase do engine (primeiro token, duração, tokens, tool calls) chegam pelos `TurnSignals` que o grafo escreve e que o gerador SSE do controller apenas absorve.
 
 Terminado o stream, a **mesma** background task que persiste a resposta do assistente grava o trace numa linha de `agent_traces`, em sessão própria (`run_in_async_session`) — o trace primeiro, porque turno que quebrou é o que mais interessa. Nada disso pode derrubar um turno: o call site fica sob `try/except` que loga e engole.
 

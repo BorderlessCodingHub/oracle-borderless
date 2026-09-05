@@ -38,6 +38,7 @@ from src.support.agent.ports import (
     ToolCallResultChunk,
     ToolCallStartChunk,
     TurnDependencies,
+    TurnRun,
     TurnSignals,
 )
 
@@ -403,7 +404,7 @@ class TurnGraphRunner:
         signals: TurnSignals,
         knowledge: list[KnowledgeSnippet] | None = None,
         extra_config: dict | None = None,
-    ) -> _TurnRun:
+    ) -> TurnRun:
         agen = self._graph.astream(
             _initial_state(question, history, knowledge),
             stream_mode=["updates", "messages", "debug"],
