@@ -140,6 +140,7 @@ export function useAskStream() {
             setActivity((prev) => applyActivity(prev, evt));
         }
       }
+      if (genRef.current !== myGen) return;
       if (!terminated) {
         setErrorMessage("conexão interrompida");
         setStatus("error");

@@ -23,6 +23,12 @@ vi.mock("../data/source", () => ({
       yield { type: "done" } as AskEvent;
       return;
     }
+    if (input.question === "first (gated, silent end)") {
+      yield { type: "run_started", conversationId: "stale-silent" } as AskEvent;
+      yield { type: "token", text: "STALE " } as AskEvent;
+      await gate.promise;
+      return;
+    }
     for (const e of scenario.events) yield e;
   },
 }));
@@ -107,6 +113,45 @@ describe("useAskStream", () => {
     expect(result.current.status).toBe("done");
     expect(result.current.answer).toBe("second answer");
     expect(result.current.conversationId).toBe("c-second");
+  });
+
+  it("a superseded run whose stream ends silently does not mark the new run as a broken connection", async () => {
+    gate.promise = new Promise<void>((resolve) => {
+      gate.resolve = resolve;
+    });
+    scenario.events = [
+      { type: "run_started", conversationId: "c-second" },
+      { type: "token", text: "second answer" },
+      { type: "done" },
+    ];
+    const { result } = renderHook(() => useAskStream());
+
+    let firstRunPromise!: Promise<void>;
+    await act(async () => {
+      // Not awaited: this run gates before its silent end, staying
+      // "in flight" while we start (and finish) a second, superseding run.
+      firstRunPromise = result.current.ask({ question: "first (gated, silent end)" });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await result.current.ask({ question: "second" });
+    });
+
+    await waitFor(() => expect(result.current.status).toBe("done"));
+
+    // Release the stale run's gate now that it has been superseded; its
+    // generator simply returns with no done/error, which must not stomp on
+    // the new run's already-"done" state.
+    await act(async () => {
+      gate.resolve();
+      await firstRunPromise;
+    });
+
+    expect(result.current.status).toBe("done");
+    expect(result.current.errorMessage).toBeNull();
+    expect(result.current.answer).toBe("second answer");
   });
 
   it("builds the activity timeline in arrival order, with steps and tool calls interleaved", async () => {
