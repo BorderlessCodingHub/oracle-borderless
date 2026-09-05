@@ -31,7 +31,7 @@ Para arquitetura completa, leia **`docs/architecture.md`**.
 - **Validação:** Pydantic v2 + `pydantic-settings`
 - **Base de conhecimento:** Notion via **MCP (Model Context Protocol)** — client em `src/support/clients/notion/`. Só consome documentos aprovados/liberados.
 - **LLM:** o oráculo pode usar **Claude (Anthropic)** ou **GPT (OpenAI)**, selecionável via `LLM_PROVIDER` (`anthropic` | `openai`). O acesso ao modelo é **exclusivamente** pelo LangGraph dentro de `src/support/agent/graph/` (`nodes.py` contém o gate e a resposta; `models.py` seleciona o provedor) — não há client HTTP próprio de LLM. Ver ADR-0016.
-- **Agente de IA:** um `StateGraph` LangGraph (gate → retrieve → refuse/answer + tool loop) orquestra Claude ou GPT sobre a base de conhecimento, consumido em duas fases via `TurnGraphPort`. Observabilidade fina no LangSmith; `agent_traces` mantém as colunas agregáveis. Ver **ADR-0016**.
+- **Agente de IA:** um `StateGraph` LangGraph (gate → retrieve → refuse/answer + tool loop) orquestra Claude ou GPT sobre a base de conhecimento, consumido em dois escopos de sessão via `TurnGraphPort.run()` (`prelude()` no corpo SSE dentro de `async_session_scope()`, `stream()` sem sessão). Observabilidade fina no LangSmith; `agent_traces` mantém as colunas agregáveis. Ver **ADR-0016** e **ADR-0020**.
 - **Protocolo de UI:** o turno é entregue ao cliente como eventos **AG-UI** (Agent–User Interaction Protocol) sobre SSE: `POST /conversations/ask` recebe `RunAgentInput` e responde `RUN_STARTED` → `STEP_*`/`TOOL_CALL_*`/`TEXT_MESSAGE_*` → `CUSTOM oracle.sources` → `RUN_FINISHED`. A tradução chunk → evento mora em `src/app/api/streaming/` (pacote `ag-ui-protocol`, só tipos + encoder). **Domínio e grafo não conhecem o protocolo.** Ver ADR-0019.
 - **Autenticação:** plataforma Borderless como IdP via **BFF**: `POST /auth/login` (público, sem key) chama o signin da plataforma, guarda o `accessToken` **opaco** na tabela `sessions` e devolve cookie httpOnly `ob_session`; `require_user` resolve cookie → sessão → valida na plataforma (`GET /api/users/profile`, cache 60s, fail-open ≤10min); `GET /auth/me` restaura, `POST /auth/logout` revoga. Admin do `/ops` por allowlist `ADMIN_EMAILS` (404 para os demais). **Não há Keycloak/OpenFGA/Supabase nem JWT neste projeto.** Ver ADR-0017, ADR-0018 e `docs/autenticacao.md`.
 - **Scheduler:** APScheduler com jobstore PostgreSQL (`src/support/core/scheduling/`) — usado, entre outros, para jobs de sincronização da base de conhecimento.
@@ -122,7 +122,7 @@ Violar qualquer uma destas regras quebra premissas do sistema. Pergunte antes de
 
 2. **Entity é dataclass pura. Model é SQLAlchemy.** Nunca misture. A conversão Entity ↔ Model é responsabilidade do **Mapper** do subdomínio (`src/domain/{ctx}/mappers/{nome}_mapper.py`) — não inline no Repository. Repositórios delegam ao Mapper na fronteira pública. Actions trabalham com Entities. *(ver ADR-0003)*
 
-3. **Sessão de banco vem do contexto, não é criada manualmente.** Repositórios acessam via `CurrentAsyncSessionContext.get()`. O `DBSessionMiddleware` já abriu, comita e fecha a sessão por request. Criar `AsyncSessionLocal()` em controller, action ou repository é sinal de erro. *(ver ADR-0006)*
+3. **Sessão de banco vem do contexto, não é criada manualmente.** Repositórios acessam via `CurrentAsyncSessionContext.get()`. O `DBSessionMiddleware` já abriu, comita e fecha a sessão por request. Criar `AsyncSessionLocal()` em controller, action ou repository é sinal de erro. Fora do request (corpo SSE, jobs, eval) o escopo vem de `src/support/core/session_scope.py` (`async_session_scope` / `run_in_async_session`), aberto por `app`/`console`/`evals` — nunca pelo domínio (`test_domain_boundary.py` falha se `src/domain/` importar `AsyncSessionLocal` ou `session_scope`). *(ver ADR-0006 e ADR-0020)*
 
 4. **Nada confidencial na base de conhecimento.** O oráculo só responde a partir de fontes/documentos aprovados e liberados pelo MCP do Notion. Nenhum conteúdo restrito pode ser ingerido, persistido ou exposto nas respostas.
 
@@ -458,6 +458,7 @@ ADRs atuais (em `docs/adr/`):
 - **ADR-0017** — Plataforma Borderless como IdP; sem Supabase (validação/sessão substituídas pelo 0018)
 - **ADR-0018** — Auth vira BFF: token opaco da plataforma vive só no servidor; cookie httpOnly; `pyjwt` removido
 - **ADR-0019** — O turno do oráculo é entregue como eventos AG-UI (substitui o contrato do 0009; SSE mantido)
+- **ADR-0020** — A fase 1 do turno roda no corpo SSE, em escopo de sessão próprio (revisa o consumo em duas fases do 0016)
 
 Índice completo em `docs/adr/README.md`.
 

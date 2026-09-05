@@ -21,7 +21,7 @@ Quase tudo que parece "Service" no Laravel/FastAPI tradicional vira **Action** a
 ### Características
 
 - **Uma classe, um método público (`execute()`)**, um caso de uso.
-- Sufixo **`Action`** no nome: `IngestDocumentAction`, `UpdateDocumentAction`, `AnswerQuestionAction`.
+- Sufixo **`Action`** no nome: `IngestDocumentAction`, `UpdateDocumentAction`, `OpenTurnAction`.
 - Recebe **DTOs** ou primitivos em `execute()`. Retorna **Entity** ou tipos primitivos.
 - Recebe dependências externas (clients, outros services) no `__init__`. Repository é instanciado direto (pega session do contexto).
 - Lança **exceções de domínio** (`DomainError` e subclasses), nunca `HTTPException`.

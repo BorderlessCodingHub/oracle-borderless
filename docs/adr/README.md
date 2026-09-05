@@ -31,10 +31,11 @@ por `---`. Fluxo recomendado:
 | [0013](0013-trace-por-turno-no-postgres.md) | Trace por turno persistido no Postgres, coletado num ponto único | Aceito |
 | [0014](0014-kb-multi-root.md) | KB é a união dos subtrees de múltiplos roots do Notion | *substituído pelo 0015* |
 | [0015](0015-kb-escopo-descoberto-pela-permissao.md) | Escopo da KB descoberto pela permissão do Notion | Aceito |
-| [0016](0016-agent-framework-langgraph.md) | Framework do agente = LangGraph, observabilidade fina no LangSmith | Aceito |
+| [0016](0016-agent-framework-langgraph.md) | Framework do agente = LangGraph, observabilidade fina no LangSmith | *consumo em duas fases revisado pelo 0020* |
 | [0017](0017-auth-plataforma-como-idp.md) | Plataforma Borderless como IdP; JWT local; sem Supabase | *validação/sessão substituídas pelo 0018* |
 | [0018](0018-auth-bff-token-opaco.md) | Auth vira BFF: token opaco da plataforma vive só no servidor | Aceito |
-| [0019](0019-contrato-ag-ui-do-turno.md) | O turno do oráculo é entregue como eventos AG-UI | Aceito |
+| [0019](0019-contrato-ag-ui-do-turno.md) | O turno do oráculo é entregue como eventos AG-UI | *Aceito — consequência "rajada" obsoleta pelo 0020* |
+| [0020](0020-fase-1-do-turno-no-corpo-sse.md) | A fase 1 do turno roda no corpo SSE, em escopo de sessão próprio | Aceito |
 
 > ADR-0001–0006 são citados pelo `CLAUDE.md` mas ainda não foram escritos como arquivo.
 > As regras já estão em vigor (ver `CLAUDE.md` → "Regras inegociáveis"). Backfill quando
