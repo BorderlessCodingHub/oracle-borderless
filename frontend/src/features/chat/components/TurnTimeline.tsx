@@ -11,19 +11,18 @@ function stateOf(item: ActivityItem): State {
   return "running";
 }
 
-/** Linha do tempo do turno (ADR-0019). Só existe enquanto o turno roda: o
- * ChatPage a monta do run_started até done/error. Sem atividade ainda (a fase 1
- * do backend não devolveu nada), mostra os três pontos de espera. */
+/** Linha do tempo do turno (ADR-0019/0020). Só existe enquanto o turno roda: o
+ * ChatPage a monta do run_started até done/error. Sem atividade ainda, a lista
+ * fica vazia com a altura de uma linha reservada (CSS) e `aria-busy` — o
+ * primeiro passo chega no round-trip HTTP, não há mais indicador de espera. */
 export function TurnTimeline({ activity }: { activity: ActivityItem[] }) {
-  if (activity.length === 0) {
-    return (
-      <div className={styles.thinking} role="status" aria-label="Pensando">
-        <span /><span /><span />
-      </div>
-    );
-  }
   return (
-    <ol className={styles.timeline} aria-live="polite" aria-label="Andamento da resposta">
+    <ol
+      className={styles.timeline}
+      aria-live="polite"
+      aria-busy={activity.length === 0}
+      aria-label="Andamento da resposta"
+    >
       {activity.map((item, i) => {
         const state = stateOf(item);
         const label = item.kind === "step" ? stepLabel(item.name, item.detail) : toolLabel(item.name, item.args);

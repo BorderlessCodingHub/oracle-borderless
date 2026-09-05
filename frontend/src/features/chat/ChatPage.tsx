@@ -150,8 +150,9 @@ export default function ChatPage() {
 
   const showError = stream.status === "error";
   // A bolha final do assistente hospeda a linha do tempo do turno (ADR-0019)
-  // desde o "thinking": vazia ela mostra os pontos de espera, depois os passos
-  // e tool calls, depois o texto chegando. Não há mais indicador separado.
+  // desde o "thinking": vazia ela só reserva a altura de uma linha, depois os
+  // passos acendem ao vivo (ADR-0020), depois o texto chega. Não há indicador
+  // de espera separado.
   const streamingIndex =
     stream.status === "thinking" || stream.status === "streaming" ? turns.length - 1 : null;
   const isLoadingExistingConversation = turns.length === 0 && stream.status === "idle" && !!conversationId && detailLoading;

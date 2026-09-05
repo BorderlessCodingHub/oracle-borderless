@@ -4,9 +4,17 @@ import type { ActivityItem } from "../../../hooks/useAskStream";
 import { TurnTimeline } from "./TurnTimeline";
 
 describe("TurnTimeline", () => {
-  it("shows the waiting dots while there is no activity yet", () => {
+  it("renders an empty, busy list while there is no activity yet — never the waiting dots", () => {
     render(<TurnTimeline activity={[]} />);
-    expect(screen.getByLabelText("Pensando")).toBeInTheDocument();
+    const list = screen.getByRole("list", { name: "Andamento da resposta" });
+    expect(list).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+    expect(screen.queryByLabelText("Pensando")).not.toBeInTheDocument();
+  });
+
+  it("is not busy once the first step arrives", () => {
+    render(<TurnTimeline activity={[{ kind: "step", name: "gate", status: "running" }]} />);
+    expect(screen.getByRole("list", { name: "Andamento da resposta" })).toHaveAttribute("aria-busy", "false");
   });
 
   it("labels steps in Portuguese and shows the retrieval count", () => {

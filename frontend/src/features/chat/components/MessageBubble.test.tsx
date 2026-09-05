@@ -39,6 +39,6 @@ describe("MessageBubble", () => {
   it("does not blink a cursor on an empty streaming bubble", () => {
     const { container } = render(<MessageBubble role="assistant" content="" streaming activity={[]} />);
     expect(container.querySelector("[class*='cursor']")).toBeNull();
-    expect(screen.getByLabelText("Pensando")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Andamento da resposta" })).toHaveAttribute("aria-busy", "true");
   });
 });
