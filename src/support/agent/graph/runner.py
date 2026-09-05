@@ -1,17 +1,21 @@
-"""Consumo do grafo em DUAS FASES — ver spec, seção 5.
+"""Consumo do grafo em DUAS FASES, ambas no corpo SSE — ver ADR-0020.
 
-`BaseHTTPMiddleware` devolve `call_next` quando o StreamingResponse é
-*construído*; o corpo SSE é gerado depois, já fora do `async with` que mantém a
-sessão async. Logo os nós que tocam o banco (gate, retrieve) precisam rodar
-durante o `await start()`, dentro do escopo do request.
+`run()` monta o gerador do grafo com `stream_mode=["updates", "messages",
+"debug"]` e devolve um `_TurnRun`. `prelude()` dirige o grafo até a ENTRADA
+real do nó de resposta (evento `task` do modo `debug`) ou até a recusa; é a
+fase que toca o banco e o controller a consome dentro de `async_session_scope()`.
+`stream()` é o resto — token de LLM e tool HTTP — e roda sem sessão.
 
-`start()` dirige o grafo até a ENTRADA do nó de resposta e devolve o gerador do
-restante. Dali em diante só há token de LLM e tool HTTP — a mesma invariante que
-o motor anterior mantinha por convenção, agora explícita na estrutura.
+O modo `debug` existe aqui por um motivo só: ele avisa quando um nó COMEÇA.
+`updates` só chega no fim do nó, então sem o `task` o "started" de um passo
+seria sintetizado junto com o "finished" e a linha do tempo não acenderia
+passo a passo. Do payload `debug` o emitter lê SÓ `type` e `payload.name` — o
+`input` é o state inteiro (com o `knowledge` recuperado) e nunca sai daqui
+(regra 4).
 
-Desde o ADR-0019 o runner não esconde mais o que o grafo faz entre a pergunta e
-o texto: cada nó vira um `StepChunk`. A tradução para eventos AG-UI NÃO é daqui
-— mora em `src/app/api/streaming/`. Este módulo só fala em dataclasses do port.
+Desde o ADR-0019 cada nó vira um `StepChunk`. A tradução para eventos AG-UI
+NÃO é daqui — mora em `src/app/api/streaming/`. Este módulo só fala em
+dataclasses do port.
 """
 
 import json
@@ -47,6 +51,10 @@ _TOOL_FAILURE_PREFIX = "(falha"
 # sai para tools cujos argumentos são exibíveis na UI — hoje, só web_search.
 _ARGS_VISIBLE_TOOLS = frozenset({"web_search"})
 
+# Nós que viram passo na linha do tempo. `tools` não: tool calls têm eventos
+# próprios (START/ARGS/END/RESULT).
+_STEP_NODES = frozenset({"gate", "retrieve", "refuse", "answer"})
+
 
 def _text_of(message) -> str:
     """Anthropic entrega blocos, OpenAI entrega string."""
@@ -60,6 +68,15 @@ def _is_answer_event(payload) -> bool:
     """O evento veio do nó de resposta? É o que encerra a fase 1 (revisão I4)."""
     _, metadata = payload
     return metadata.get("langgraph_node") == "answer"
+
+
+def _task_name(payload: dict) -> str | None:
+    """Nome do nó de um evento `debug` do tipo `task` (entrada de nó). None para
+    `task_result`, `checkpoint` ou payload malformado. Nada além do nome é lido."""
+    if not isinstance(payload, dict) or payload.get("type") != "task":
+        return None
+    inner = payload.get("payload")
+    return inner.get("name") if isinstance(inner, dict) else None
 
 
 def _step_detail(name: str, signals: TurnSignals) -> dict | None:
@@ -85,13 +102,14 @@ def _tool_status(message: ToolMessage) -> str:
 
 
 class TurnEmitter:
-    """Traduz os eventos brutos do LangGraph (`updates` e `messages`) em chunks
-    do port, guardando o pouco de estado que isso exige: quais passos já
-    abriram e as citações coletadas. Um por run.
+    """Traduz os eventos brutos do LangGraph (`debug`, `updates` e `messages`)
+    em chunks do port, guardando o pouco de estado que isso exige: quais passos
+    já abriram e as citações coletadas. Um por run.
 
-    `updates` chega no FIM de cada nó, por isso o `started` de um passo é
-    sintetizado no primeiro sinal do nó — o próprio update, ou (só para
-    `answer`) o primeiro evento de `messages` vindo dele.
+    O `started` de um passo vem do `task` do modo `debug` (entrada real do nó);
+    o `finished` vem do `update` (fim do nó, quando os `signals` já têm o
+    `detail`). `step_started` é idempotente, então um update sem `task` antes
+    (fakes que não emitem `debug`) ainda sintetiza o `started`.
     """
 
     def __init__(self, signals: TurnSignals) -> None:
@@ -114,6 +132,15 @@ class TurnEmitter:
             *self.step_started(name),
             StepChunk(name=name, phase="finished", detail=_step_detail(name, self._signals)),
         ]
+
+    def on_debug(self, payload: dict) -> list[AgentStreamChunk]:
+        """Um payload de stream_mode="debug". Só `type == "task"` (entrada de
+        nó) e só o nome — o `input` do payload é o state inteiro e nunca sai
+        daqui (regra 4). `task_result` é ignorado: o `finished` vem do update."""
+        name = _task_name(payload)
+        if name in _STEP_NODES:
+            return self.step_started(name)
+        return []
 
     def on_update(self, payload: dict) -> list[AgentStreamChunk]:
         """Um payload de stream_mode="updates": {nó: saída do nó}."""
@@ -280,6 +307,63 @@ def _initial_state(
     }
 
 
+class _TurnRun:
+    """Implementa `TurnRun` por cima de um gerador `astream` do LangGraph.
+
+    O `break` no `async for` NÃO fecha o gerador do grafo — é isso que permite
+    `stream()` retomar exatamente de onde `prelude()` parou. Enquanto ninguém
+    itera, o LangGraph não avança: o nó `answer` só começa quando `stream()` é
+    iterado, já fora do escopo de sessão.
+    """
+
+    def __init__(self, agen, emitter: TurnEmitter, signals: TurnSignals) -> None:
+        self._agen = agen
+        self._emitter = emitter
+        self._signals = signals
+        self._prelude_done = False
+
+    async def prelude(self) -> AsyncIterator[AgentStreamChunk]:
+        async for mode, payload in self._agen:
+            if mode == "debug":
+                for chunk in self._emitter.on_debug(payload):
+                    yield chunk
+                if _task_name(payload) == "answer":
+                    break  # entrada REAL do nó de resposta (D3)
+            elif mode == "updates":
+                for chunk in self._emitter.on_update(payload):
+                    yield chunk
+                if "refuse" in payload:
+                    break  # a recusa é determinística e termina o grafo
+            elif _is_answer_event(payload):
+                # Defensivo: não é esperado ver "messages" do answer antes do
+                # seu `task`, mas se vier é a entrada — nada de texto se perde.
+                for chunk in self._emitter.on_message(payload):
+                    if isinstance(chunk, TextChunk):
+                        _mark_first_token(self._signals)
+                    yield chunk
+                break
+            # "messages" de outros nós (structured output do gate) são ignorados.
+        self._prelude_done = True
+
+    async def stream(self) -> AsyncIterator[AgentStreamChunk]:
+        if not self._prelude_done:
+            raise RuntimeError("stream() chamado antes de prelude() esgotar — a fase 1 toca o banco e precisa terminar dentro do escopo de sessão")
+        async for mode, payload in self._agen:
+            if mode == "debug":
+                chunks = self._emitter.on_debug(payload)  # re-entradas do answer: idempotente
+            elif mode == "updates":
+                chunks = self._emitter.on_update(payload)
+            else:
+                chunks = self._emitter.on_message(payload)
+            for chunk in chunks:
+                if isinstance(chunk, TextChunk):
+                    _mark_first_token(self._signals)
+                yield chunk
+        _mark_engine_end(self._signals)
+        for chunk in self._emitter.finish():
+            yield chunk
+
+
 class TurnGraphRunner:
     def __init__(
         self,
@@ -311,7 +395,7 @@ class TurnGraphRunner:
             config["metadata"] = {"user_hash": self._user_hash}
         return config
 
-    async def start(
+    def run(
         self,
         question: str,
         history: list[AgentMessage],
@@ -319,97 +403,13 @@ class TurnGraphRunner:
         signals: TurnSignals,
         knowledge: list[KnowledgeSnippet] | None = None,
         extra_config: dict | None = None,
-    ) -> AsyncIterator[AgentStreamChunk]:
-        emitter = TurnEmitter(signals)
+    ) -> _TurnRun:
         agen = self._graph.astream(
             _initial_state(question, history, knowledge),
-            stream_mode=["updates", "messages"],
+            stream_mode=["updates", "messages", "debug"],
             config=self._config(deps, signals, extra_config),
         )
-
-        # FASE 1 — sessão viva. Para na ENTRADA do nó de resposta (revisão I4).
-        #
-        # O critério NÃO é "o primeiro texto": quando o modelo abre com uma
-        # AIMessage só de tool_calls (content vazio — a forma comum de
-        # Anthropic/OpenAI), nenhum chunk de texto é produzido e o laço
-        # answer -> tools -> answer inteiro rodaria aqui dentro, segurando a
-        # conexão Postgres do request durante chamadas HTTP externas. O critério
-        # é o PRIMEIRO evento "messages" do nó `answer` — mesmo que ele não
-        # renda texto.
-        #
-        # Tudo que a fase 1 produz (passos de gate/retrieve, o refuse com seu
-        # texto, o `answer started`, o primeiro token se houver) vai para
-        # `buffered`; a fase 2 reproduz a lista antes de continuar.
-        buffered: list[AgentStreamChunk] = []
-        deferred: Exception | None = None
-        try:
-            async for mode, payload in agen:
-                if mode == "updates":
-                    buffered += emitter.on_update(payload)
-                    if "refuse" in payload:
-                        break
-                    continue
-                if not _is_answer_event(payload):
-                    continue
-                chunks = emitter.on_message(payload)
-                if any(isinstance(c, TextChunk) for c in chunks):
-                    _mark_first_token(signals)
-                buffered += chunks
-                break
-        except Exception as exc:
-            # Revisão I3 — de onde veio a falha decide quem a trata:
-            #
-            # - gate/retrieve/refuse (`answer_started_at is None`): sobe agora,
-            #   ainda dentro da sessão, e o rollback do DBSessionMiddleware pega
-            #   (spec, seção 7). Turno sem contexto é pior que erro visível.
-            # - estágio de resposta (o nó `answer` já foi carimbado): a exceção
-            #   é ADIADA para o `_resume`. Se subisse aqui, viraria um 500 seco:
-            #   o middleware faria rollback (perdendo a mensagem do usuário) e
-            #   NENHUMA linha de agent_traces com outcome="error" seria gravada
-            #   — justamente o trace mais valioso. Adiando, cai no `except` que
-            #   o controller já tem: RUN_ERROR + trace persistido, com a
-            #   mensagem do usuário já commitada.
-            if signals.answer_started_at is None:
-                raise
-            # F2: o nó `answer` carimbou `answer_started_at` (nodes.py) antes de
-            # chamar o modelo — então o passo REALMENTE começou, mesmo que
-            # nenhum evento "messages" tenha chegado a tempo (provider que
-            # quebra antes do primeiro token). `buffered` precisa desse
-            # StepChunk para a spec (seção 1.2): passos que rodaram sobrevivem
-            # ao erro, mesmo sem texto nenhum.
-            buffered += emitter.step_started("answer")
-            deferred = exc
-
-        # FASE 2 — devolvida ao controller, consumida fora do escopo da sessão.
-        return _resume(buffered, agen, emitter, signals, deferred)
-
-
-async def _resume(
-    buffered: list[AgentStreamChunk],
-    agen,
-    emitter: TurnEmitter,
-    signals: TurnSignals,
-    deferred: Exception | None = None,
-) -> AsyncIterator[AgentStreamChunk]:
-    # F2: primeiro reproduz o que a fase 1 já produziu (gate/retrieve/answer
-    # started) — spec §1.2: um run que morre antes do primeiro token ainda
-    # emite RUN_STARTED + os passos que rodaram + RUN_ERROR, nunca um erro seco
-    # sem nada antes. Só DEPOIS relança a falha do estágio de resposta
-    # capturada na fase 1 (revisão I3), para que ela chegue ao `except` do
-    # controller.
-    for chunk in buffered:
-        yield chunk
-    if deferred is not None:
-        raise deferred
-    async for mode, payload in agen:
-        chunks = emitter.on_update(payload) if mode == "updates" else emitter.on_message(payload)
-        for chunk in chunks:
-            if isinstance(chunk, TextChunk):
-                _mark_first_token(signals)
-            yield chunk
-    _mark_engine_end(signals)
-    for chunk in emitter.finish():
-        yield chunk
+        return _TurnRun(agen, TurnEmitter(signals), signals)
 
 
 def get_turn_graph_runner(

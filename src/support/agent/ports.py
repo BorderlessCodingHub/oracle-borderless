@@ -134,16 +134,13 @@ class TurnSignals:
     outcome: str = "answer"  # "answer" | "refusal" | "error"
 
     # Latência do estágio de resposta, medida DENTRO do grafo (revisão I2).
-    # Antes o controller cronometrava a partir do início do corpo SSE; com o
-    # consumo em duas fases o primeiro token já nasce durante o `await start()`,
-    # então aquele relógio dava `first_token_ms` ≈ 0 sempre e deixava de fora
-    # justamente a fatia dominante do `engine_ms`. Quem mede agora é quem sabe:
-    # o nó `answer` carimba a entrada, o runner fecha as duas contas.
+    # O controller não pode cronometrá-la: o corpo SSE começa antes do grafo
+    # rodar, então um relógio de fora mediria gate + retrieval junto. Quem mede
+    # é quem sabe: o nó `answer` carimba a entrada, o runner fecha as duas contas.
     #
     # `answer_started_at` é interno (time.monotonic da PRIMEIRA entrada no nó
     # `answer`) e não vai para o trace — só serve de origem das duas medidas
-    # abaixo. Também é o marcador que distingue "o estágio de resposta começou"
-    # de "ainda estávamos em gate/retrieve/refuse" (ver runner, revisão I3).
+    # abaixo.
     answer_started_at: float | None = None
     # Ambos ficam None no caminho de recusa: a recusa é texto canônico emitido
     # na hora, e entrar nas médias do motor misturaria as duas coisas.
@@ -171,9 +168,10 @@ class NearestDistancePort(Protocol):
 
 @dataclass
 class TurnDependencies:
-    """Actions de domínio injetadas no grafo. Montadas pela Action DENTRO do
-    request: repositórios leem a sessão do ContextVar em __init__ (regra 3), então
-    isto não pode nascer em tempo de import."""
+    """Actions de domínio injetadas no grafo. Montadas por `RunTurnAction` DENTRO
+    de um escopo de sessão (ADR-0020): repositórios leem a sessão do ContextVar
+    em __init__ (regra 3), então isto não pode nascer em tempo de import nem no
+    request — o request já fechou a sessão quando o corpo SSE começa."""
 
     search: KnowledgeSearchPort
     sections: KnowledgeSectionsPort
@@ -181,8 +179,27 @@ class TurnDependencies:
     nearest: NearestDistancePort | None = None
 
 
+class TurnRun(Protocol):
+    """Um turno já montado, consumido em DUAS FASES (ADR-0020). Nada executa até
+    `prelude()` ser iterado."""
+
+    def prelude(self) -> AsyncIterator[AgentStreamChunk]:
+        """Fase 1: gate → retrieve → (refuse | entrada do answer). Toca o banco
+        via `deps`: consumir ATÉ O FIM dentro de um escopo de sessão, antes de
+        `stream()`. Emite StepChunk ao vivo (started na entrada do nó, finished
+        no update). Numa recusa, emite também o TextChunk canônico."""
+        ...
+
+    def stream(self) -> AsyncIterator[AgentStreamChunk]:
+        """Fase 2: o restante — texto, tool calls, `answer finished`,
+        SourcesChunk. Não toca o banco; deve rodar FORA de escopo de sessão.
+        Chamar antes de `prelude()` esgotar é erro de programação
+        (RuntimeError)."""
+        ...
+
+
 class TurnGraphPort(Protocol):
-    async def start(
+    def run(
         self,
         question: str,
         history: list[AgentMessage],
@@ -190,11 +207,8 @@ class TurnGraphPort(Protocol):
         signals: TurnSignals,
         knowledge: list[KnowledgeSnippet] | None = None,
         extra_config: dict | None = None,
-    ) -> AsyncIterator[AgentStreamChunk]:
-        """Dirige o grafo até o PRIMEIRO token e devolve o gerador do restante.
-
-        O await desta chamada executa gate e retrieval — precisa acontecer dentro
-        do escopo da sessão de banco. Ver spec, seção 5.
+    ) -> TurnRun:
+        """Monta o turno. Síncrono: só constrói o gerador do grafo e o emitter.
 
         `knowledge` pré-semeado pula gate e retrieval e vai direto ao nó de
         resposta; é o que o eval usa nos casos adversariais.
