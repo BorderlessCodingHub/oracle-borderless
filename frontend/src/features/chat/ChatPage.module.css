@@ -50,6 +50,22 @@
 .thinking span:nth-child(2) { animation-delay: .15s; }
 .thinking span:nth-child(3) { animation-delay: .3s; }
 @keyframes bounce { 0%,60%,100% { transform: translateY(0); opacity: .4; } 30% { transform: translateY(-5px); opacity: 1; } }
+/* Linha do tempo do turno (ADR-0019): passos e tool calls ao vivo, acima do
+   texto que está chegando. Some quando o turno termina. */
+.timeline { list-style: none; margin: 0 0 var(--space-2); padding: 0; display: grid; gap: 4px; }
+.timelineItem { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--text-muted); }
+.timelineItem[data-state="done"] { color: var(--text); }
+.timelineDot { width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--violet-ink); flex: none; box-sizing: border-box; }
+.timelineItem[data-state="running"] .timelineDot { border-top-color: transparent; animation: spin 1s linear infinite; }
+.timelineItem[data-state="done"] .timelineDot { background: var(--emerald-ink); border-color: var(--emerald-ink); }
+.timelineItem[data-state="error"] .timelineDot { background: var(--danger-border); border-color: var(--danger-border); }
+.timelineLabel { min-width: 0; overflow-wrap: anywhere; }
+.timelineTag { font-family: var(--font-mono); font-size: .6rem; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .timelineItem[data-state="running"] .timelineDot { animation: none; }
+  .thinking span { animation: none; opacity: .7; }
+}
 /* Fontes como notas de rodapé: um resumo discreto recolhido por padrão; a
    lista (com filete à esquerda, índice mono) só aparece no clique. */
 .citations { margin-top: var(--space-3); }

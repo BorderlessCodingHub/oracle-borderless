@@ -24,4 +24,21 @@ describe("MessageBubble", () => {
     // a proveniência continua a um clique
     expect(screen.getByRole("button", { name: /1 fonte/i })).toBeInTheDocument();
   });
+
+  it("renders the turn timeline above the text while streaming, and not otherwise", () => {
+    const activity = [{ kind: "step" as const, name: "answer", status: "running" as const }];
+    const { rerender } = render(
+      <MessageBubble role="assistant" content="parcial" streaming activity={activity} />
+    );
+    expect(screen.getByText("Respondendo")).toBeInTheDocument();
+
+    rerender(<MessageBubble role="assistant" content="final" activity={activity} />);
+    expect(screen.queryByText("Respondendo")).not.toBeInTheDocument();
+  });
+
+  it("does not blink a cursor on an empty streaming bubble", () => {
+    const { container } = render(<MessageBubble role="assistant" content="" streaming activity={[]} />);
+    expect(container.querySelector("[class*='cursor']")).toBeNull();
+    expect(screen.getByLabelText("Pensando")).toBeInTheDocument();
+  });
 });
