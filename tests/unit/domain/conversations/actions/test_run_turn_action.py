@@ -47,17 +47,32 @@ def sentinel_session():
         CurrentAsyncSessionContext.clear()
 
 
-def test_deps_are_built_with_the_session_current_at_call_time(sentinel_session):
+def test_deps_are_built_with_the_session_current_at_call_time():
+    """Sessão A no momento da construção, sessão B no momento do `execute()` —
+    se `RunTurnAction.__init__` chegasse a montar os deps (regressão), os
+    repositórios capturariam A e este teste pegaria isso."""
+    session_a = _FakeSession()
     graph = FakeTurnGraph()
+    CurrentAsyncSessionContext.set(session_a)
+    try:
+        action = RunTurnAction(graph, _FakeEmbeddings())
+    finally:
+        CurrentAsyncSessionContext.clear()
 
-    RunTurnAction(graph, _FakeEmbeddings()).execute(_turn())
+    session_b = _FakeSession()
+    CurrentAsyncSessionContext.set(session_b)
+    try:
+        action.execute(_turn())
+    finally:
+        CurrentAsyncSessionContext.clear()
 
     deps = graph.received_deps
     assert deps is not None
-    assert deps.search.chunk_repo.session is sentinel_session
-    assert deps.sections.documents.session is sentinel_session
+    assert deps.search.chunk_repo.session is session_b
+    assert deps.sections.documents.session is session_b
     assert isinstance(deps.nearest, _NearestDistance)
-    assert deps.nearest._chunks.session is sentinel_session
+    assert deps.nearest._chunks.session is session_b
+    assert deps.search.chunk_repo.session is not session_a
 
 
 def test_execute_is_synchronous_and_forwards_question_history_and_signals(sentinel_session):

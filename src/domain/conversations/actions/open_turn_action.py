@@ -1,4 +1,3 @@
-import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -12,8 +11,6 @@ from src.domain.conversations.repositories.message_repository import MessageRepo
 from src.domain.conversations.services.conversation_access_policy import ConversationAccessPolicy
 from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
 from src.support.agent.ports import TurnSignals
-
-logger = logging.getLogger(__name__)
 
 _TITLE_MAX = 80
 
