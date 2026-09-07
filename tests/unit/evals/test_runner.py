@@ -8,7 +8,7 @@ from evals.models import (
     Turn,
 )
 from evals.runner import run_case
-from src.support.agent.ports import SourcesChunk, StepChunk, TextChunk
+from src.support.agent.ports import GraphEvent, ROOT_NAME
 
 
 class _FakeGraph:
@@ -44,12 +44,27 @@ class _FakeRun:
         self._answer = answer
 
     async def prelude(self):
-        yield StepChunk(name="gate", phase="started")
-        yield StepChunk(name="gate", phase="finished")
+        yield GraphEvent(
+            event="on_chain_start", name="gate", run_id="g", tags=[],
+            metadata={"thread_id": "t", "langgraph_node": "gate"}, parent_ids=["root"], data={},
+        )
+        yield GraphEvent(
+            event="on_chain_end", name="gate", run_id="g", tags=[],
+            metadata={"thread_id": "t", "langgraph_node": "gate"}, parent_ids=["root"],
+            data={"output": {"retrieve": True, "degraded": False}},
+        )
 
     async def stream(self):
-        yield TextChunk(text=self._answer)
-        yield SourcesChunk(citations=[])
+        yield GraphEvent(
+            event="on_chat_model_stream", name="ScriptedChatModel", run_id="m", tags=[],
+            metadata={"thread_id": "t", "langgraph_node": "answer"}, parent_ids=["root", "answer"],
+            data={"chunk": {"content": self._answer, "id": "lc"}},
+        )
+        yield GraphEvent(
+            event="on_chain_end", name=ROOT_NAME, run_id="root", tags=[],
+            metadata={"thread_id": "t"}, parent_ids=[],
+            data={"output": {"outcome": "answer", "citations": []}},
+        )
 
 
 class _RecordingSearch:
