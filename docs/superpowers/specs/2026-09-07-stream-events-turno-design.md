@@ -28,9 +28,17 @@ O LangChain tem um formato próprio de evento de streaming: o **`StreamEvent`**
 ```
 
 Nomes seguem `on_[chain|chat_model|tool|...]_(start|stream|end)`. Um
-`CompiledStateGraph` do LangGraph aceita `stream_mode` em `astream_events`; os
-chunks de cada modo chegam como `on_chain_stream` do grafo raiz, com
-`data.chunk == (modo, payload)`.
+`CompiledStateGraph` do LangGraph aceita `stream_mode` em `astream_events` (via
+`**kwargs`, repassados ao `astream` do grafo); os chunks de cada modo chegam
+como `on_chain_stream` do grafo raiz, com `data.chunk == (modo, payload)`.
+
+Referência do método (assinatura, tabela de eventos por tipo de runnable,
+filtros `include_*`/`exclude_*`, versões `v1`/`v2`/`v3`): `as_stream.md`, cópia
+da página `Runnable.astream_events` da referência do `langchain_core`
+(https://reference.langchain.com/python/langchain-core/runnables/base/Runnable/astream_events).
+Esta spec usa **`version="v2"`**: é o schema `StreamEvent` acima, o que o
+brainstorm pediu no fio. `v3` (protocolo por blocos de conteúdo, beta) fica
+fora até estabilizar; `v1` está a caminho da depreciação.
 
 ### O que o brainstorm decidiu
 
@@ -67,6 +75,19 @@ cada super-step. Além dos nós, chegam as arestas condicionais (`route_entry`,
 `should_retrieve`, `has_grounding`, `tools_condition`), o nó `__start__` e os
 runnables internos do `with_structured_output` do gate. Nada disso pode sair
 para o cliente: os runnables internos por ruído, o resto por regra 4.
+
+### Por que não os filtros nativos do método
+
+`astream_events` aceita `include_names`, `include_types`, `include_tags` e os
+`exclude_*` correspondentes. Eles filtram **por nome, tipo ou tag do runnable**
+e nada mais — não sabem dizer "só `on_chat_model_stream` quando
+`metadata.langgraph_node == "answer"`", nem "só nós cujo `name` coincide com o
+`langgraph_node`" (é o que separa `gate` da aresta `should_retrieve`, que roda
+com o mesmo `langgraph_node`). Também não tocam em `data`, e a projeção é a
+parte que importa para a regra 4. Como o redator precisa existir de qualquer
+jeito e é a única barreira que garante o que sai, a allowlist mora inteira
+nele; os filtros nativos não são usados, para não haver duas listas do mesmo
+assunto em lugares diferentes.
 
 ## Decisão
 
@@ -155,7 +176,7 @@ que permite `EventSource`/parsers filtrarem por nome sem abrir o JSON.
 | chunk do modo `updates` | `on_chain_stream` | `LangGraph` | `{"chunk": ["updates", {"<nó>": projeção(update)}]}` |
 | chunk do modo `values` | `on_chain_stream` | `LangGraph` | `{"chunk": ["values", projeção(state)]}` |
 | saída de nó `gate` / `retrieve` / `refuse` / `answer` | `on_chain_end` | nó | `{"output": projeção(saída do nó)}` |
-| token do modelo (só no nó `answer`) | `on_chat_model_stream` | classe do modelo | `{"chunk": {"content": str, "id": str}}` |
+| token do modelo (só no nó `answer`) | `on_chat_model_stream` | classe do modelo | `{"chunk": {"content": str, "id": str}}` — `content` é o texto do `AIMessageChunk` já achatado (Anthropic entrega lista de blocos, OpenAI string; `_text_of` de hoje) |
 | tool começa | `on_tool_start` | nome da tool | `{"input": args}` só para `web_search`; `{}` para as demais (`fetch_notion_page`: o `page_id` não cruza o port) |
 | tool termina | `on_tool_end` | nome da tool | `{"output": {"status": "ok" \| "error", "tool_call_id": str}}`. **Nunca o conteúdo da tool.** |
 | fim | `on_chain_end` | `LangGraph` | `{"output": {"outcome": str, "citations": [...]}}` |
@@ -273,6 +294,10 @@ agen = self._graph.astream_events(
     stream_mode=["values", "updates"],
 )
 ```
+
+`stream_mode` viaja em `**kwargs` até o `astream` do grafo — é o mecanismo
+documentado, não um atalho. Nenhum `include_*`/`exclude_*` é passado (ver
+"Por que não os filtros nativos do método").
 
 Um `EventRedactor` (nome interno; um por run) substitui o `TurnEmitter`:
 
@@ -452,6 +477,9 @@ Frontend:
   descrição da caixa `runner` (sem `debug`).
 - Notas de "substituído por" no topo desta família de specs: 04/09 (AG-UI) e
   05/09 (turno ao vivo, onde o corte cita o `debug`).
+- `as_stream.md` (referência do método, hoje solto na raiz e não versionado)
+  vai para `docs/reference/langchain-astream-events.md`, citado pelo ADR-0021 e
+  por esta spec. É a cópia local do que o ADR assume sobre o schema.
 
 ## 10. Sequência de corte
 
