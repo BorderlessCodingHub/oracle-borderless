@@ -13,9 +13,9 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
-from tests.fakes.ag_ui_stream import events, run_input, text_of
 from tests.fakes.auth import auth_headers
 from tests.fakes.fake_turn_graph import FailingInPreludeTurnGraph, FailingInStreamTurnGraph, FakeTurnGraph
+from tests.fakes.stream_events import ask_body, event_names, events, is_root, text_of
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -30,11 +30,8 @@ def _patch_controller(monkeypatch, graph=None):
     import src.app.api.controllers.conversation_controller as ctrl
     from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
 
-    monkeypatch.setattr(
-        ctrl,
-        "get_turn_graph_runner",
-        lambda **kw: graph or FakeTurnGraph(answer="resposta de teste"),
-    )
+    graph = graph or FakeTurnGraph(answer="resposta de teste")
+    monkeypatch.setattr(ctrl, "get_turn_graph_runner", lambda **kw: graph.with_config(**kw))
     monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
 
 
@@ -77,13 +74,14 @@ async def test_trace_row_exists_after_a_successful_ask(monkeypatch):
     _patch_controller(monkeypatch, graph=graph)
     from main import app
 
-    body = run_input("o que é o PSP?")
+    body = ask_body("o que é o PSP?")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/conversations/ask", json=body, headers=await auth_headers("asker@x.com"))
         assert resp.status_code == 200
-        assert events(resp.text)[-1]["type"] == "RUN_FINISHED"
+        last = events(resp.text)[-1]
+        assert last["event"] == "on_chain_end" and is_root(last)
 
-    trace = await _fetch_trace(UUID(body["threadId"]))
+    trace = await _fetch_trace(UUID(body["config"]["configurable"]["thread_id"]))
     assert trace["question"] == "o que é o PSP?"
     assert trace["outcome"] == "answer"
     assert trace["gate_retrieve"] is True
@@ -93,9 +91,9 @@ async def test_trace_row_exists_after_a_successful_ask(monkeypatch):
     assert trace["tool_calls"] == 2
     assert trace["input_tokens"] == 123
     assert trace["output_tokens"] == 45
-    # ADR-0019: o runId do cliente É o run do LangSmith — um turno da tela liga
-    # ao trace sem intermediário.
-    assert trace["langsmith_run_id"] == body["runId"]
+    # ADR-0021: o config.run_id do cliente É o run do LangSmith — um turno da
+    # tela liga ao trace sem intermediário.
+    assert trace["langsmith_run_id"] == body["config"]["run_id"]
 
 
 @pytest.mark.asyncio
@@ -104,12 +102,12 @@ async def test_failed_turn_is_traced_even_though_the_answer_is_not_persisted(mon
     _patch_controller(monkeypatch, graph=FailingInStreamTurnGraph())
     from main import app
 
-    body = run_input("vai falhar")
+    body = ask_body("vai falhar")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/conversations/ask", json=body, headers=await auth_headers("asker@x.com"))
-        assert events(resp.text)[-1]["type"] == "RUN_ERROR"
+        assert event_names(events(resp.text))[-1] == "on_chain_error"
 
-    conversation_id = UUID(body["threadId"])
+    conversation_id = UUID(body["config"]["configurable"]["thread_id"])
 
     from src.support.core.database import AsyncSessionLocal
 
@@ -144,12 +142,12 @@ async def test_refusal_leaves_engine_ms_and_first_token_ms_null(monkeypatch):
     )
     from main import app
 
-    body = run_input("qual a capital da Austrália?")
+    body = ask_body("qual a capital da Austrália?")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/conversations/ask", json=body, headers=await auth_headers("asker@x.com"))
         assert "Não encontrei informações sobre isso na base de conhecimento." in text_of(events(resp.text))
 
-    trace = await _fetch_trace(UUID(body["threadId"]))
+    trace = await _fetch_trace(UUID(body["config"]["configurable"]["thread_id"]))
     assert trace["outcome"] == "refusal"
     assert trace["engine_ms"] is None
     assert trace["first_token_ms"] is None
@@ -162,12 +160,12 @@ async def test_a_prelude_failure_is_traced_with_outcome_error_and_what_the_gate_
     _patch_controller(monkeypatch, graph=FailingInPreludeTurnGraph())
     from main import app
 
-    body = run_input("vai quebrar no retrieve")
+    body = ask_body("vai quebrar no retrieve")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/conversations/ask", json=body, headers=await auth_headers("asker@x.com"))
-        assert events(resp.text)[-1]["type"] == "RUN_ERROR"
+        assert event_names(events(resp.text))[-1] == "on_chain_error"
 
-    trace = await _fetch_trace(UUID(body["threadId"]))
+    trace = await _fetch_trace(UUID(body["config"]["configurable"]["thread_id"]))
     assert trace["outcome"] == "error"
     assert trace["gate_retrieve"] is True  # o que o gate escreveu antes da falha sobrevive
     assert trace["error"] == "RuntimeError: boom: pgvector caiu no prelúdio"
