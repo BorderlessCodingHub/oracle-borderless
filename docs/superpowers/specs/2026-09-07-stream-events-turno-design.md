@@ -479,8 +479,8 @@ Frontend:
 - Notas de "substituído por" no topo desta família de specs: 04/09 (AG-UI) e
   05/09 (turno ao vivo, onde o corte cita o `debug`).
 - `docs/as_stream.md` (referência do método, cópia da página oficial) é
-  versionado e citado pelo ADR-0021, citado pelo ADR-0021 e
-  por esta spec. É a cópia local do que o ADR assume sobre o schema.
+  versionado e citado pelo ADR-0021 e por esta spec. É a cópia local do que o
+  ADR assume sobre o schema.
 
 ## 10. Sequência de corte
 
