@@ -7,7 +7,6 @@ import { Sidebar } from "./components/Sidebar";
 import { MessageList, type Turn } from "./components/MessageList";
 import { Composer } from "./components/Composer";
 import { EmptyState } from "./components/EmptyState";
-import { ThinkingIndicator } from "./components/ThinkingIndicator";
 import { ErrorState } from "./components/ErrorState";
 import { Logo } from "../../components/Logo/Logo";
 import { ThemeToggle } from "../../components/ThemeToggle/ThemeToggle";
@@ -132,7 +131,12 @@ export default function ChatPage() {
       }
       return next;
     });
-    await stream.ask({ question: lastQuestion, conversationId });
+    // F3: reuse the threadId the hook already learned at run_started, even
+    // though the route's conversationId is still undefined after a
+    // first-question failure — otherwise a retry mints a fresh threadId and
+    // lands in a second conversation (spec §7: retry reuses the threadId with
+    // a new runId).
+    await stream.ask({ question: lastQuestion, conversationId: stream.conversationId ?? conversationId });
   }
 
   function newConversation() {
@@ -144,13 +148,13 @@ export default function ChatPage() {
     navigate("/");
   }
 
-  const showThinking = stream.status === "thinking";
   const showError = stream.status === "error";
-  const streamingIndex = stream.status === "streaming" ? turns.length - 1 : null;
-  // While "thinking", hide the trailing empty assistant bubble entirely so the
-  // ThinkingIndicator (which already renders its own Logo) is the only thing
-  // shown — otherwise both render a Logo and it reads as a double-logo flash.
-  const visibleTurns = showThinking ? turns.slice(0, -1) : turns;
+  // A bolha final do assistente hospeda a linha do tempo do turno (ADR-0019)
+  // desde o "thinking": vazia ela só reserva a altura de uma linha, depois os
+  // passos acendem ao vivo (ADR-0020), depois o texto chega. Não há indicador
+  // de espera separado.
+  const streamingIndex =
+    stream.status === "thinking" || stream.status === "streaming" ? turns.length - 1 : null;
   const isLoadingExistingConversation = turns.length === 0 && stream.status === "idle" && !!conversationId && detailLoading;
 
   return (
@@ -188,8 +192,7 @@ export default function ChatPage() {
             )
           ) : (
             <div className={styles.threadInner}>
-              <MessageList turns={visibleTurns} streamingIndex={streamingIndex} />
-              {showThinking && <ThinkingIndicator />}
+              <MessageList turns={turns} streamingIndex={streamingIndex} activity={stream.activity} />
               {showError && <ErrorState message={stream.errorMessage ?? "Erro ao gerar a resposta."} onRetry={retry} />}
             </div>
           )}

@@ -84,9 +84,14 @@ export const ARCHITECTURE_MAP: MapBand[] = [
     boxes: [
       {
         id: "ask",
-        label: "Pergunta",
-        description: "POST /conversations/ask, resposta em SSE.",
-        files: ["src/app/api/controllers/conversation_controller.py"],
+        label: "Pergunta (AG-UI)",
+        description: "POST /conversations/ask recebe RunAgentInput e responde eventos AG-UI: passos do grafo, tool calls, texto e fontes. Tradução chunk → evento na camada app.",
+        files: [
+          "src/app/api/controllers/conversation_controller.py",
+          "src/domain/conversations/actions/open_turn_action.py",
+          "src/app/api/requests/run_agent_request.py",
+          "src/app/api/streaming/ag_ui_encoder.py",
+        ],
       },
       {
         id: "recency",
@@ -142,9 +147,13 @@ export const ARCHITECTURE_MAP: MapBand[] = [
       },
       {
         id: "runner",
-        label: "Consumo em duas fases",
-        description: "Dirige o grafo até a ENTRADA do nó de resposta com a sessão de banco viva; só depois entrega o gerador ao SSE. É o que mantém retrieval e streaming em escopos diferentes.",
-        files: ["src/support/agent/graph/runner.py"],
+        label: "Dois escopos de sessão",
+        description: "A fase 1 do grafo (gate → retrieval → recusa ou entrada da resposta) roda no corpo SSE dentro de um escopo de sessão próprio e emite cada passo ao vivo; o restante corre sem sessão. É o que mantém retrieval e streaming em escopos diferentes.",
+        files: [
+          "src/support/agent/graph/runner.py",
+          "src/support/core/session_scope.py",
+          "src/domain/conversations/actions/run_turn_action.py",
+        ],
       },
       {
         id: "persist",

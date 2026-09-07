@@ -8,7 +8,7 @@ from evals.models import (
     Turn,
 )
 from evals.runner import run_case
-from src.support.agent.ports import AgentStreamChunk
+from src.support.agent.ports import SourcesChunk, StepChunk, TextChunk
 
 
 class _FakeGraph:
@@ -27,22 +27,29 @@ class _FakeGraph:
         self.received_knowledge = None
         self.received_deps = None
 
-    async def start(self, question, history, deps, signals, knowledge=None, extra_config=None):
+    def run(self, question, history, deps, signals, knowledge=None, extra_config=None):
         self.received_question = question
         self.received_history = history
         self.received_knowledge = knowledge
         self.received_deps = deps
         if knowledge is None:
-            # Caminho não pré-semeado: o gate roda dentro do grafo e grava o
-            # sinal que `run_case` usa para decidir a segunda busca.
             signals.retrieval_ran = self._retrieve
             signals.gate_search_query = self._search_query if self._search_query is not None else question
         signals.outcome = self._outcome
-        return self._stream()
+        return _FakeRun(self._answer)
 
-    async def _stream(self):
-        yield AgentStreamChunk(type="text", text=self._answer)
-        yield AgentStreamChunk(type="sources", citations=[])
+
+class _FakeRun:
+    def __init__(self, answer: str) -> None:
+        self._answer = answer
+
+    async def prelude(self):
+        yield StepChunk(name="gate", phase="started")
+        yield StepChunk(name="gate", phase="finished")
+
+    async def stream(self):
+        yield TextChunk(text=self._answer)
+        yield SourcesChunk(citations=[])
 
 
 class _RecordingSearch:

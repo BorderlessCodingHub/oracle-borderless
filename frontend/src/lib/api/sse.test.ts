@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSSE } from "./sse";
+import { parseSSEData } from "./sse";
 
 function streamOf(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -12,37 +12,34 @@ function streamOf(chunks: string[]): ReadableStream<Uint8Array> {
 }
 
 async function collect(stream: ReadableStream<Uint8Array>) {
-  const out: { event: string; data: string }[] = [];
-  for await (const evt of parseSSE(stream)) out.push(evt);
+  const out: string[] = [];
+  for await (const data of parseSSEData(stream)) out.push(data);
   return out;
 }
 
-describe("parseSSE", () => {
-  it("parses complete events", async () => {
+describe("parseSSEData", () => {
+  it("parses complete blocks, ignoring event:/id:/retry:", async () => {
     const events = await collect(
       streamOf([
         "event: conversation\ndata: {\"id\":\"abc\"}\n\n",
-        "event: token\ndata: {\"text\":\"oi\"}\n\n",
+        "id: 1\ndata: {\"text\":\"oi\"}\nretry: 3000\n\n",
       ])
     );
-    expect(events).toEqual([
-      { event: "conversation", data: '{"id":"abc"}' },
-      { event: "token", data: '{"text":"oi"}' },
-    ]);
+    expect(events).toEqual(['{"id":"abc"}', '{"text":"oi"}']);
   });
 
-  it("reassembles an event split across chunks", async () => {
-    const events = await collect(streamOf(["event: token\nda", 'ta: {"text":"x"}\n\n']));
-    expect(events).toEqual([{ event: "token", data: '{"text":"x"}' }]);
+  it("reassembles a block split across chunks", async () => {
+    const events = await collect(streamOf(["da", 'ta: {"text":"x"}\n\n']));
+    expect(events).toEqual(['{"text":"x"}']);
   });
 
-  it("ignores a trailing partial event with no terminator", async () => {
-    const events = await collect(streamOf(["event: token\ndata: {}"]));
-    expect(events).toEqual([]);
+  it("flushes a trailing block with no blank-line terminator when the stream ends", async () => {
+    const events = await collect(streamOf(["data: {}"]));
+    expect(events).toEqual(["{}"]);
   });
 
-  it("joins multiple data: lines within one event", async () => {
-    const events = await collect(streamOf(["event: token\ndata: line1\ndata: line2\n\n"]));
-    expect(events).toEqual([{ event: "token", data: "line1\nline2" }]);
+  it("joins multiple data: lines within one block", async () => {
+    const events = await collect(streamOf(["data: line1\ndata: line2\n\n"]));
+    expect(events).toEqual(["line1\nline2"]);
   });
 });

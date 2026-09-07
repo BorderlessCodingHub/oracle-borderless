@@ -27,7 +27,7 @@ A **"Claude Code"-style AI agent repositioned as an oracle**: a *single source o
 - `src/domain/` — business logic, organized by subdomain (bounded contexts)
 - `src/support/` — cross-cutting tooling (infra, integrations, utils)
 
-The web interface is a separate React + Vite SPA in [`frontend/`](frontend/), which talks to the backend over HTTP/SSE.
+The web interface is a separate React + Vite SPA in [`frontend/`](frontend/), which talks to the backend over HTTP/SSE using the AG-UI protocol (see ADR-0019).
 
 Start with **[`CLAUDE.md`](CLAUDE.md)** (rules and condensed overview) and **[`docs/architecture.md`](docs/architecture.md)** (full architecture).
 

@@ -232,6 +232,8 @@ trace, sem estado global e sem recompilar.
 
 ## 5. Consumo em duas fases
 
+> **Revisado em 2026-09-05** pelo ADR-0020: as duas fases continuam, mas a fase 1 roda no corpo SSE (não mais no request) e o corte é o evento `task` do nó `answer`. `start()` não existe mais; ver `TurnGraphPort.run()`.
+
 ```python
 # runner.py
 async def start(self, question, history, config) -> AsyncIterator[AgentStreamChunk]:
@@ -453,3 +455,11 @@ genuinamente difícil. O resto é tradução mecânica.
 - Contrato SSE inalterado: frontend do chat funciona sem alteração.
 - Run do LangSmith alcançável a partir do detalhe do turno na página de Ops.
 - Nenhum `user_email` em claro no LangSmith.
+
+---
+
+**Nota (2026-09-04).** O contrato de saída do runner mudou com a spec
+`2026-09-04-ag-ui-turno-design.md` / ADR-0019: `AgentStreamChunk` virou uma
+união com passos e tool calls, e o controller passou a emitir eventos AG-UI. O
+consumo em duas fases (seção 5) e o tratamento de falhas (seção 7) descritos
+aqui continuam valendo.

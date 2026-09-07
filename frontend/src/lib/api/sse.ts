@@ -1,7 +1,11 @@
-/** Parses an SSE byte stream into { event, data } records. */
-export async function* parseSSE(
+/** Lê um stream SSE e devolve o payload `data:` de cada bloco.
+ *
+ * O AG-UI põe tudo no JSON (ADR-0019): `event:`, `id:` e `retry:` são
+ * ignorados, como o protocolo pede. Linhas `data:` múltiplas no mesmo bloco
+ * são unidas com "\n". */
+export async function* parseSSEData(
   stream: ReadableStream<Uint8Array>
-): AsyncGenerator<{ event: string; data: string }> {
+): AsyncGenerator<string> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -12,19 +16,18 @@ export async function* parseSSE(
     const parts = buffer.split("\n\n");
     buffer = parts.pop() ?? "";
     for (const part of parts) {
-      const record = readEvent(part);
-      if (record) yield record;
+      const data = readData(part);
+      if (data !== null) yield data;
     }
   }
+  const tail = readData(buffer);
+  if (tail !== null) yield tail;
 }
 
-function readEvent(block: string): { event: string; data: string } | null {
-  let event = "message";
-  const dataLines: string[] = [];
-  for (const line of block.split("\n")) {
-    if (line.startsWith("event:")) event = line.slice(6).trim();
-    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
-  }
-  if (dataLines.length === 0) return null;
-  return { event, data: dataLines.join("\n") };
+function readData(block: string): string | null {
+  const lines = block
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim());
+  return lines.length ? lines.join("\n") : null;
 }

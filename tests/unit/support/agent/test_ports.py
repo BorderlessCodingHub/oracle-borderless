@@ -1,17 +1,39 @@
-from src.support.agent.ports import AgentMessage, AgentStreamChunk, KnowledgeSnippet
+from src.support.agent.ports import (
+    AgentMessage,
+    KnowledgeSnippet,
+    SourcesChunk,
+    StepChunk,
+    TextChunk,
+    ToolCallArgsChunk,
+    ToolCallEndChunk,
+    ToolCallResultChunk,
+    ToolCallStartChunk,
+)
 from src.domain.shared.value_objects.citation import Citation
 
 
-def test_text_chunk_defaults():
-    c = AgentStreamChunk(type="text", text="olá")
-    assert c.text == "olá" and c.citations == []
+def test_text_chunk_carries_text():
+    assert TextChunk(text="olá").text == "olá"
 
 
-def test_sources_chunk_carries_citations():
-    from src.domain.shared.value_objects.citation import Citation
+def test_sources_chunk_defaults_to_no_citations():
+    assert SourcesChunk().citations == []
+    c = SourcesChunk(citations=[Citation("web", "T", "u", "s")])
+    assert len(c.citations) == 1
 
-    c = AgentStreamChunk(type="sources", citations=[Citation("web", "T", "u", "s")])
-    assert c.type == "sources" and len(c.citations) == 1
+
+def test_step_chunk_detail_is_optional():
+    started = StepChunk(name="gate", phase="started")
+    finished = StepChunk(name="retrieve", phase="finished", detail={"kept": 3})
+    assert started.detail is None
+    assert finished.detail == {"kept": 3}
+
+
+def test_tool_call_chunks_are_plain_dataclasses():
+    assert ToolCallStartChunk(id="c1", name="web_search").name == "web_search"
+    assert ToolCallArgsChunk(id="c1", delta='{"q').delta == '{"q'
+    assert ToolCallEndChunk(id="c1").id == "c1"
+    assert ToolCallResultChunk(id="c1", status="error").status == "error"
 
 
 def test_agent_message():

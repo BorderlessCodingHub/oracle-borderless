@@ -1,32 +1,37 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
+import { AuthProvider } from "../../../hooks/useAuth";
+import { loggedIn, stubAuthFetch } from "../../../test/authFetch";
 import { Sidebar } from "./Sidebar";
 
+afterEach(() => vi.unstubAllGlobals());
+
 function renderSidebar() {
-  return render(
-    <MemoryRouter>
-      <Sidebar conversations={[]} activeId={null} onNew={vi.fn()} onOpen={vi.fn()} />
-    </MemoryRouter>
+  const fetchMock = stubAuthFetch(loggedIn());
+  render(
+    <AuthProvider>
+      <MemoryRouter>
+        <Sidebar conversations={[]} activeId={null} onNew={vi.fn()} onOpen={vi.fn()} />
+      </MemoryRouter>
+    </AuthProvider>
   );
+  return fetchMock;
 }
 
 describe("Sidebar", () => {
-  it("rodapé traz as configurações de autenticação, não o tema", () => {
-    renderSidebar();
-    // O ThemeToggle mudou para o canto superior direito da tela (topbar do
-    // ChatPage / Header do ops). Reintroduzi-lo aqui duplicaria o controle.
+  it("rodapé mostra a conta logada e o sair — sem controle de tema", async () => {
+    const fetchMock = renderSidebar();
     expect(screen.queryByRole("group", { name: "Tema da interface" })).not.toBeInTheDocument();
-    // O slot de auth mora no rodapé: identidade placeholder até /me existir.
-    const foot = screen.getByTestId("sidebar-foot");
-    expect(foot).toHaveTextContent("Visitante");
-    expect(foot).toHaveTextContent(/autenticação/i);
-  });
+    // O rodapé só aparece depois que /auth/me responde (restore é assíncrono).
+    expect(await screen.findByText("ana@x.com")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-foot")).toHaveTextContent("ana@x.com");
 
-  it("não exibe identidade enquanto não há autenticação", () => {
-    renderSidebar();
-    expect(screen.queryByText(/@/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/autenticado na borda/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /sair/i }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/auth\/logout$/),
+      expect.objectContaining({ method: "POST" })
+    );
   });
 
   it("lista vazia ganha um empty state em vez de espaço morto", () => {

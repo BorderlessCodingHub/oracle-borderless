@@ -16,18 +16,24 @@ vi.mock("../data/source", () => ({
   isDemo: true,
   askStream: async function* (input: { question: string }) {
     if (input.question === "first (gated)") {
-      yield { type: "conversation", id: "stale-convo" } as AskEvent;
+      yield { type: "run_started", conversationId: "stale-convo" } as AskEvent;
       yield { type: "token", text: "STALE_TOKEN " } as AskEvent;
       await gate.promise;
       yield { type: "token", text: "should-not-appear" } as AskEvent;
       yield { type: "done" } as AskEvent;
       return;
     }
+    if (input.question === "first (gated, silent end)") {
+      yield { type: "run_started", conversationId: "stale-silent" } as AskEvent;
+      yield { type: "token", text: "STALE " } as AskEvent;
+      await gate.promise;
+      return;
+    }
     for (const e of scenario.events) yield e;
   },
 }));
 
-import { useAskStream } from "./useAskStream";
+import { useAskStream, applyActivity, type ActivityItem } from "./useAskStream";
 
 beforeEach(() => {
   scenario.events = [];
@@ -36,7 +42,7 @@ beforeEach(() => {
 describe("useAskStream", () => {
   it("moves through thinking → streaming → done and accumulates tokens + citations", async () => {
     scenario.events = [
-      { type: "conversation", id: "c9" },
+      { type: "run_started", conversationId: "c9" },
       { type: "token", text: "olá " },
       { type: "token", text: "mundo" },
       { type: "sources", citations: [{ source_type: "SOP", title: "T", url: "https://x", snippet: "s" }] },
@@ -54,9 +60,8 @@ describe("useAskStream", () => {
 
   it("enters error status on an error event", async () => {
     scenario.events = [
-      { type: "conversation", id: "c9" },
+      { type: "run_started", conversationId: "c9" },
       { type: "error", message: "falhou" },
-      { type: "done" },
     ];
     const { result } = renderHook(() => useAskStream());
     await act(async () => {
@@ -71,7 +76,7 @@ describe("useAskStream", () => {
       gate.resolve = resolve;
     });
     scenario.events = [
-      { type: "conversation", id: "c-second" },
+      { type: "run_started", conversationId: "c-second" },
       { type: "token", text: "second answer" },
       { type: "done" },
     ];
@@ -108,5 +113,135 @@ describe("useAskStream", () => {
     expect(result.current.status).toBe("done");
     expect(result.current.answer).toBe("second answer");
     expect(result.current.conversationId).toBe("c-second");
+  });
+
+  it("a superseded run whose stream ends silently does not mark the new run as a broken connection", async () => {
+    gate.promise = new Promise<void>((resolve) => {
+      gate.resolve = resolve;
+    });
+    scenario.events = [
+      { type: "run_started", conversationId: "c-second" },
+      { type: "token", text: "second answer" },
+      { type: "done" },
+    ];
+    const { result } = renderHook(() => useAskStream());
+
+    let firstRunPromise!: Promise<void>;
+    await act(async () => {
+      // Not awaited: this run gates before its silent end, staying
+      // "in flight" while we start (and finish) a second, superseding run.
+      firstRunPromise = result.current.ask({ question: "first (gated, silent end)" });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await result.current.ask({ question: "second" });
+    });
+
+    await waitFor(() => expect(result.current.status).toBe("done"));
+
+    // Release the stale run's gate now that it has been superseded; its
+    // generator simply returns with no done/error, which must not stomp on
+    // the new run's already-"done" state.
+    await act(async () => {
+      gate.resolve();
+      await firstRunPromise;
+    });
+
+    expect(result.current.status).toBe("done");
+    expect(result.current.errorMessage).toBeNull();
+    expect(result.current.answer).toBe("second answer");
+  });
+
+  it("builds the activity timeline in arrival order, with steps and tool calls interleaved", async () => {
+    scenario.events = [
+      { type: "run_started", conversationId: "c1" },
+      { type: "step", name: "gate", phase: "started" },
+      { type: "step", name: "gate", phase: "finished", detail: { retrieve: true, degraded: false } },
+      { type: "step", name: "retrieve", phase: "started" },
+      { type: "step", name: "retrieve", phase: "finished", detail: { kept: 4 } },
+      { type: "step", name: "answer", phase: "started" },
+      { type: "tool_call_start", id: "t1", name: "web_search" },
+      { type: "tool_call_args", id: "t1", delta: '{"query":' },
+      { type: "tool_call_args", id: "t1", delta: '"psp"}' },
+      { type: "tool_call_end", id: "t1" },
+      { type: "tool_call_result", id: "t1", status: "ok" },
+      { type: "token", text: "resposta" },
+      { type: "step", name: "answer", phase: "finished" },
+      { type: "sources", citations: [] },
+      { type: "done" },
+    ];
+    const { result } = renderHook(() => useAskStream());
+    await act(async () => {
+      await result.current.ask({ question: "oi" });
+    });
+    await waitFor(() => expect(result.current.status).toBe("done"));
+
+    expect(result.current.activity).toEqual([
+      { kind: "step", name: "gate", status: "done", detail: { retrieve: true, degraded: false } },
+      { kind: "step", name: "retrieve", status: "done", detail: { kept: 4 } },
+      { kind: "step", name: "answer", status: "done", detail: undefined },
+      { kind: "tool", id: "t1", name: "web_search", argsRaw: '{"query":"psp"}', args: { query: "psp" }, status: "ok" },
+    ]);
+  });
+
+  it("a stream that ends without done or error is reported as a broken connection", async () => {
+    scenario.events = [
+      { type: "run_started", conversationId: "c1" },
+      { type: "token", text: "parcial" },
+    ];
+    const { result } = renderHook(() => useAskStream());
+    await act(async () => {
+      await result.current.ask({ question: "oi" });
+    });
+    await waitFor(() => expect(result.current.status).toBe("error"));
+    expect(result.current.errorMessage).toBe("conexão interrompida");
+  });
+
+  it("reset() clears the activity", async () => {
+    scenario.events = [
+      { type: "run_started", conversationId: "c1" },
+      { type: "step", name: "gate", phase: "started" },
+      { type: "done" },
+    ];
+    const { result } = renderHook(() => useAskStream());
+    await act(async () => {
+      await result.current.ask({ question: "oi" });
+    });
+    expect(result.current.activity).toHaveLength(1);
+    act(() => result.current.reset());
+    expect(result.current.activity).toEqual([]);
+  });
+});
+
+describe("applyActivity", () => {
+  it("a finished step without a prior started enters already done", () => {
+    expect(applyActivity([], { type: "step", name: "gate", phase: "finished", detail: { retrieve: false } })).toEqual([
+      { kind: "step", name: "gate", status: "done", detail: { retrieve: false } },
+    ]);
+  });
+
+  it("tool call lifecycle: pending → running (args parsed) → ok/error", () => {
+    let items: ActivityItem[] = applyActivity([], { type: "tool_call_start", id: "t1", name: "fetch_notion_page" });
+    expect(items).toEqual([{ kind: "tool", id: "t1", name: "fetch_notion_page", argsRaw: "", status: "pending" }]);
+    items = applyActivity(items, { type: "tool_call_args", id: "t1", delta: '{"page_id":"abc"}' });
+    items = applyActivity(items, { type: "tool_call_end", id: "t1" });
+    expect(items[0]).toMatchObject({ status: "running", args: { page_id: "abc" } });
+    items = applyActivity(items, { type: "tool_call_result", id: "t1", status: "error" });
+    expect(items[0]).toMatchObject({ status: "error" });
+  });
+
+  it("events for unknown tool ids and non-activity events leave the list untouched", () => {
+    const items: ActivityItem[] = [{ kind: "step", name: "gate", status: "running" }];
+    expect(applyActivity(items, { type: "tool_call_args", id: "ghost", delta: "x" })).toBe(items);
+    expect(applyActivity(items, { type: "token", text: "x" })).toBe(items);
+  });
+
+  it("unparseable args stay undefined but the tool still runs", () => {
+    let items: ActivityItem[] = applyActivity([], { type: "tool_call_start", id: "t1", name: "web_search" });
+    items = applyActivity(items, { type: "tool_call_args", id: "t1", delta: "{oops" });
+    items = applyActivity(items, { type: "tool_call_end", id: "t1" });
+    expect(items[0]).toMatchObject({ status: "running", args: undefined, argsRaw: "{oops" });
   });
 });

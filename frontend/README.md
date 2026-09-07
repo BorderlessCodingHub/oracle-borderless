@@ -13,7 +13,7 @@ React + TypeScript + Vite SPA for the Oracle Borderless product.
 Copy `.env.example` to `.env`:
 
 - `VITE_DEMO_MODE=true` — runs fully offline with seeded demo data.
-- `VITE_DEMO_MODE=false` + `VITE_API_BASE_URL=<url>` — talks to the FastAPI backend.
+- `VITE_DEMO_MODE=false` + `VITE_API_BASE_URL=` (empty) — talks to the FastAPI backend on the **same origin** (Vite proxy in dev, path routing in prod). Auth is a `SameSite=Lax` httpOnly cookie (ADR-0018): pointing `VITE_API_BASE_URL` at another host breaks login (the browser drops the cookie and every call 401s).
 
 The app detects demo mode via `import.meta.env.VITE_DEMO_MODE === "true"` and routes all API calls through the appropriate data source (see `src/data/source.ts`).
 

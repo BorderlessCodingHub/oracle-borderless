@@ -46,3 +46,32 @@ describe("toPlainText", () => {
     expect(result).toContain("PSP x BASE");
   });
 });
+
+// A interface já mostra as fontes no bloco recolhível ("N fontes"); o marcador
+// que o modelo copia do contexto das ferramentas ("[Fonte: título — url]") não
+// pode aparecer no corpo da resposta.
+describe("stripSourceMarkers", () => {
+  it("remove o marcador [Fonte: …] e a linha vazia que sobra", async () => {
+    const { stripSourceMarkers } = await import("./text");
+    const input =
+      "O PSP é o programa premium.\n\n[Fonte: Offer Architecture, PSP — https://app.notion.com/p/Offer-Architecture-3288d655c88981668dc4dfd824c986f7]";
+    expect(stripSourceMarkers(input)).toBe("O PSP é o programa premium.");
+  });
+
+  it("remove vários marcadores no meio do texto sem grudar os parágrafos", async () => {
+    const { stripSourceMarkers } = await import("./text");
+    const input = "Parágrafo 1.\n[Fonte: A — https://a]\n\nParágrafo 2.\n[Fonte: B — https://b]\n";
+    expect(stripSourceMarkers(input)).toBe("Parágrafo 1.\n\nParágrafo 2.");
+  });
+
+  it("remove um marcador ainda incompleto no fim (streaming token a token)", async () => {
+    const { stripSourceMarkers } = await import("./text");
+    expect(stripSourceMarkers("Resposta.\n\n[Fonte: Offer Archi")).toBe("Resposta.");
+  });
+
+  it("não toca em colchetes comuns nem em links markdown", async () => {
+    const { stripSourceMarkers } = await import("./text");
+    const input = "Veja [o guia](https://x) e o item [1] da lista.";
+    expect(stripSourceMarkers(input)).toBe(input);
+  });
+});

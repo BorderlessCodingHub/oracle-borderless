@@ -10,3 +10,5 @@
 .identity { display: grid; min-width: 0; }
 .name { font-size: .82rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status { font-size: .7rem; color: var(--text-muted); }
+.signOut { margin-left: auto; flex: none; font-size: .74rem; color: var(--text-muted); padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; transition: color .15s ease, border-color .15s ease; }
+.signOut:hover { color: var(--text); border-color: var(--text-muted); }

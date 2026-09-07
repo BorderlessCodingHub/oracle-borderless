@@ -1,6 +1,7 @@
 """Bootstrap da aplicação FastAPI: cria o app, registra middlewares, handlers e rotas."""
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from src.app.api.exception_handlers import register_exception_handlers
 from src.app.api.middlewares import (
@@ -27,6 +28,17 @@ def create_app() -> FastAPI:
     app.add_middleware(BackgroundTaskMiddleware)
     app.add_middleware(DBSessionMiddleware)
     app.add_middleware(RequestContextMiddleware)
+
+    # CORS: só quando SPA e API ficam em hosts distintos (CORS_ORIGINS
+    # preenchido). Vazio = mesmo origin/proxy do Vite em dev, sem middleware.
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=False,  # SPA precisa estar no MESMO host (cookie); CORS aqui não serve à auth (ADR-0018)
+            allow_methods=["*"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
 
     register_exception_handlers(app)
     register_routes(app)

@@ -72,10 +72,10 @@ class OpsOverviewResponse(BaseModel):
 # TurnSummaryResponse/TurnDetailResponse omitem, de propósito, dois campos que
 # existem na Entity TurnTrace:
 #
-# - `user_email`: a página de ops está aberta hoje (require_admin é no-op, por
-#   decisão da dona do produto). Expor o e-mail de quem fez cada pergunta para
-#   qualquer um com a URL seria vazamento de dado pessoal. Quando a auth de
-#   admin existir, isso pode ser revisto — mas é decisão de então, não de agora.
+# - `user_email`: mesmo com /ops atrás de `require_admin` (ADR-0017), expor o
+#   e-mail de quem fez cada pergunta para qualquer admin seria vazamento de
+#   dado pessoal desnecessário para a tela. Pode ser revisto, mas é decisão
+#   separada desta.
 # - `message_id`: hoje nunca é preenchido (nem a Action nem o controller de
 #   conversations o atribuem — o retorno de AppendAssistantMessageAction é
 #   descartado), então a coluna é sempre NULL. Expor um campo sempre nulo só

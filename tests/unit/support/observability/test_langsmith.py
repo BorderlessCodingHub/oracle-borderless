@@ -3,7 +3,7 @@
 import pytest
 
 from src.support.core.settings import settings
-from src.support.observability.langsmith import configure_langsmith, hash_email, new_run_id, run_url
+from src.support.observability.langsmith import configure_langsmith, hash_email, run_url
 
 
 def test_hashing_is_stable_for_the_same_person():
@@ -37,10 +37,6 @@ def test_no_link_without_a_run_id(monkeypatch):
 def test_the_link_points_at_the_run(monkeypatch):
     monkeypatch.setattr(settings, "LANGSMITH_PROJECT_URL", "https://smith.langchain.com/o/x/projects/p/y/")
     assert run_url("abc") == "https://smith.langchain.com/o/x/projects/p/y/r/abc"
-
-
-def test_run_ids_are_unique():
-    assert new_run_id() != new_run_id()
 
 
 def test_tracing_off_does_not_export(monkeypatch):

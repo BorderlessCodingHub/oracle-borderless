@@ -1,14 +1,16 @@
-"""Encaixe único da auth de admin da página de ops."""
+"""Admin do /ops: allowlist ADMIN_EMAILS; quem não é admin recebe 404 (ADR-0017)."""
+
+from fastapi import Depends
+
+from src.app.api.dependencies.require_user import require_user
+from src.domain.users.entities.authenticated_user import AuthenticatedUser
+from src.support.core.exceptions import NotFoundError
 
 
-async def require_admin() -> None:
-    """HOJE: no-op — a página está aberta por decisão da dona do produto, enquanto a
-    auth do ecossistema não está definida (ver CLAUDE.md, "pontos em aberto").
-
-    QUANDO A AUTH CHEGAR: validar aqui a identidade (hoje o e-mail chega por
-    `Cf-Access-Authenticated-User-Email`, sem validação) e, para quem não for admin,
-    levantar `NotFoundError` — que o exception_handlers traduz para **404**. Não usar
-    403: a página de ops não deve nem revelar que existe. O lado do frontend é
-    `useCurrentUser().isAdmin`, que decide se a rota é montada.
-    """
-    return None
+async def require_admin(
+    user: AuthenticatedUser = Depends(require_user),
+) -> AuthenticatedUser:
+    if not user.is_admin:
+        # 404, nunca 403: a página de ops não deve nem revelar que existe.
+        raise NotFoundError("recurso não encontrado")
+    return user

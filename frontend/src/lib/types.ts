@@ -31,8 +31,15 @@ export interface AskInput {
   conversationId?: string;
 }
 
+/** Eventos internos do turno. É o que o hook consome; a tradução do protocolo
+ * AG-UI para isto fica em lib/api/agui.ts (ADR-0019). */
 export type AskEvent =
-  | { type: "conversation"; id: string }
+  | { type: "run_started"; conversationId: string }
+  | { type: "step"; name: string; phase: "started" | "finished"; detail?: Record<string, unknown> }
+  | { type: "tool_call_start"; id: string; name: string }
+  | { type: "tool_call_args"; id: string; delta: string }
+  | { type: "tool_call_end"; id: string }
+  | { type: "tool_call_result"; id: string; status: "ok" | "error" }
   | { type: "token"; text: string }
   | { type: "sources"; citations: Citation[] }
   | { type: "error"; message: string }

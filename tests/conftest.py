@@ -1,5 +1,6 @@
 """Configuração global de testes."""
 
+import asyncio
 import os
 
 import pytest
@@ -13,3 +14,11 @@ def setup_test_env():
         os.environ["OPENAI_API_KEY"] = "sk-test-dummy-key"
     if not os.getenv("ANTHROPIC_API_KEY"):
         os.environ["ANTHROPIC_API_KEY"] = "sk-test-dummy-key"
+
+    yield
+
+    # Sessões semeadas por tests/fakes/auth.py (ADR-0018) não podem acumular
+    # no banco de dev entre execuções.
+    from tests.fakes.auth import purge_seeded_sessions
+
+    asyncio.run(purge_seeded_sessions())

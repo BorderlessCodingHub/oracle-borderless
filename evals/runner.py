@@ -1,6 +1,6 @@
 """Runner do harness de eval: monta o pipeline REAL por caso (grafo LangGraph),
 coleta a resposta e as fontes usadas, e chama o juiz. NÃO persiste nada
-(sem AnswerQuestionAction, sem escrita em conversations/messages)."""
+(não persiste nada: sem Actions de conversa, sem escrita em conversations/messages)."""
 
 import logging
 
@@ -8,7 +8,7 @@ from evals.models import CaseResult, EvalCase, MetricScore, metrics_for_category
 from src.domain.conversations.services.out_of_scope_reply import build_out_of_scope_reply
 from src.domain.documents.actions.list_knowledge_sections_action import ListKnowledgeSectionsAction
 from src.domain.shared.value_objects.citation import Citation
-from src.support.agent.ports import AgentMessage, KnowledgeSnippet, TurnDependencies, TurnSignals
+from src.support.agent.ports import AgentMessage, KnowledgeSnippet, TextChunk, TurnDependencies, TurnSignals
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +19,15 @@ def _sources_text(knowledge: list[KnowledgeSnippet]) -> str:
     return "\n\n".join(f"[{s.citation.title}] {s.content}" for s in knowledge)
 
 
-async def _collect_text(stream) -> str:
+async def _collect_text(run) -> str:
+    """As duas fases, na ordem. O harness inteiro já roda dentro de um escopo de
+    sessão (evals/__main__.py), então não há troca de escopo entre elas aqui."""
     text = ""
-    async for chunk in stream:
-        if chunk.type == "text":
+    async for chunk in run.prelude():
+        if isinstance(chunk, TextChunk):
+            text += chunk.text
+    async for chunk in run.stream():
+        if isinstance(chunk, TextChunk):
             text += chunk.text
     return text
 
@@ -54,8 +59,8 @@ async def run_case(case: EvalCase, *, graph, search, judge) -> CaseResult:
         refusal=build_out_of_scope_reply,
         nearest=None,
     )
-    stream = await graph.start(case.question, history, deps, signals, knowledge=knowledge)
-    answer = await _collect_text(stream)
+    run = graph.run(case.question, history, deps, signals, knowledge=knowledge)
+    answer = await _collect_text(run)
 
     sources = knowledge if knowledge is not None else []
     if knowledge is None and signals.retrieval_ran:

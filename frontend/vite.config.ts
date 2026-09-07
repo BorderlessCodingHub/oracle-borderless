@@ -6,6 +6,9 @@ export default defineConfig({
   server: {
     proxy: {
       "/conversations": "http://localhost:8000",
+      "/auth/login": "http://localhost:8000",
+      "/auth/me": "http://localhost:8000",
+      "/auth/logout": "http://localhost:8000",
       // Chaves específicas (não "/ops") — o proxy do Vite casa por prefixo, e
       // "/ops" bateria também no document request de quem digita a URL
       // /ops no navegador, quebrando a SPA. Backend só expõe estes subpaths

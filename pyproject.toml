@@ -37,6 +37,11 @@ dependencies = [
     # MCP (Model Context Protocol) — cliente usado por src/support/clients/notion/mcp_session.py.
     # Antes vinha transitivo via pydantic-ai; explicitado após a troca para LangGraph.
     "mcp>=2.1,<3",
+    # Autenticação (ADR-0018): bridge BFF com a plataforma
+    "httpx>=0.27",
+    # Protocolo AG-UI (ADR-0019): só tipos Pydantic + EventEncoder. A tradução
+    # chunk -> evento mora em src/app/api/streaming/; domínio e grafo não importam.
+    "ag-ui-protocol>=0.1,<1",
 ]
 
 [project.scripts]
