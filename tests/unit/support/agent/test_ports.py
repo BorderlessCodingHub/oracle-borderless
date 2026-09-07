@@ -1,39 +1,56 @@
-from src.support.agent.ports import (
-    AgentMessage,
-    KnowledgeSnippet,
-    SourcesChunk,
-    StepChunk,
-    TextChunk,
-    ToolCallArgsChunk,
-    ToolCallEndChunk,
-    ToolCallResultChunk,
-    ToolCallStartChunk,
-)
+"""`GraphEvent` é o StreamEvent redigido que cruza o port. `text_of` e
+`citations_of` são o que o controller e o eval leem sem conhecer a allowlist."""
+
 from src.domain.shared.value_objects.citation import Citation
+from src.support.agent.ports import ROOT_NAME, AgentMessage, GraphEvent, KnowledgeSnippet, citations_of, text_of
 
 
-def test_text_chunk_carries_text():
-    assert TextChunk(text="olá").text == "olá"
+def _ev(event, name, data, node=None, root=False):
+    metadata = {"thread_id": "t1"}
+    if node:
+        metadata["langgraph_node"] = node
+    return GraphEvent(
+        event=event, name=name, run_id="r1", tags=[], metadata=metadata,
+        parent_ids=[] if root else ["root"], data=data,
+    )
 
 
-def test_sources_chunk_defaults_to_no_citations():
-    assert SourcesChunk().citations == []
-    c = SourcesChunk(citations=[Citation("web", "T", "u", "s")])
-    assert len(c.citations) == 1
+def test_node_and_is_root_read_the_langchain_fields():
+    assert _ev("on_chain_start", "gate", {}, node="gate").node == "gate"
+    assert _ev("on_chain_start", ROOT_NAME, {}, root=True).node is None
+    assert _ev("on_chain_start", ROOT_NAME, {}, root=True).is_root is True
+    assert _ev("on_chain_start", "gate", {}, node="gate").is_root is False
 
 
-def test_step_chunk_detail_is_optional():
-    started = StepChunk(name="gate", phase="started")
-    finished = StepChunk(name="retrieve", phase="finished", detail={"kept": 3})
-    assert started.detail is None
-    assert finished.detail == {"kept": 3}
+def test_text_of_reads_answer_tokens():
+    ev = _ev("on_chat_model_stream", "ChatAnthropic", {"chunk": {"content": "olá ", "id": "x"}}, node="answer")
+    assert text_of(ev) == "olá "
 
 
-def test_tool_call_chunks_are_plain_dataclasses():
-    assert ToolCallStartChunk(id="c1", name="web_search").name == "web_search"
-    assert ToolCallArgsChunk(id="c1", delta='{"q').delta == '{"q'
-    assert ToolCallEndChunk(id="c1").id == "c1"
-    assert ToolCallResultChunk(id="c1", status="error").status == "error"
+def test_text_of_ignores_tokens_from_other_nodes_and_empty_chunks():
+    assert text_of(_ev("on_chat_model_stream", "m", {"chunk": {"content": "x"}}, node="gate")) == ""
+    assert text_of(_ev("on_chat_model_stream", "m", {"chunk": {}}, node="answer")) == ""
+
+
+def test_text_of_reads_the_refusal_from_the_updates_chunk_of_the_root():
+    ev = _ev("on_chain_stream", ROOT_NAME, {"chunk": ["updates", {"refuse": {"answer": "Não encontrei.", "citations": []}}]}, root=True)
+    assert text_of(ev) == "Não encontrei."
+
+
+def test_text_of_ignores_values_chunks_and_other_updates():
+    assert text_of(_ev("on_chain_stream", ROOT_NAME, {"chunk": ["values", {"answer": "Não encontrei."}]}, root=True)) == ""
+    assert text_of(_ev("on_chain_stream", ROOT_NAME, {"chunk": ["updates", {"gate": {"retrieve": True}}]}, root=True)) == ""
+    assert text_of(_ev("on_chain_end", "refuse", {"output": {"answer": "Não encontrei."}}, node="refuse")) == ""
+
+
+def test_citations_of_reads_only_the_root_chain_end():
+    c = Citation("notion", "Doc", "https://n/a", "trecho")
+    root_end = _ev("on_chain_end", ROOT_NAME, {"output": {"outcome": "answer", "citations": [c]}}, root=True)
+    node_end = _ev("on_chain_end", "answer", {"output": {"citations": [c]}}, node="answer")
+
+    assert citations_of(root_end) == [c]
+    assert citations_of(node_end) is None
+    assert citations_of(_ev("on_chain_end", ROOT_NAME, {"output": {"outcome": "refusal"}}, root=True)) == []
 
 
 def test_agent_message():

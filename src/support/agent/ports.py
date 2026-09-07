@@ -6,7 +6,7 @@ oposta, os nós do grafo consomem Actions de domínio pelos Protocols abaixo —
 """
 
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Callable, Literal, Protocol
+from typing import AsyncIterator, Callable, Protocol
 
 from src.domain.shared.value_objects.citation import Citation
 
@@ -17,70 +17,67 @@ class AgentMessage:
     content: str
 
 
-@dataclass
-class TextChunk:
-    """Texto do modelo de resposta (ou o texto canônico da recusa)."""
-
-    text: str
+ROOT_NAME = "LangGraph"
+"""`name` que o LangGraph dá ao grafo raiz nos eventos do `astream_events`."""
 
 
 @dataclass
-class SourcesChunk:
-    """Fontes do turno. Sempre o último chunk do stream."""
+class GraphEvent:
+    """Um StreamEvent do `astream_events`, já REDIGIDO pelo runner (regra 4).
 
-    citations: list[Citation] = field(default_factory=list)
-
-
-@dataclass
-class StepChunk:
-    """Um nó do grafo abriu ou fechou: gate, retrieve, refuse ou answer.
-
-    `detail` só vem no `finished` e só quando há dado útil para a UI
-    (ex.: {"kept": 4} do retrieval). Ver ADR-0019.
+    Espelha `langchain_core.runnables.schema.StandardStreamEvent` campo a
+    campo, sem importar langchain — o domínio consome isto. `data` carrega
+    `Citation` onde há fontes; quem serializa é a camada `app` (ADR-0021).
     """
 
+    event: str
     name: str
-    phase: Literal["started", "finished"]
-    detail: dict | None = None
+    run_id: str
+    tags: list[str] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
+    parent_ids: list[str] = field(default_factory=list)
+    data: dict = field(default_factory=dict)
+
+    @property
+    def node(self) -> str | None:
+        return self.metadata.get("langgraph_node")
+
+    @property
+    def is_root(self) -> bool:
+        return not self.parent_ids
 
 
-@dataclass
-class ToolCallStartChunk:
-    id: str
-    name: str
+def _updates_chunk(event: GraphEvent) -> dict | None:
+    """O payload de um chunk `["updates", {...}]` do raiz, ou None."""
+    if event.event != "on_chain_stream" or not event.is_root:
+        return None
+    chunk = event.data.get("chunk")
+    if isinstance(chunk, (list, tuple)) and len(chunk) == 2 and chunk[0] == "updates":
+        return chunk[1] or {}
+    return None
 
 
-@dataclass
-class ToolCallArgsChunk:
-    """Fragmento do JSON dos argumentos, como o provedor o entrega."""
-
-    id: str
-    delta: str
-
-
-@dataclass
-class ToolCallEndChunk:
-    id: str
-
-
-@dataclass
-class ToolCallResultChunk:
-    """Só o status. O conteúdo que a tool devolveu ao modelo NUNCA passa por
-    aqui (regra 4 do CLAUDE.md) — fica no LangSmith."""
-
-    id: str
-    status: Literal["ok", "error"]
+def text_of(event: GraphEvent) -> str:
+    """Texto que vira resposta: os tokens do `answer` (`on_chat_model_stream`) e
+    o texto canônico da recusa (chave `answer` do update do nó `refuse`). ""
+    para qualquer outro evento — inclusive o `on_chain_end` do `refuse`, que
+    repete o texto e não pode ser contado duas vezes."""
+    if event.event == "on_chat_model_stream" and event.node == "answer":
+        chunk = event.data.get("chunk") or {}
+        return chunk.get("content") or ""
+    updates = _updates_chunk(event)
+    if updates is not None:
+        return (updates.get("refuse") or {}).get("answer") or ""
+    return ""
 
 
-AgentStreamChunk = (
-    TextChunk
-    | SourcesChunk
-    | StepChunk
-    | ToolCallStartChunk
-    | ToolCallArgsChunk
-    | ToolCallEndChunk
-    | ToolCallResultChunk
-)
+def citations_of(event: GraphEvent) -> list[Citation] | None:
+    """As fontes do turno: só no `on_chain_end` do raiz (state final). None nos
+    demais eventos, [] quando o turno terminou sem fontes (recusa)."""
+    if event.event == "on_chain_end" and event.is_root:
+        output = event.data.get("output") or {}
+        return list(output.get("citations") or [])
+    return None
 
 
 @dataclass
@@ -181,19 +178,21 @@ class TurnDependencies:
 
 class TurnRun(Protocol):
     """Um turno já montado, consumido em DUAS FASES (ADR-0020). Nada executa até
-    `prelude()` ser iterado."""
+    `prelude()` ser iterado. Ambas as fases emitem `GraphEvent` já redigidos
+    (ADR-0021)."""
 
-    def prelude(self) -> AsyncIterator[AgentStreamChunk]:
+    def prelude(self) -> AsyncIterator[GraphEvent]:
         """Fase 1: gate → retrieve → (refuse | entrada do answer). Toca o banco
         via `deps`: consumir ATÉ O FIM dentro de um escopo de sessão, antes de
-        `stream()`. Emite StepChunk ao vivo (started na entrada do nó, finished
-        no update). Numa recusa, emite também o TextChunk canônico."""
+        `stream()`. Termina depois de emitir o `on_chain_start` do nó `answer`
+        ou o `on_chain_end` do nó `refuse`."""
 
-    def stream(self) -> AsyncIterator[AgentStreamChunk]:
-        """Fase 2: o restante — texto, tool calls, `answer finished`,
-        SourcesChunk. Não toca o banco; deve rodar FORA de escopo de sessão.
-        Chamar antes de `prelude()` esgotar é erro de programação
-        (RuntimeError)."""
+    def stream(self) -> AsyncIterator[GraphEvent]:
+        """Fase 2: o restante — tokens (`on_chat_model_stream`), tools, chunks
+        de `updates`/`values`, `on_chain_end` do `answer` e, por último, o
+        `on_chain_end` do raiz (com `citations`). Não toca o banco; deve rodar
+        FORA de escopo de sessão. Chamar antes de `prelude()` esgotar é erro de
+        programação (RuntimeError)."""
 
 
 class TurnGraphPort(Protocol):
