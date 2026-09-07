@@ -84,13 +84,13 @@ export const ARCHITECTURE_MAP: MapBand[] = [
     boxes: [
       {
         id: "ask",
-        label: "Pergunta (AG-UI)",
-        description: "POST /conversations/ask recebe RunAgentInput e responde eventos AG-UI: passos do grafo, tool calls, texto e fontes. Tradução chunk → evento na camada app.",
+        label: "Pergunta (StreamEvents)",
+        description: "POST /conversations/ask recebe {input, config} — os parâmetros de astream_events — e responde StreamEvents do LangChain, um por bloco event:/data:, já redigidos: passos do grafo, tokens, tools e fontes. Serialização na camada app.",
         files: [
           "src/app/api/controllers/conversation_controller.py",
           "src/domain/conversations/actions/open_turn_action.py",
-          "src/app/api/requests/run_agent_request.py",
-          "src/app/api/streaming/ag_ui_encoder.py",
+          "src/app/api/requests/stream_events_request.py",
+          "src/app/api/streaming/stream_event_encoder.py",
         ],
       },
       {
@@ -148,7 +148,7 @@ export const ARCHITECTURE_MAP: MapBand[] = [
       {
         id: "runner",
         label: "Dois escopos de sessão",
-        description: "A fase 1 do grafo (gate → retrieval → recusa ou entrada da resposta) roda no corpo SSE dentro de um escopo de sessão próprio e emite cada passo ao vivo; o restante corre sem sessão. É o que mantém retrieval e streaming em escopos diferentes.",
+        description: "O grafo é consumido via astream_events. A fase 1 (gate → retrieval → recusa ou entrada da resposta) roda no corpo SSE dentro de um escopo de sessão próprio e termina no on_chain_start do nó answer; o restante corre sem sessão. O EventRedactor é a única barreira entre o state e o cliente.",
         files: [
           "src/support/agent/graph/runner.py",
           "src/support/core/session_scope.py",

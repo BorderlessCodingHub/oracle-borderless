@@ -172,8 +172,9 @@ def _fill_usage(signals, message: AIMessage) -> None:
 
 
 async def answer_node(state: TurnState, config) -> dict:
-    """Resposta do oráculo. Os tokens saem daqui pelo stream_mode="messages" do
-    LangGraph; este nó devolve a mensagem completa para o tool loop."""
+    """Resposta do oráculo. Os tokens saem daqui como `on_chat_model_stream` do
+    `astream_events` (o modelo strema via callbacks mesmo com `ainvoke`); este
+    nó devolve a mensagem completa para o tool loop."""
     cfg = config["configurable"]
     signals = cfg["signals"]
 

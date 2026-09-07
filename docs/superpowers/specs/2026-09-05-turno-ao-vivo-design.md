@@ -5,6 +5,10 @@
 **Evolui:** [spec AG-UI de 2026-09-04](2026-09-04-ag-ui-turno-design.md), seções 7 e 8
 **ADR resultante:** ADR-0020 (substitui a seção "consumo em duas fases" do ADR-0016 quanto a *onde* a fase 1 roda)
 
+> **Nota (2026-09-07):** o corte da fase 1 deixou de usar o `task` do
+> `stream_mode="debug"`; é o `on_chain_start` do nó `answer` no
+> `astream_events` (ADR-0021). O restante desta spec continua válido.
+
 ## Contexto
 
 A spec de 04/09 entregou o contrato AG-UI e a linha do tempo do turno, mas

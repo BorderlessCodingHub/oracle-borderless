@@ -176,9 +176,10 @@ que permite `EventSource`/parsers filtrarem por nome sem abrir o JSON.
 | chunk do modo `updates` | `on_chain_stream` | `LangGraph` | `{"chunk": ["updates", {"<nó>": projeção(update)}]}` |
 | chunk do modo `values` | `on_chain_stream` | `LangGraph` | `{"chunk": ["values", projeção(state)]}` |
 | saída de nó `gate` / `retrieve` / `refuse` / `answer` | `on_chain_end` | nó | `{"output": projeção(saída do nó)}` |
-| token do modelo (só no nó `answer`) | `on_chat_model_stream` | classe do modelo | `{"chunk": {"content": str, "id": str}}` — `content` é o texto do `AIMessageChunk` já achatado (Anthropic entrega lista de blocos, OpenAI string; `_text_of` de hoje) |
+| token do modelo (só no nó `answer`) | `on_chat_model_stream` | classe do modelo | `{"chunk": {"content": str, "id": str}}` — `content` é o texto do `AIMessageChunk` já achatado (Anthropic entrega lista de blocos, OpenAI string; `_text_of` de hoje). Chunks cujo texto achatado é vazio (só `tool_call_chunks`, ou o vazio final do provedor) são descartados. |
 | tool começa | `on_tool_start` | nome da tool | `{"input": args}` só para `web_search`; `{}` para as demais (`fetch_notion_page`: o `page_id` não cruza o port) |
 | tool termina | `on_tool_end` | nome da tool | `{"output": {"status": "ok" \| "error", "tool_call_id": str}}`. **Nunca o conteúdo da tool.** |
+| tool levantou exceção | `on_tool_error` | nome da tool | `{"output": {"status": "error", "tool_call_id": str}}` — mesma forma do `on_tool_end`; a mensagem do erro não sai |
 | fim | `on_chain_end` | `LangGraph` | `{"output": {"outcome": str, "citations": [...]}}` |
 | falha durante o stream | `on_chain_error` | `LangGraph` | `{"error": "erro ao gerar a resposta"}` — sintetizado pela camada `app`, terminal. **Sem `on_chain_end` depois.** |
 
@@ -477,8 +478,8 @@ Frontend:
   descrição da caixa `runner` (sem `debug`).
 - Notas de "substituído por" no topo desta família de specs: 04/09 (AG-UI) e
   05/09 (turno ao vivo, onde o corte cita o `debug`).
-- `as_stream.md` (referência do método, hoje solto na raiz e não versionado)
-  vai para `docs/reference/langchain-astream-events.md`, citado pelo ADR-0021 e
+- `docs/as_stream.md` (referência do método, cópia da página oficial) é
+  versionado e citado pelo ADR-0021, citado pelo ADR-0021 e
   por esta spec. É a cópia local do que o ADR assume sobre o schema.
 
 ## 10. Sequência de corte
