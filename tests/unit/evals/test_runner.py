@@ -66,6 +66,9 @@ class _FakeRun:
             data={"output": {"outcome": "answer", "citations": []}},
         )
 
+    async def aclose(self) -> None:
+        return None
+
 
 class _RecordingSearch:
     def __init__(self):

@@ -173,3 +173,11 @@ def test_tool_end_carries_only_status_and_tool_call_id():
 
 def test_tool_events_outside_the_tools_node_are_dropped():
     assert EventRedactor().redact(_raw("on_tool_start", "web_search", {"input": {}}, node="answer")) is None
+
+
+def test_malformed_updates_payload_and_non_toolmessage_output_fail_closed():
+    r = EventRedactor()
+    assert r.redact(_raw("on_chain_stream", ROOT_NAME, {"chunk": ("updates", [SECRET])}, root=True)) is None
+    weird = r.redact(_raw("on_tool_end", "web_search", {"output": {"raw": SECRET}}, node="tools"))
+    assert weird.data == {"output": {"status": "error", "tool_call_id": None}}
+    assert SECRET not in repr(weird.data)

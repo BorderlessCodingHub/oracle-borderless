@@ -84,6 +84,9 @@ class FakeTurnRun:
         yield ev.node("on_chain_end", "answer", {"output": final})
         yield ev.root("on_chain_end", {"output": final})
 
+    async def aclose(self) -> None:
+        return None
+
 
 class FakeTurnGraph:
     def __init__(
@@ -179,6 +182,9 @@ class _FailingRun:
     async def stream(self) -> AsyncIterator[GraphEvent]:
         yield self._ev.token("ola ")
         raise RuntimeError("boom: engine caiu no meio do stream")
+
+    async def aclose(self) -> None:
+        return None
 
 
 class _FailingGraph:

@@ -9,7 +9,6 @@ raiz para falha no meio do stream. Ele é terminal — não há `on_chain_end`
 depois dele.
 """
 
-import dataclasses
 import json
 
 from src.domain.shared.value_objects.citation import Citation
@@ -23,8 +22,6 @@ def _json_default(obj):
     if isinstance(obj, Citation):
         # page_id fica de fora: é o id interno do Notion (regra 4).
         return {"source_type": obj.source_type, "title": obj.title, "url": obj.url, "snippet": obj.snippet}
-    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        return dataclasses.asdict(obj)
     raise TypeError(f"objeto não serializável no fio: {type(obj).__name__}")
 
 

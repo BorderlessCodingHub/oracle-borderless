@@ -33,7 +33,7 @@ Nomes seguem `on_[chain|chat_model|tool|...]_(start|stream|end)`. Um
 como `on_chain_stream` do grafo raiz, com `data.chunk == (modo, payload)`.
 
 Referência do método (assinatura, tabela de eventos por tipo de runnable,
-filtros `include_*`/`exclude_*`, versões `v1`/`v2`/`v3`): `as_stream.md`, cópia
+filtros `include_*`/`exclude_*`, versões `v1`/`v2`/`v3`): `docs/as_stream.md`, cópia
 da página `Runnable.astream_events` da referência do `langchain_core`
 (https://reference.langchain.com/python/langchain-core/runnables/base/Runnable/astream_events).
 Esta spec usa **`version="v2"`**: é o schema `StreamEvent` acima, o que o
@@ -214,11 +214,12 @@ inteira. `search_query` cai por ser dispensável, não por risco. O update do n�
 **Metadata** passa por allowlist: `langgraph_node`, `langgraph_step`,
 `thread_id`, `ls_provider`, `ls_model_name`. `user_hash`, `langgraph_path`,
 `langgraph_triggers`, `langgraph_checkpoint_ns` e o resto ficam de fora.
-`tags` vai como vem (só rótulos `seq:step:N`/`graph:step:N`). O runner garante
-`metadata.thread_id` em todo evento emitido: é como o cliente descobre o id da
-conversa a partir do `on_chain_start` do raiz (papel do `threadId` do
-`RUN_STARTED`). O `run_id` do evento raiz é o `config.run_id` do request — o
-mesmo run do LangSmith.
+`tags` vai como vem (só rótulos `seq:step:N`/`graph:step:N`). Todo evento
+emitido carrega `metadata.thread_id`: o LangGraph copia `configurable.thread_id`
+para o `metadata` de todos os eventos e o `error_event` o define explicitamente
+— é como o cliente descobre o id da conversa a partir do `on_chain_start` do
+raiz (papel do `threadId` do `RUN_STARTED`). O `run_id` do evento raiz é o
+`config.run_id` do request — o mesmo run do LangSmith.
 
 **Regras de passos**, preservadas do ADR-0019:
 
@@ -315,10 +316,13 @@ Um `EventRedactor` (nome interno; um por run) substitui o `TurnEmitter`:
 `_TurnRun.prelude()` itera o gerador, redige, faz `yield` do que passar e
 **para** quando o evento redigido é `on_chain_start` com `name == "answer"`
 (depois de emiti-lo) ou `on_chain_end` com `name == "refuse"` (depois de
-emiti-lo). `stream()` continua o mesmo gerador (o `break` não fecha o
-`astream_events`, como hoje), marca `first_token_ms` no primeiro
-`on_chat_model_stream` com `content` não vazio e `engine_ms` ao fim, e antes de
-emitir o `on_chain_end` do raiz emite o `on_chain_end` do `answer` segurado.
+emiti-lo). `stream()` continua o mesmo gerador. O `astream_events` roda o
+grafo numa task própria e não pausa no `break`: a separação das fases vem da
+ordem dos eventos (nenhum nó a partir do `answer` toca o banco). `TurnRun.aclose()`
+cancela a task quando o turno é abandonado. `stream()` marca `first_token_ms`
+no primeiro `on_chat_model_stream` com `content` não vazio e `engine_ms` ao
+fim, e antes de emitir o `on_chain_end` do raiz emite o `on_chain_end` do
+`answer` segurado.
 
 Nada muda em `nodes.py`, `edges.py`, `builder.py`, `state.py`, `tools.py`. O
 docstring de `answer_node` que cita `stream_mode="messages"` é atualizado.
@@ -343,7 +347,8 @@ CONTENT_TYPE = "text/event-stream"
 
 def encode(event: GraphEvent) -> str:
     """`event: <event.event>\\ndata: <json>\\n\\n`. Citation vira
-    {source_type, title, url, snippet}; qualquer outro dataclass, asdict."""
+    {source_type, title, url, snippet}; qualquer outro objeto levanta
+    TypeError (fail closed)."""
 
 def error_event(run_id: str, thread_id: str, message: str) -> GraphEvent:
     """O único evento que não vem do grafo: on_chain_error do raiz, com
@@ -351,8 +356,8 @@ def error_event(run_id: str, thread_id: str, message: str) -> GraphEvent:
 ```
 
 `json.dumps(..., ensure_ascii=False, default=_json_default)`; o `default`
-conhece `Citation` (sem `page_id`) e dataclasses genéricos. Sem dependência
-externa.
+conhece só `Citation` (sem `page_id`); qualquer outro objeto é recusado. Sem
+dependência externa.
 
 ### 4.3 Controller
 

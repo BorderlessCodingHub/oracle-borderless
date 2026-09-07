@@ -18,7 +18,7 @@ O ADR-0019 pôs o AG-UI no fio: o runner consumia `astream(stream_mode=["updates
 
 O LangChain já tem um formato de evento de streaming, o `StreamEvent` (`langchain_core.runnables.schema`), produzido por `Runnable.astream_events`. Um `CompiledStateGraph` aceita `stream_mode` nessa chamada; os chunks de cada modo chegam como `on_chain_stream` do grafo raiz. A entrada de cada nó é um `on_chain_start` com `metadata.langgraph_node` — exatamente o sinal que o modo `debug` fornecia para o corte da fase 1.
 
-O evento cru, porém, carrega o state inteiro (`data.input` de cada nó, snapshots de `values`), o prompt completo (`on_chat_model_start`) e a `ToolMessage` inteira (`on_tool_end`). Mandar isso ao cliente viola a regra 4. Os filtros nativos (`include_*`/`exclude_*`) operam por nome/tipo/tag e não tocam em `data`, então não bastam.
+O evento cru, porém, carrega o state inteiro (`data.input` de cada nó, snapshots de `values`), o prompt completo (`on_chat_model_start`) e a `ToolMessage` inteira (`on_tool_end`). Mandar isso ao cliente viola a regra 4. Os filtros nativos (`include_*`/`exclude_*`) operam por nome/tipo/tag e não tocam em `data`, então não bastam. A referência do método está versionada em `docs/as_stream.md`.
 
 ## Decisão
 
@@ -41,6 +41,8 @@ O evento cru, porém, carrega o state inteiro (`data.input` de cada nó, snapsho
 - `values` duplica o state projetado a cada super-step — custo pequeno porque a projeção é minúscula, mas existe.
 - Tokens dependem de o modelo stremar dentro de `astream_events` (`BaseChatModel._should_stream` detecta o handler). Anthropic e OpenAI stremam; um modelo que não strema não produz `on_chat_model_stream` e o texto não chega ao fio — fakes de teste precisam ser `BaseChatModel` de verdade.
 - `on_chain_error` é um nome nosso (o `astream_events` não emite erro como evento; ele levanta). Segue a convenção `on_<tipo>_<fase>` para não criar um segundo estilo.
+- `astream_events` roda o grafo numa task própria, com fila sem limite: parar de iterar não pausa o grafo. A separação das fases do ADR-0020 passa a vir da ORDEM dos eventos e do fato de nenhum nó a partir do `answer` tocar o banco — não de o grafo esperar o consumidor. `TurnRun.aclose()` cancela a task em turnos abandonados.
+- Corte coordenado: o fio muda nos dois sentidos (body e eventos). Frontend antigo contra backend novo, ou o inverso, recebe 422. Os dois sobem juntos.
 
 ## Alternativas consideradas
 

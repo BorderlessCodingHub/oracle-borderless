@@ -248,9 +248,9 @@ async def test_prelude_ends_at_the_answer_node_entry_before_the_model_replies():
 @pytest.mark.asyncio
 async def test_prelude_ends_at_the_answer_node_even_when_the_first_reply_is_only_tool_calls():
     """Lado 2 da invariante: parar no primeiro TEXTO não bastava — uma primeira
-    resposta só de tool_calls não produz token, e o laço answer -> tools ->
-    answer inteiro rodaria dentro do escopo de sessão, segurando a conexão
-    Postgres durante chamadas HTTP externas."""
+    resposta só de tool_calls não produz token, e a entrada do `answer` é o
+    único sinal que chega ANTES do laço answer -> tools -> answer. (O grafo
+    não pausa no `break`; o que este teste fixa é a ordem dos eventos.)"""
     executed = {"ran": False}
     runner = TurnGraphRunner(graph=_tool_loop_graph(executed), enable_tools=True)
     run = runner.run(
@@ -260,7 +260,7 @@ async def test_prelude_ends_at_the_answer_node_even_when_the_first_reply_is_only
 
     prelude = await _drain(run.prelude())
 
-    assert executed["ran"] is False, "a tool rodou DENTRO de prelude(): HTTP externo com a sessão de banco presa"
+    assert executed["ran"] is False, "a tool já tinha rodado quando a entrada do answer foi entregue — a ordem dos eventos do astream_events não separa mais a fase 1 do tool loop"
     assert _steps(prelude) == [("answer", "start")]
 
     rest = await _drain(run.stream())
@@ -364,6 +364,23 @@ async def test_stream_before_prelude_is_exhausted_is_a_programming_error():
 
     with pytest.raises(RuntimeError, match="prelude"):
         await _drain(run.stream())
+
+
+@pytest.mark.asyncio
+async def test_aclose_after_prelude_stops_the_graph_before_the_model_replies():
+    """Turno abandonado (desconexão, falha): `aclose()` cancela a task do grafo,
+    então um modelo bloqueado nunca é liberado nem chamado de novo."""
+    released = asyncio.Event()
+    model = _chat("nunca sai", released=released)
+    run = _runner().run("o que é PSP?", [], _deps(_RecordingSearch([_snippet()])), TurnSignals(), extra_config=_models(answer=model))
+
+    await _drain(run.prelude())
+    await run.aclose()
+    await asyncio.sleep(0.05)
+
+    assert model.calls == 0 or not released.is_set()
+    rest = await _drain(run.stream())
+    assert rest == []
 
 
 # --- formato -------------------------------------------------------------------

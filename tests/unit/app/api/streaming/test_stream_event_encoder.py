@@ -3,6 +3,8 @@
 
 import json
 
+import pytest
+
 from src.app.api.streaming.stream_event_encoder import CONTENT_TYPE, ERROR_EVENT, encode, error_event
 from src.domain.shared.value_objects.citation import Citation
 from src.support.agent.ports import ROOT_NAME, GraphEvent
@@ -50,3 +52,17 @@ def test_error_event_is_a_root_on_chain_error_with_the_thread_id():
 
 def test_content_type_is_event_stream():
     assert CONTENT_TYPE == "text/event-stream"
+
+
+def test_unknown_objects_are_refused_instead_of_serialised():
+    """Fail closed: só Citation atravessa; um dataclass qualquer no data teria
+    que ser decidido na spec (poderia carregar page_id ou state)."""
+    from dataclasses import dataclass
+
+    @dataclass
+    class Foreign:
+        x: int
+
+    ev = GraphEvent(event="on_chain_end", name=ROOT_NAME, run_id="r1", tags=[], metadata={}, parent_ids=[], data={"output": Foreign(1)})
+    with pytest.raises(TypeError, match="não serializável"):
+        encode(ev)

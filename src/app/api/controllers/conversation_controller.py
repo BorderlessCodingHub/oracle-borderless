@@ -85,6 +85,7 @@ class ConversationController:
 
         async def event_source() -> AsyncIterator[str]:
             failed = False
+            run = None
             try:
                 async with async_session_scope():
                     run = RunTurnAction(graph, embeddings).execute(turn)
@@ -104,6 +105,9 @@ class ConversationController:
                 # informativo. Truncado em 512: é o tamanho da coluna.
                 draft.error = f"{type(exc).__name__}: {exc}"[:512]
                 yield encode(error_event(run_id, thread_id, "erro ao gerar a resposta"))
+            finally:
+                if run is not None:
+                    await run.aclose()
 
             draft.citations_count = len(captured["citations"])
             _absorb_engine_metrics(draft)

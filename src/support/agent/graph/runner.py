@@ -7,6 +7,8 @@ real do nó de resposta (`on_chain_start` do nó `answer`) ou até o fim da recu
 (`on_chain_end` do nó `refuse`); é a fase que toca o banco e o controller a
 consome dentro de `async_session_scope()`. `stream()` é o resto — tokens, tools,
 chunks de `updates`/`values`, fim do `answer` e do raiz — e roda sem sessão.
+O grafo não espera o consumidor (ver `_TurnRun`): a separação das fases vem da
+ordem dos eventos, não de uma pausa.
 
 Todo evento passa pelo `EventRedactor` antes de cruzar o port: é a ÚNICA
 barreira entre o state do grafo (knowledge, prompt, conteúdo de tool) e o
@@ -116,6 +118,7 @@ class EventRedactor:
             event=event,
             name=name,
             run_id=str(raw.get("run_id", "")),
+            # tags passam sem filtro por decisão da spec (§1.2): hoje só seq:step:N/graph:step:N.
             tags=list(raw.get("tags") or []),
             metadata={key: metadata[key] for key in _METADATA_KEYS if key in metadata},
             parent_ids=parent_ids,
@@ -137,6 +140,8 @@ class EventRedactor:
                 return None
             mode, payload = chunk
             if mode == "updates":
+                if not isinstance(payload, dict):
+                    return None
                 return {"chunk": ["updates", {n: _project(u) for n, u in (payload or {}).items()}]}
             if mode == "values":
                 return {"chunk": ["values", _project(payload)]}
@@ -164,7 +169,8 @@ class EventRedactor:
         if event == "on_tool_error":
             return {"output": {"status": "error", "tool_call_id": data.get("tool_call_id")}}
         output = data.get("output")
-        status = _tool_status(output) if isinstance(output, ToolMessage) else "ok"
+        # fail closed: saída fora do formato do ToolNode não vira "ok" por acaso
+        status = _tool_status(output) if isinstance(output, ToolMessage) else "error"
         return {"output": {"status": status, "tool_call_id": getattr(output, "tool_call_id", None)}}
 
 
@@ -214,10 +220,17 @@ def _is_root_end(event: GraphEvent) -> bool:
 class _TurnRun:
     """Implementa `TurnRun` por cima do gerador `astream_events` do LangGraph.
 
-    O `break` no `async for` NÃO fecha o gerador — é isso que permite `stream()`
-    retomar exatamente de onde `prelude()` parou. Enquanto ninguém itera, o
-    LangGraph não avança: o nó `answer` só começa quando `stream()` é iterado,
-    já fora do escopo de sessão.
+    O `astream_events` NÃO é dirigido pelo consumidor: ele roda o grafo numa
+    task própria e empilha os eventos numa fila sem limite. Parar de iterar (o
+    `break` do `prelude()`) não pausa o grafo — o nó `answer` pode começar antes
+    de `stream()` ser iterado. O que a fase 1 garante é mais estreito, e basta:
+    a ORDEM dos eventos assegura que gate/retrieve/refuse já terminaram quando a
+    entrada do `answer` é entregue, e nenhum nó a partir do `answer` toca `deps`
+    (banco). Nenhum trabalho de banco escapa do escopo de sessão, ainda que o
+    modelo já possa estar rodando enquanto o controller fecha o escopo.
+
+    `aclose()` cancela a task do grafo quando o turno é abandonado (desconexão,
+    falha): sem isso ela seguiria chamando LLM e tools até o GC fechar o gerador.
     """
 
     def __init__(self, agen, redactor: EventRedactor, signals: TurnSignals) -> None:
@@ -250,6 +263,9 @@ class _TurnRun:
                 if self._redactor.pending_answer_end is not None:
                     yield self._redactor.pending_answer_end
             yield event
+
+    async def aclose(self) -> None:
+        await self._agen.aclose()
 
 
 class TurnGraphRunner:

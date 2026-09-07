@@ -194,6 +194,10 @@ class TurnRun(Protocol):
         FORA de escopo de sessão. Chamar antes de `prelude()` esgotar é erro de
         programação (RuntimeError)."""
 
+    async def aclose(self) -> None:
+        """Encerra o turno antes do fim (desconexão, falha): cancela a execução
+        do grafo. Idempotente; seguro chamar depois de `stream()` esgotar."""
+
 
 class TurnGraphPort(Protocol):
     def run(
