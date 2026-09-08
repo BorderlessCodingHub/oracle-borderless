@@ -6,7 +6,7 @@ import type {
   ConversationSummary,
 } from "../types";
 import { apiUrl, getJSON, handleUnauthorized } from "./client";
-import { buildRunAgentInput, parseAgUiStream, toAskEvents } from "./agui";
+import { buildAskBody, parseStreamEvents, toAskEvents } from "./streamEvents";
 
 interface SummaryDTO { id: string; title: string | null; updated_at: string; }
 interface MessageDTO { role: "user" | "assistant"; content: string; sources?: Citation[] | null; }
@@ -34,7 +34,7 @@ export async function* askStream(input: AskInput): AsyncGenerator<AskEvent> {
   const resp = await fetch(apiUrl("/conversations/ask"), {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify(buildRunAgentInput(input.question, input.conversationId)),
+    body: JSON.stringify(buildAskBody(input.question, input.conversationId)),
   });
   if (resp.status === 401) {
     handleUnauthorized();
@@ -45,5 +45,5 @@ export async function* askStream(input: AskInput): AsyncGenerator<AskEvent> {
     yield { type: "error", message: `Falha na requisição (${resp.status})` };
     return;
   }
-  yield* toAskEvents(parseAgUiStream(resp.body));
+  yield* toAskEvents(parseStreamEvents(resp.body));
 }

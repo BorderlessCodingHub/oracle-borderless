@@ -31,8 +31,8 @@ export interface AskInput {
   conversationId?: string;
 }
 
-/** Eventos internos do turno. É o que o hook consome; a tradução do protocolo
- * AG-UI para isto fica em lib/api/agui.ts (ADR-0019). */
+/** Eventos internos do turno. É o que o hook consome; a tradução dos
+ * StreamEvents do fio para isto fica em lib/api/streamEvents.ts (ADR-0021). */
 export type AskEvent =
   | { type: "run_started"; conversationId: string }
   | { type: "step"; name: string; phase: "started" | "finished"; detail?: Record<string, unknown> }

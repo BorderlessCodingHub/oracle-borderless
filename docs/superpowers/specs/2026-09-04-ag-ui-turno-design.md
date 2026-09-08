@@ -5,6 +5,10 @@ Origem: brainstorm Duanne <> Claude, 04/09/2026.
 Substitui: ADR-0009 (contrato SSE do chat) — via ADR-0019, a ser escrito na
 sequência de corte, antes da implementação.
 
+> **Nota (2026-09-07):** o contrato AG-UI desta spec foi substituído pelo
+> `StreamEvent` do `astream_events` — ver ADR-0021 e a spec
+> `2026-09-07-stream-events-turno-design.md`. Regras de passos e regra 4 mantidas.
+
 ## Contexto
 
 O oráculo responde hoje por um contrato SSE caseiro em

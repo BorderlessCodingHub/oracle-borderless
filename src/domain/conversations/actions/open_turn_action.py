@@ -33,8 +33,8 @@ class OpenTurnAction:
         now = datetime.now(timezone.utc)
         draft = TurnTraceDraft(question=question, user_email=user_email)
 
-        # ADR-0019: o id vem do cliente (threadId do AG-UI). Conhecido e do
-        # usuário → continua; desconhecido → nasce com ESSE id; de outro
+        # ADR-0021: o id vem do cliente (config.configurable.thread_id) — find-or-create.
+        # Conhecido e do usuário → continua; desconhecido → nasce com ESSE id; de outro
         # usuário → a policy responde 404 (nunca revela que existe).
         conversation = await self.conversations.get_by_id(conversation_id)
         if conversation is None:

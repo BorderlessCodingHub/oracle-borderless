@@ -109,7 +109,7 @@ export function useAskStream() {
     setCitations([]);
     setActivity([]);
     setErrorMessage(null);
-    // O protocolo termina em RUN_FINISHED ou RUN_ERROR. Se o stream acabar sem
+    // O fio termina no on_chain_end do raiz ou em on_chain_error. Se o stream acabar sem
     // nenhum dos dois (queda de conexão, proxy), é erro — não um "streaming"
     // preso para sempre.
     let terminated = false;

@@ -8,7 +8,7 @@ from evals.models import CaseResult, EvalCase, MetricScore, metrics_for_category
 from src.domain.conversations.services.out_of_scope_reply import build_out_of_scope_reply
 from src.domain.documents.actions.list_knowledge_sections_action import ListKnowledgeSectionsAction
 from src.domain.shared.value_objects.citation import Citation
-from src.support.agent.ports import AgentMessage, KnowledgeSnippet, TextChunk, TurnDependencies, TurnSignals
+from src.support.agent.ports import AgentMessage, KnowledgeSnippet, TurnDependencies, TurnSignals, text_of
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +21,13 @@ def _sources_text(knowledge: list[KnowledgeSnippet]) -> str:
 
 async def _collect_text(run) -> str:
     """As duas fases, na ordem. O harness inteiro já roda dentro de um escopo de
-    sessão (evals/__main__.py), então não há troca de escopo entre elas aqui."""
+    sessão (evals/__main__.py), então não há troca de escopo entre elas aqui.
+    `text_of` lê tokens do `answer` e o texto canônico da recusa (ADR-0021)."""
     text = ""
-    async for chunk in run.prelude():
-        if isinstance(chunk, TextChunk):
-            text += chunk.text
-    async for chunk in run.stream():
-        if isinstance(chunk, TextChunk):
-            text += chunk.text
+    async for event in run.prelude():
+        text += text_of(event)
+    async for event in run.stream():
+        text += text_of(event)
     return text
 
 
