@@ -122,7 +122,7 @@ Resposta (fatos, sem frase pronta — o modelo escreve o texto):
 }
 ```
 
-Erros: `422` com `error.details.validDestinations: string[]` para id desconhecido (o modelo se corrige na chamada seguinte); `401` sem token; `404` nunca — destino dinâmico sem candidato vira fallback para a listagem.
+Erros: `400` (type `VALIDATION`, padrão do repo para validação) com `error.details.validDestinations: string[]` para id desconhecido (o modelo se corrige na chamada seguinte); `401` sem token; `404` nunca — destino dinâmico sem candidato vira fallback para a listagem.
 
 ### 4.3 Regras de resolução (nesta ordem)
 
@@ -193,7 +193,7 @@ Nó `navigate` (`src/support/agent/graph/navigate_node.py`):
 - Se `state["navigation"]` já existe → devolve `ToolMessage(status="error")` com "uma navegação por turno".
 - Chama `BorderlessNavigationClient.resolve(...)` (`src/support/clients/borderless/borderless_navigation_client.py`, httpx, timeout 8 s) com o bearer de `configurable["platform_token"]`.
 - Sucesso: `ToolMessage` com o JSON embrulhado em `<<TOOL_CONTENT>>`; state `navigation = {destination, access, unlock, signals: {matchedTags, inProgress, difficulty, fallback}, alternatives}` (sem o `profile` — o modelo já o tem no prompt).
-- `422`: `ToolMessage(status="error")` com os ids válidos; sem `navigation`.
+- `400 VALIDATION`: `ToolMessage(status="error")` com os ids válidos; sem `navigation`.
 - Timeout/5xx: `ToolMessage(status="error")` "plataforma indisponível"; sem `navigation`.
 - Incrementa `signals.tool_calls`, seta `signals.navigation_called`, `signals.navigation_access`.
 
@@ -271,7 +271,7 @@ Sem mudanças obrigatórias. Opcional: renderizar o card de `navigation` no chat
 | Intenção ambígua ("quero melhorar") | Modelo faz uma pergunta de esclarecimento; sem tool; input mantido |
 | Pergunta de conhecimento na barra | Sem RAG no modo `navigate`; resposta em uma frase sugerindo o chat; nunca a RESPOSTA PADRÃO |
 | Destino bloqueado | Navega para a página; agente explica o lock com o `unlock` devolvido; sem `unlock`, só explica |
-| Path inválido vindo do modelo | API rejeita id desconhecido (422); frontend revalida na allowlist; falhou, não navega e mostra texto |
+| Path inválido vindo do modelo | API rejeita id desconhecido (400 VALIDATION); frontend revalida na allowlist; falhou, não navega e mostra texto |
 | Duas navegações no turno | Nó `navigate` devolve erro na segunda; `navigation` do state não muda |
 | Token da Platform expirado | Oracle 401 → proxy repassa → cliente dispara o tratamento do `api-client` (limpa cookie, redireciona) |
 | Membership mudou há < 60 s | Cache do Oracle só afeta autenticação; `access` vem da API na hora, nunca defasado |
@@ -282,9 +282,9 @@ Sem mudanças obrigatórias. Opcional: renderizar o card de `navigation` no chat
 
 ## 8. Testes
 
-**borderless-api** (`test/unit/services/navigation.service.test.ts`, `test/unit/routes/navigation.routes.test.ts`): static allowed; `livestream` gated; `trail` por tag com interseção; trilha em progresso vence tag; seniority desempata; DENY vence ALLOW e membership; `locked_upgrade` com `unlock.membership`; `locked_enroll` com `unlock.path`; `topic` sem candidato → fallback `trails`; id desconhecido → 422 com `validDestinations`; sem token → 401.
+**borderless-api** (`test/unit/services/navigation.service.test.ts`, `test/unit/routes/navigation.routes.test.ts`): static allowed; `livestream` gated; `trail` por tag com interseção; trilha em progresso vence tag; seniority desempata; DENY vence ALLOW e membership; `locked_upgrade` com `unlock.membership`; `locked_enroll` com `unlock.path`; `topic` sem candidato → fallback `trails`; id desconhecido → 400 `VALIDATION` com `validDestinations`; sem token → 401.
 
-**Oracle** (`tests/unit/...`): gate com `intent` nos três casos; `mode: navigate` pula gate; `should_retrieve` ignora `retrieve=true` quando `intent != knowledge`; `after_answer` roteia para `navigate` / `tools` / `END`; nó `navigate` com `httpx.MockTransport` (sucesso, 422, timeout, segunda chamada); redator projeta `navigation` só com chaves permitidas e emite `navigate` como passo; `require_user` bearer (find-or-create, cache, revogação); `StreamInput` com `mode`/`locale` padrão e inválido; migration 0010 sobe e desce; `navigation_of`. Evals: `navigation_set.json` rodando no harness existente.
+**Oracle** (`tests/unit/...`): gate com `intent` nos três casos; `mode: navigate` pula gate; `should_retrieve` ignora `retrieve=true` quando `intent != knowledge`; `after_answer` roteia para `navigate` / `tools` / `END`; nó `navigate` com `httpx.MockTransport` (sucesso, 400, timeout, segunda chamada); redator projeta `navigation` só com chaves permitidas e emite `navigate` como passo; `require_user` bearer (find-or-create, cache, revogação); `StreamInput` com `mode`/`locale` padrão e inválido; migration 0010 sobe e desce; `navigation_of`. Evals: `navigation_set.json` rodando no harness existente.
 
 **Platform**: sem runner unitário no repo; cobertura via Playwright em `e2e/tests/oracle/` com um servidor SSE fake em `e2e/fixtures/oracle-fake-server.ts`: navegação bem-sucedida navega e mostra a frase; lock mostra explicação e navega; path inválido não navega; Oracle fora mostra fallback; painel abre, envia, recebe fontes; `pnpm i18n:check` no CI.
 
