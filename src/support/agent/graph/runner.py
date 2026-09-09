@@ -81,7 +81,11 @@ def _tool_status(message: ToolMessage) -> str:
 
 
 def _pick(source, keys: tuple[str, ...]) -> dict:
-    return {key: source[key] for key in keys if key in source}
+    """Allowlist que também DESCARTA valores nulos (R14): é o que
+    `NavigationResult.to_public()` já fazia no client, e o fio precisa ter uma
+    forma só — o cliente não deve ter que distinguir chave ausente de chave
+    nula na mesma projeção."""
+    return {key: source[key] for key in keys if key in source and source[key] is not None}
 
 
 def _project_navigation(navigation) -> dict:

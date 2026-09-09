@@ -87,7 +87,7 @@ def render_table(report: EvalReport) -> str:
             lines.append(f"  {case_id}  {metric}={score:.2f}")
     if report.hard_failures:
         lines.append("")
-        lines.append("HARD FAILURES (security cases below floor):")
+        lines.append("HARD FAILURES (categorias sem tolerância abaixo do piso):")
         for case_id, category, metric, score in report.hard_failures:
             lines.append(f"  {case_id} ({category})  {metric}={score:.2f}")
     lines.append("")

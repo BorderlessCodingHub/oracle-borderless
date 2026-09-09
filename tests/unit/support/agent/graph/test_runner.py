@@ -643,6 +643,9 @@ async def test_a_navigate_tool_call_puts_the_destination_on_the_wire_before_the_
     forbidden = FORBIDDEN_KEYS | {"platform_token", "profile"}
     for e in events:
         assert not (set(_keys(e.data)) & forbidden), (e.event, e.name, e.data)
+        # Não basta a chave sumir: o VALOR do bearer não pode aparecer em
+        # lugar nenhum do fio — nem no payload, nem no metadata.
+        assert "tok" not in repr(e.data), (e.event, e.name, e.data)
         assert "tok" not in repr(e.metadata)
 
 
@@ -689,3 +692,32 @@ async def test_a_retried_navigation_opens_the_navigate_step_once_but_still_deliv
     assert navigation_of(events[-1]) == NAV_RESULT.to_public()
     assert signals.tool_calls == 2
     assert signals.navigation_called is True and signals.navigation_access == "allowed"
+
+    forbidden = FORBIDDEN_KEYS | {"platform_token", "profile"}
+    for e in events:
+        assert not (set(_keys(e.data)) & forbidden), (e.event, e.name, e.data)
+        assert "tok" not in repr(e.data), (e.event, e.name, e.data)
+        assert "tok" not in repr(e.metadata)
+
+
+def test_project_drops_null_valued_keys_of_the_navigation():
+    """R14: `NavigationResult.to_public()` já descartava chaves nulas no client;
+    o redator descartava só as fora da allowlist. Duas formas para o mesmo
+    campo no fio — o cliente teria que distinguir chave ausente de chave nula
+    conforme o caminho. Agora as duas projeções descartam nulo."""
+    out = _project({"navigation": {
+        "destination": {"id": "trail", "path": "/trilhas", "labelKey": None, "label": None},
+        "access": "allowed",
+        "unlock": {"action": "upgrade", "path": None, "membership": None},
+        "signals": {"matchedTags": ["python"], "inProgress": False, "difficulty": None, "fallback": None},
+        "alternatives": [{"id": "trails", "path": "/trilhas", "labelKey": None, "label": None}],
+    }})
+
+    assert out["navigation"] == {
+        "destination": {"id": "trail", "path": "/trilhas"},
+        "access": "allowed",
+        "unlock": {"action": "upgrade"},
+        "signals": {"matchedTags": ["python"], "inProgress": False},
+        "alternatives": [{"id": "trails", "path": "/trilhas"}],
+    }
+    assert "None" not in repr(out["navigation"])
