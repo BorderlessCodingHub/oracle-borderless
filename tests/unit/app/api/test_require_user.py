@@ -19,6 +19,13 @@ def _request(cookie: str | None = None) -> Request:
     return Request({"type": "http", "method": "GET", "path": "/", "headers": headers})
 
 
+def _request_with_auth(header: str, cookie: str | None = None) -> Request:
+    headers = [(b"authorization", header.encode())]
+    if cookie:
+        headers.append((b"cookie", cookie.encode()))
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": headers})
+
+
 class FakeResolve:
     """Substitui ResolveSessionAction no módulo: registra o token recebido e
     devolve/lança o que o teste mandar."""
@@ -36,12 +43,31 @@ class FakeResolve:
         return FakeResolve.outcome
 
 
+class FakeResolveBearer:
+    """Substitui ResolveBearerAction no módulo: registra o token recebido e
+    devolve/lança o que o teste mandar."""
+
+    seen: list[str] = []
+    outcome = None
+
+    def __init__(self, auth_client=None, **kw):
+        pass
+
+    async def execute(self, raw_bearer):
+        FakeResolveBearer.seen.append(raw_bearer)
+        if isinstance(FakeResolveBearer.outcome, Exception):
+            raise FakeResolveBearer.outcome
+        return FakeResolveBearer.outcome
+
+
 @pytest.fixture(autouse=True)
 def _wire(monkeypatch):
     import src.app.api.dependencies.require_user as mod
 
     FakeResolve.seen, FakeResolve.outcome = [], None
+    FakeResolveBearer.seen, FakeResolveBearer.outcome = [], None
     monkeypatch.setattr(mod, "ResolveSessionAction", FakeResolve)
+    monkeypatch.setattr(mod, "ResolveBearerAction", FakeResolveBearer)
     yield
     CurrentRequestContext.clear()
 
@@ -106,3 +132,37 @@ async def test_require_admin_404_para_nao_admin(monkeypatch):
         await require_admin(AuthenticatedUser(id="u", email="a@x.com", is_admin=False))
     admin = AuthenticatedUser(id="u", email="admin@x.com", is_admin=True)
     assert await require_admin(admin) is admin
+
+
+@pytest.mark.asyncio
+async def test_bearer_valido_devolve_user_sem_olhar_o_cookie():
+    from src.app.api.dependencies.require_user import require_user
+
+    FakeResolveBearer.outcome = ANA
+    user = await require_user(_request_with_auth("Bearer plat-123", f"{SESSION_COOKIE_NAME}=cookie-x"))
+    assert user is ANA
+    assert FakeResolveBearer.seen == ["plat-123"]
+    assert FakeResolve.seen == []
+    assert CurrentRequestContext.get_user() is ANA
+
+
+@pytest.mark.asyncio
+async def test_bearer_invalido_da_401_sem_apagar_cookie():
+    from src.app.api.dependencies.require_user import require_user
+
+    FakeResolveBearer.outcome = None
+    with pytest.raises(HTTPException) as exc:
+        await require_user(_request_with_auth("Bearer nope"))
+    assert exc.value.status_code == 401
+    assert exc.value.headers is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("header", ["Basic abc", "Bearer", "Bearer   ", "bearer x y"])
+async def test_authorization_malformado_cai_no_caminho_do_cookie(header):
+    from src.app.api.dependencies.require_user import require_user
+
+    FakeResolve.outcome = ANA
+    user = await require_user(_request_with_auth(header, f"{SESSION_COOKIE_NAME}=tok-1"))
+    assert user is ANA
+    assert FakeResolveBearer.seen == []
