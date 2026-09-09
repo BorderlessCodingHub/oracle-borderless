@@ -45,6 +45,10 @@ class ResolveSessionAction:
         if session is None:
             return None
 
+        membership = session.user_membership
+        seniority = session.user_seniority
+        career_stage = session.user_career_stage
+
         now = self.clock()
         age = session.seconds_since_platform_check(now)
         if age >= PLATFORM_CHECK_TTL_S:
@@ -62,7 +66,8 @@ class ResolveSessionAction:
                     # Expirada/revogada na plataforma: a nossa morre junto.
                     await self.sessions.delete(session.uuid)
                     return None
-                await self.sessions.mark_platform_checked(session.uuid, now)
+                membership, seniority, career_stage = profile.membership, profile.seniority, profile.career_stage
+                await self.sessions.update_profile_snapshot(session.uuid, now, membership, seniority, career_stage)
 
         return AuthenticatedUser(
             id=session.user_id,
@@ -70,4 +75,8 @@ class ResolveSessionAction:
             is_admin=session.user_email in settings.admin_emails,
             name=session.user_name,
             username=session.user_username,
+            platform_access_token=session.platform_access_token,
+            membership=membership,
+            seniority=seniority,
+            career_stage=career_stage,
         )

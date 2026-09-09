@@ -19,3 +19,7 @@ class UserSessionModel(BaseModel, HasUUID, HasTimestamps, ApplyRelations):
     user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     user_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_platform_check_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, server_default="oracle_login")
+    user_membership: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    user_seniority: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    user_career_stage: Mapped[str | None] = mapped_column(String(64), nullable=True)

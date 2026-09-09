@@ -27,6 +27,7 @@ def _session(checked_seconds_ago: int) -> UserSession:
         uuid=uuid7(), token_hash=hash_session_token(RAW), platform_access_token="opaque-abc",
         user_id="u-1", user_email="ana@x.com", user_name="Ana", user_username="ana",
         last_platform_check_at=checked, created_at=checked, updated_at=checked,
+        user_membership="FREE", user_seniority=None, user_career_stage="curious",
     )
 
 
@@ -34,6 +35,7 @@ class FakeSessions:
     def __init__(self, row: UserSession | None):
         self.row = row
         self.marked: list[tuple] = []
+        self.snapshots: list[tuple] = []
         self.deleted: list = []
 
     async def get_by_token_hash(self, token_hash):
@@ -41,6 +43,9 @@ class FakeSessions:
 
     async def mark_platform_checked(self, session_id, checked_at):
         self.marked.append((session_id, checked_at))
+
+    async def update_profile_snapshot(self, session_id, checked_at, membership, seniority, career_stage):
+        self.snapshots.append((session_id, membership, seniority, career_stage))
 
     async def delete(self, session_id):
         self.deleted.append(session_id)
@@ -60,7 +65,10 @@ class FakeClient:
         return self.outcome
 
 
-PROFILE = PlatformProfile(id="u-1", email="ana@x.com", name="Ana", username="ana", membership="BASE", community_role="MEMBER")
+PROFILE = PlatformProfile(
+    id="u-1", email="ana@x.com", name="Ana", username="ana", membership="STARTER",
+    community_role="MEMBER", seniority="JUNIOR", career_stage="junior_transition",
+)
 
 
 def _action(sessions, client):
@@ -81,18 +89,21 @@ async def test_dentro_do_cache_nao_chama_a_plataforma(monkeypatch):
     user = await _action(sessions, client).execute(RAW)
     assert client.calls == []
     assert sessions.marked == []
+    assert sessions.snapshots == []
     assert (user.id, user.email, user.is_admin, user.name, user.username) == ("u-1", "ana@x.com", True, "Ana", "ana")
+    assert (user.membership, user.seniority, user.career_stage) == ("FREE", None, "curious")
 
 
 @pytest.mark.asyncio
-async def test_fora_do_cache_valida_e_atualiza_o_carimbo():
+async def test_fora_do_cache_valida_e_atualiza_o_snapshot():
     row = _session(PLATFORM_CHECK_TTL_S)
     sessions, client = FakeSessions(row), FakeClient(PROFILE)
     user = await _action(sessions, client).execute(RAW)
     assert client.calls == ["opaque-abc"]
-    assert sessions.marked == [(row.uuid, NOW)]
+    assert sessions.snapshots == [(row.uuid, "STARTER", "JUNIOR", "junior_transition")]
     assert user.email == "ana@x.com"
     assert user.is_admin is False
+    assert (user.membership, user.seniority, user.career_stage) == ("STARTER", "JUNIOR", "junior_transition")
 
 
 @pytest.mark.asyncio

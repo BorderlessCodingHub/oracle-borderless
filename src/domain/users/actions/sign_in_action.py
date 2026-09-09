@@ -61,6 +61,8 @@ class SignInAction:
                 last_platform_check_at=now,  # o signin acabou de validar
                 created_at=now,
                 updated_at=now,
+                source="oracle_login",
+                user_career_stage=data.user.career_stage,
             )
         )
         return SignInResult(

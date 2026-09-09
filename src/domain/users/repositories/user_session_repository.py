@@ -34,6 +34,25 @@ class UserSessionRepository:
             .values(last_platform_check_at=checked_at)
         )
 
+    async def update_profile_snapshot(
+        self,
+        session_id: UUID,
+        checked_at: datetime,
+        membership: str | None,
+        seniority: str | None,
+        career_stage: str | None,
+    ) -> None:
+        await self.session.execute(
+            update(UserSessionModel)
+            .where(UserSessionModel.uuid == session_id)
+            .values(
+                last_platform_check_at=checked_at,
+                user_membership=membership,
+                user_seniority=seniority,
+                user_career_stage=career_stage,
+            )
+        )
+
     async def delete(self, session_id: UUID) -> None:
         await self.session.execute(
             delete(UserSessionModel).where(UserSessionModel.uuid == session_id)
