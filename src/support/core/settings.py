@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     BORDERLESS_AUTH_URL: str = "https://api.borderlesscoding.com"
     ADMIN_EMAILS: str = ""  # allowlist de admins do /ops, separada por vírgula
 
+    # --- Navegação (agente): API de navegação da borderless-api (spec §4) ---
+    NAVIGATION_CATALOG_TTL_S: int = 3600
+    NAVIGATION_TIMEOUT_SECONDS: float = 8.0
+
     # --- CORS ---
     # Vazio (default) = SPA e API no mesmo host (proxy do Vite em dev) e nenhum
     # CORSMiddleware é montado. ATENÇÃO (ADR-0018): a sessão é cookie e o SPA
