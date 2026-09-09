@@ -20,7 +20,8 @@ from src.domain.conversations.actions.run_turn_action import RunTurnAction
 from src.domain.observability.actions.record_turn_trace_action import RecordTurnTraceAction
 from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
 from src.support.agent.graph import get_turn_graph_runner
-from src.support.agent.ports import GraphEvent, citations_of, text_of
+from src.support.agent.navigation_catalog import NavigationCatalog
+from src.support.agent.ports import GraphEvent, citations_of, navigation_of, text_of
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
 from src.support.core.context import CurrentAsyncSessionContext, CurrentRequestContext
 from src.support.core.session_scope import async_session_scope, run_in_async_session
@@ -54,10 +55,13 @@ class ConversationController:
         Duas Actions num endpoint é a exceção registrada no ADR-0020 à regra 5:
         cada uma pertence a um escopo de sessão diferente.
         """
-        user_email = CurrentRequestContext.get_user().email
+        user = CurrentRequestContext.get_user()
+        user_email = user.email
         run_id = data.run_id
 
-        turn = await OpenTurnAction().execute(data.question, data.conversation_id, user_email)
+        turn = await OpenTurnAction().execute(
+            data.question, data.conversation_id, user_email, mode=data.mode, locale=data.locale
+        )
         draft = turn.draft
         # Gravado sempre — coluna barata; o link só aparece na UI quando
         # LANGSMITH_PROJECT_URL está configurado (ver run_url).
@@ -69,15 +73,21 @@ class ConversationController:
         # é SearchKnowledgeBaseAction — nasce em RunTurnAction, dentro do escopo 2.
         embeddings = get_embeddings_client()
 
-        captured: dict = {"text": "", "citations": [], "root_end": None}
+        extra_config = await _build_extra_config(user)
+
+        captured: dict = {"text": "", "citations": [], "navigation": None, "root_end": None}
 
         def capture(event: GraphEvent) -> str | None:
-            """Guarda texto/fontes para a persistência e serializa o evento.
-            O `on_chain_end` do raiz é retido (None) e emitido após persistir."""
+            """Guarda texto/fontes/navegação para a persistência e serializa o
+            evento. O `on_chain_end` do raiz é retido (None) e emitido após
+            persistir."""
             captured["text"] += text_of(event)
             citations = citations_of(event)
             if citations is not None:
                 captured["citations"] = citations
+            navigation = navigation_of(event)
+            if navigation is not None:
+                captured["navigation"] = navigation
             if event.event == "on_chain_end" and event.is_root:
                 captured["root_end"] = event
                 return None
@@ -88,7 +98,7 @@ class ConversationController:
             run = None
             try:
                 async with async_session_scope():
-                    run = RunTurnAction(graph, embeddings).execute(turn)
+                    run = RunTurnAction(graph, embeddings).execute(turn, extra_config=extra_config)
                     async for event in run.prelude():
                         line = capture(event)
                         if line is not None:
@@ -120,6 +130,7 @@ class ConversationController:
                     draft,
                     captured["text"] if (not failed and captured["text"]) else None,
                     captured["citations"],
+                    captured["navigation"],
                 )
             except Exception:
                 logger.exception("falha ao persistir turno (resposta e/ou trace)")
@@ -147,6 +158,29 @@ class ConversationController:
         return ConversationDetailResponse.from_entity(conversation, messages)
 
 
+async def _build_extra_config(user) -> dict:
+    """Monta o `extra_config` do turno (vira `configurable` do grafo — ADR-0016/
+    0021): token e perfil alimentam a tool `navigate_platform` e o prompt de
+    navegação. Roda no escopo do request: `NavigationCatalog().describe` é HTTP
+    puro, não captura sessão. Um catálogo indisponível não pode derrubar o
+    turno — cai para o snapshot embutido. O token NUNCA entra no log."""
+    try:
+        catalog_text = await NavigationCatalog().describe(user.platform_access_token)
+    except Exception:
+        logger.warning("catálogo de navegação indisponível; usando snapshot embutido", exc_info=True)
+        catalog_text = NavigationCatalog.snapshot_text()
+
+    return {
+        "platform_token": user.platform_access_token,
+        "user_profile": {
+            "membership": user.membership,
+            "seniority": user.seniority,
+            "careerStage": user.career_stage,
+        },
+        "navigation_catalog_text": catalog_text,
+    }
+
+
 def _engine_ran(draft: TurnTraceDraft) -> bool:
     """Só há "latência do motor" quando um modelo de fato rodou. A recusa é
     texto canônico emitido na hora; contá-la aqui misturaria as duas coisas na
@@ -171,6 +205,9 @@ def _absorb_engine_metrics(draft: TurnTraceDraft) -> None:
     draft.tool_calls = s.tool_calls
     draft.input_tokens = s.input_tokens
     draft.output_tokens = s.output_tokens
+    draft.intent = s.intent
+    draft.navigation_called = s.navigation_called
+    draft.navigation_access = s.navigation_access
     # first_token_ms/engine_ms vêm MEDIDOS do grafo (revisão I2): o nó `answer`
     # carimba a entrada, o runner fecha as contas. Medir daqui somaria gate +
     # retrieval ao primeiro token. `_engine_ran` segue como filtro: a recusa é
@@ -186,7 +223,11 @@ def _absorb_engine_metrics(draft: TurnTraceDraft) -> None:
 
 
 async def _persist_turn(
-    conversation_id: UUID, draft: TurnTraceDraft, content: str | None, citations: list
+    conversation_id: UUID,
+    draft: TurnTraceDraft,
+    content: str | None,
+    citations: list,
+    navigation: dict | None = None,
 ) -> None:
     """Uma sessão própria para as duas escritas pós-stream.
 
@@ -210,7 +251,7 @@ async def _persist_turn(
             try:
                 async with CurrentAsyncSessionContext.get().begin_nested():
                     await AppendAssistantMessageAction().execute(
-                        conversation_id, content, citations
+                        conversation_id, content, citations, navigation=navigation
                     )
             except Exception:
                 logger.exception("falha ao persistir a resposta do oráculo")

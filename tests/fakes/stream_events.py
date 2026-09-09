@@ -5,7 +5,7 @@ testes de integração de `/conversations/ask`. `ask_body` monta o body
 import json
 from uuid import uuid4
 
-STEP_NODES = ("gate", "retrieve", "refuse", "answer")
+STEP_NODES = ("gate", "retrieve", "refuse", "answer", "navigate")
 
 
 def ask_body(
@@ -85,3 +85,17 @@ def root_end(evs: list[dict]) -> dict:
 
 def sources_of(evs: list[dict]) -> list[dict]:
     return root_end(evs)["data"]["output"]["citations"]
+
+
+def navigation_of(evs: list[dict]) -> dict | None:
+    """O destino resolvido: o PRIMEIRO chunk `updates` do raiz que carrega
+    `navigate.navigation` (antes do modelo terminar a frase). None se o turno
+    não navegou."""
+    for e in evs:
+        if e["event"] == "on_chain_stream" and is_root(e):
+            mode, payload = e["data"]["chunk"]
+            if mode == "updates":
+                nav = (payload.get("navigate") or {}).get("navigation")
+                if nav:
+                    return nav
+    return None
