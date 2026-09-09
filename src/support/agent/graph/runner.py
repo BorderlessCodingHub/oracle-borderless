@@ -333,6 +333,11 @@ class TurnGraphRunner:
         locale: str = "pt-BR",
         extra_config: dict | None = None,
     ) -> TurnRun:
+        if mode == "navigate":
+            # O gate é pulado em mode == "navigate" (route_entry) — sem isto,
+            # signals.intent nunca seria escrito e o trace persistido do turno
+            # da barra ficaria sem intent == "navigate" (ruling R5).
+            signals.intent = "navigate"
         agen = self._graph.astream_events(
             _initial_state(question, history, knowledge, mode=mode, locale=locale),
             config=self._config(deps, signals, extra_config),

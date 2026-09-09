@@ -103,6 +103,50 @@ async def test_a_slow_gate_times_out_and_fails_open(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_navigation_intent_is_classified_and_never_retrieves():
+    from src.support.agent.graph.nodes import _GateOutput
+
+    signals = TurnSignals()
+    model = _FakeStructuredModel(_GateOutput(retrieve=False, search_query="", intent="navigate"))
+
+    out = await gate_node(
+        {"question": "quero praticar algoritmos", "history": []}, _config(signals, model)
+    )
+
+    assert out["intent"] == "navigate"
+    assert out["retrieve"] is False
+    assert signals.intent == "navigate"
+
+
+@pytest.mark.asyncio
+async def test_a_navigation_intent_normalizes_retrieve_to_false_even_if_the_model_said_true():
+    from src.support.agent.graph.nodes import _GateOutput
+
+    signals = TurnSignals()
+    model = _FakeStructuredModel(_GateOutput(retrieve=True, search_query="algo", intent="navigate"))
+
+    out = await gate_node(
+        {"question": "me leva para as trilhas de backend", "history": []}, _config(signals, model)
+    )
+
+    assert out["intent"] == "navigate"
+    assert out["retrieve"] is False
+    assert out["search_query"] == ""
+
+
+@pytest.mark.asyncio
+async def test_a_failing_gate_carries_a_knowledge_intent():
+    signals = TurnSignals()
+    model = _FakeStructuredModel(raises=RuntimeError("provider caiu"))
+
+    out = await gate_node({"question": "o que é PSP?", "history": []}, _config(signals, model))
+
+    assert out["intent"] == "knowledge"
+    assert out["degraded"] is True
+    assert signals.intent == "knowledge"
+
+
+@pytest.mark.asyncio
 async def test_the_gate_always_records_its_latency():
     from src.support.agent.graph.nodes import _GateOutput
 

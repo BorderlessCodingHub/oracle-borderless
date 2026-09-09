@@ -5,6 +5,7 @@ request (regra 3)."""
 import asyncio
 import logging
 import time
+from typing import Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
@@ -21,6 +22,14 @@ GATE_SYSTEM_PROMPT = """\
 Você é um roteador para a base de conhecimento do Oracle Borderless (documentos
 curados do Notion: SOPs, processos de negócio, editoriais, dados operacionais).
 Decida se responder à ÚLTIMA mensagem do usuário exige buscar nessa base.
+
+Classifique também `intent`:
+- navigate: o usuário quer IR a algum lugar da plataforma, ENCONTRAR um conteúdo
+  ou COMEÇAR uma atividade (ex.: "quero praticar algoritmos", "me leva para as
+  trilhas de backend", "onde vejo meus eventos?", "quero treinar system design").
+  Para navigate, retrieve=false e search_query="".
+- chit_chat: saudações, agradecimentos, conversa fiada, perguntas sobre você.
+- knowledge: qualquer pergunta substantiva sobre o ecossistema, suas regras ou dados.
 
 - retrieve=false para: saudações, agradecimentos, conversa fiada, perguntas sobre
   você mesmo, e qualquer coisa totalmente respondível pelo histórico da conversa.
@@ -45,6 +54,13 @@ class _GateOutput(BaseModel):
 
     retrieve: bool = Field(description="true se a pergunta exige buscar na base")
     search_query: str = Field(default="", description="query autônoma, ou '' quando retrieve=false")
+    intent: Literal["knowledge", "navigate", "chit_chat"] = Field(
+        default="knowledge",
+        description=(
+            "knowledge=pergunta sobre a base; navigate=quer ir a um lugar/começar "
+            "uma atividade na plataforma; chit_chat=saudação/conversa"
+        ),
+    )
 
 
 def _gate_prompt(state: TurnState) -> list[dict]:
@@ -72,18 +88,22 @@ async def gate_node(state: TurnState, config) -> dict:
         out = await asyncio.wait_for(
             model.ainvoke(_gate_prompt(state)), timeout=settings.GATE_TIMEOUT_SECONDS
         )
-        query = out.search_query.strip() or question if out.retrieve else ""
-        result = {"retrieve": out.retrieve, "search_query": query, "degraded": False}
+        # navigate nunca retrieva, mesmo se o modelo devolveu retrieve=True junto:
+        # a classificação de intent tem prioridade sobre o campo retrieve solto.
+        retrieve = out.retrieve and out.intent == "knowledge"
+        query = out.search_query.strip() or question if retrieve else ""
+        result = {"retrieve": retrieve, "search_query": query, "degraded": False, "intent": out.intent}
     except Exception:
         # fail-open: uma recuperação a mais > uma perdida. degraded=True avisa a
         # aresta has_grounding de que NÃO houve classificação — só um chute.
         logger.warning("retrieval gate falhou; fail-open (query crua)", exc_info=True)
-        result = {"retrieve": True, "search_query": question, "degraded": True}
+        result = {"retrieve": True, "search_query": question, "degraded": True, "intent": "knowledge"}
 
     signals.gate_ms = int((time.monotonic() - started) * 1000)
     signals.gate_retrieve = result["retrieve"]
     signals.gate_search_query = result["search_query"] or None
     signals.gate_degraded = result["degraded"]
+    signals.intent = result["intent"]
     return result
 
 

@@ -7,16 +7,23 @@ from src.support.agent.graph.state import TurnState
 
 
 def route_entry(state: TurnState) -> Literal["answer", "gate"]:
-    """Knowledge pré-semeado pula gate e retrieval.
+    """Knowledge pré-semeado pula gate e retrieval; `mode == "navigate"` também
+    pula o gate — a barra já fixou a intenção (spec §5.3).
 
     Existe para o harness de eval: nos casos `adversarial` o contexto envenenado
     é injetado à mão, e fazer o gate classificá-lo mediria a coisa errada.
     """
-    return "answer" if state.get("preset_knowledge") else "gate"
+    if state.get("preset_knowledge") or state.get("mode") == "navigate":
+        return "answer"
+    return "gate"
 
 
 def should_retrieve(state: TurnState) -> Literal["retrieve", "answer"]:
-    return "retrieve" if state.get("retrieve") else "answer"
+    """navigate e chit_chat nunca retrievam, mesmo que `retrieve` tenha vindo
+    True — o intent classificado pelo gate tem prioridade. Sem `intent` no
+    state (compat), assume knowledge."""
+    intent = state.get("intent", "knowledge")
+    return "retrieve" if state.get("retrieve") and intent == "knowledge" else "answer"
 
 
 def has_grounding(state: TurnState) -> Literal["refuse", "answer"]:

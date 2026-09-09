@@ -120,6 +120,10 @@ class TurnSignals:
     gate_search_query: str | None = None
     gate_degraded: bool = False
     gate_ms: int = 0
+    # Classificação do gate: "knowledge" | "navigate" | "chit_chat". None até o
+    # gate rodar (ou até o runner presetar "navigate" em mode == "navigate",
+    # que pula o gate — ver TurnGraphRunner.run).
+    intent: str | None = None
 
     retrieval_ran: bool = False
     retrieval_top_k: int = 0

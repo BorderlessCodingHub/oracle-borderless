@@ -197,6 +197,30 @@ def test_initial_state_navigate_mode_presets_intent_and_skips_the_gate():
 # --- fases ------------------------------------------------------------------
 
 
+def test_run_sets_signals_intent_to_navigate_in_navigate_mode():
+    """R5: em mode="navigate" o gate é pulado, então nada mais escreveria
+    signals.intent — o trace persistido precisa de intent == "navigate" para
+    turnos da barra (task futura). O runner fixa isso antes de montar o
+    gerador."""
+    signals = TurnSignals()
+
+    _runner().run(
+        "q", [], _deps(_RecordingSearch([])), signals, mode="navigate", extra_config=_models(),
+    )
+
+    assert signals.intent == "navigate"
+
+
+def test_run_leaves_signals_intent_unset_in_default_chat_mode():
+    """No modo padrão, o gate ainda não rodou (run() é síncrono) — intent
+    continua None até prelude() ser iterado."""
+    signals = TurnSignals()
+
+    _runner().run("q", [], _deps(_RecordingSearch([])), signals, extra_config=_models())
+
+    assert signals.intent is None
+
+
 def test_run_is_synchronous_and_executes_nothing_until_prelude_is_iterated():
     search = _RecordingSearch([_snippet()])
     signals = TurnSignals()

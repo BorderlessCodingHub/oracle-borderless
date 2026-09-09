@@ -28,6 +28,10 @@ def test_a_missing_preset_flag_starts_at_the_gate():
     assert route_entry({}) == "gate"
 
 
+def test_navigate_mode_skips_the_gate():
+    assert route_entry({"mode": "navigate", "intent": "navigate"}) == "answer"
+
+
 # --- should_retrieve -----------------------------------------------------
 
 def test_a_substantive_question_goes_to_retrieval():
@@ -37,6 +41,19 @@ def test_a_substantive_question_goes_to_retrieval():
 def test_a_greeting_goes_straight_to_the_answer():
     """retrieve=False não injeta contexto nenhum — sem poluição de prompt."""
     assert should_retrieve({"retrieve": False}) == "answer"
+
+
+def test_a_navigation_intent_never_retrieves_even_if_the_gate_said_so():
+    assert should_retrieve({"retrieve": True, "intent": "navigate"}) == "answer"
+
+
+def test_chit_chat_never_retrieves():
+    assert should_retrieve({"retrieve": True, "intent": "chit_chat"}) == "answer"
+
+
+def test_a_knowledge_intent_keeps_retrieving():
+    assert should_retrieve({"retrieve": True, "intent": "knowledge"}) == "retrieve"
+    assert should_retrieve({"retrieve": True}) == "retrieve"  # compat: sem intent = knowledge
 
 
 # --- has_grounding -------------------------------------------------------
