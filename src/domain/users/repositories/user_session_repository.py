@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 
 from src.domain.users.entities.user_session import UserSession
 from src.domain.users.mappers import UserSessionMapper
@@ -25,6 +26,26 @@ class UserSessionRepository:
         self.session.add(model)
         await self.session.flush()
         await self.session.refresh(model)
+        return UserSessionMapper.to_entity(model)
+
+    async def create_if_absent(self, user_session: UserSession) -> UserSession | None:
+        """`create` tolerante à corrida pelo unique index de `token_hash`.
+
+        Dois primeiros requests concorrentes com o MESMO bearer novo (barra e
+        painel de chat logo depois do login na Platform) fazem o mesmo INSERT:
+        o perdedor recebe `IntegrityError`. O savepoint isola esse erro — sem
+        ele o Postgres aborta a transação inteira do request e o commit final
+        vira ROLLBACK silencioso. Devolve `None` no conflito: quem chama relê
+        a linha que o vencedor gravou.
+        """
+        model = UserSessionModel(**UserSessionMapper.to_model_attrs(user_session))
+        try:
+            async with self.session.begin_nested():
+                self.session.add(model)
+                await self.session.flush()
+                await self.session.refresh(model)
+        except IntegrityError:
+            return None
         return UserSessionMapper.to_entity(model)
 
     async def mark_platform_checked(self, session_id: UUID, checked_at: datetime) -> None:

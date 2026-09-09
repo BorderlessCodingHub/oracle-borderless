@@ -5,6 +5,7 @@ fail-open de ResolveSessionAction quando a sessão já existe."""
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 from uuid6 import uuid7
 
 from src.domain.users.actions.resolve_bearer_action import ResolveBearerAction
@@ -23,8 +24,13 @@ PROFILE = PlatformProfile(
 
 
 class FakeSessions:
-    def __init__(self, row: UserSession | None = None):
+    """Espelha `UserSessionRepository`: `create_if_absent` embrulha `create`
+    e traduz o IntegrityError do unique index de `token_hash` em None — é o
+    que o savepoint do repositório real faz."""
+
+    def __init__(self, row: UserSession | None = None, conflict_row: UserSession | None = None):
         self.row = row
+        self.conflict_row = conflict_row  # linha que a requisição concorrente grava
         self.created: list[UserSession] = []
         self.snapshots: list[tuple] = []
         self.deleted: list = []
@@ -33,9 +39,19 @@ class FakeSessions:
         return self.row if self.row and self.row.token_hash == token_hash else None
 
     async def create(self, session):
+        if self.conflict_row is not None:
+            # A concorrente venceu a corrida: a linha já está lá quando o INSERT chega.
+            self.row, self.conflict_row = self.conflict_row, None
+            raise IntegrityError("INSERT INTO sessions", {}, Exception("duplicate key value"))
         self.created.append(session)
         self.row = session
         return session
+
+    async def create_if_absent(self, session):
+        try:
+            return await self.create(session)
+        except IntegrityError:
+            return None
 
     async def mark_platform_checked(self, session_id, checked_at):
         pass
@@ -138,3 +154,26 @@ async def test_bearer_vazio_devolve_none_sem_consultar_nada():
     sessions, client = FakeSessions(None), FakeClient(PROFILE)
     assert await _action(sessions, client).execute("   ") is None
     assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_corrida_de_dois_primeiros_requests_com_o_mesmo_bearer_nao_estoura():
+    """Header bar e painel de chat abrem juntos logo depois do login na
+    Platform: os dois resolvem o MESMO bearer novo ao mesmo tempo. O INSERT
+    perdedor bate no unique index de `sessions.token_hash` (migration 0009);
+    sem savepoint isso viraria 500. O perdedor relê a linha da vencedora e
+    segue pelo caminho da sessão conhecida."""
+    winner = _existing(PLATFORM_CHECK_TTL_S - 1)
+    sessions = FakeSessions(row=None, conflict_row=winner)
+    client = FakeClient(PROFILE)
+
+    user = await _action(sessions, client).execute(BEARER)
+
+    assert sessions.created == []  # o INSERT perdedor não gravou nada
+    assert user is not None
+    # Delegou a ResolveSessionAction como no caminho da sessão existente: dentro
+    # do cache de 60s ele NÃO revalida (a única chamada é a validação do bearer novo).
+    assert client.calls == [BEARER]
+    assert user.platform_access_token == BEARER
+    assert (user.membership, user.seniority, user.career_stage) == ("FREE", None, "curious")
+    assert user.session_source == "platform_bearer"

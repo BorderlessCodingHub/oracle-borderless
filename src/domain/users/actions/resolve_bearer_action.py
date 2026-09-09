@@ -44,16 +44,14 @@ class ResolveBearerAction:
 
         existing = await self.sessions.get_by_token_hash(hash_session_token(raw_bearer))
         if existing is not None:
-            return await ResolveSessionAction(
-                auth_client=self.auth_client, sessions=self.sessions, clock=self.clock
-            ).execute(raw_bearer)
+            return await self._resolve_existing(raw_bearer)
 
         profile = await self.auth_client.get_profile(raw_bearer)
         if profile is None:
             return None
 
         now = self.clock()
-        await self.sessions.create(
+        created = await self.sessions.create_if_absent(
             UserSession(
                 uuid=uuid7(),
                 token_hash=hash_session_token(raw_bearer),
@@ -71,6 +69,12 @@ class ResolveBearerAction:
                 user_career_stage=profile.career_stage,
             )
         )
+        if created is None:
+            # Corrida perdida: outra requisição com o mesmo bearer novo gravou
+            # a linha primeiro. Relê e segue exatamente o caminho da sessão
+            # existente, em vez de estourar o unique index como 500.
+            return await self._resolve_existing(raw_bearer)
+
         return AuthenticatedUser(
             id=profile.id,
             email=profile.email,
@@ -81,4 +85,12 @@ class ResolveBearerAction:
             membership=profile.membership,
             seniority=profile.seniority,
             career_stage=profile.career_stage,
+            session_source=SOURCE_PLATFORM_BEARER,
         )
+
+    async def _resolve_existing(self, raw_bearer: str) -> AuthenticatedUser | None:
+        """Sessão já em `sessions`: o cache de 60s / fail-open de 10min do
+        ADR-0018 é o mesmo do cookie."""
+        return await ResolveSessionAction(
+            auth_client=self.auth_client, sessions=self.sessions, clock=self.clock
+        ).execute(raw_bearer)

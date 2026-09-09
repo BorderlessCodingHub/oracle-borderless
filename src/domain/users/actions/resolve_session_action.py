@@ -79,4 +79,5 @@ class ResolveSessionAction:
             membership=membership,
             seniority=seniority,
             career_stage=career_stage,
+            session_source=session.source,
         )
