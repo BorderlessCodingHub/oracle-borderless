@@ -14,7 +14,9 @@ Aceito — 2026-09-08. Estende o ADR-0021 (contrato `StreamEvent`) e o ADR-0018
   (`sessions`, `source="platform_bearer"`) que reaproveitam o cache/fail-open
   já existentes; o catálogo de destinos é buscado por turno com o token do
   usuário (cache de 1h por processo) e cai para um snapshot embutido quando
-  falta token ou a API está fora.
+  falta token ou a API está fora. Navegar é capacidade da **sessão**, não do
+  endpoint: só sessões `platform_bearer` recebem a tool, o bloco de prompt de
+  navegação e a busca do catálogo (R12).
 - **Aplica-se quando:** for mexer na tool de navegação, no nó `navigate`, no
   caminho de auth por bearer, no catálogo de destinos, ou for entender por que
   a barra da Platform recebe o destino antes do modelo terminar de escrever.
@@ -33,7 +35,12 @@ Aceito — 2026-09-08. Estende o ADR-0021 (contrato `StreamEvent`) e o ADR-0018
   que `question` — nunca por `configurable` (ADR-0021). `require_user` lê
   `Authorization: Bearer` antes do cookie; bearer desconhecido cria sessão via
   `ResolveBearerAction`, bearer conhecido segue direto para
-  `ResolveSessionAction` (cache 60 s / fail-open ≤ 10 min).
+  `ResolveSessionAction` (cache 60 s / fail-open ≤ 10 min). **Navegação só para
+  sessões `platform_bearer`; o SPA do oráculo não recebe a tool** — o
+  controller carimba `navigation_enabled` no `extra_config` e é ele que decide
+  tool, bloco de prompt e busca de catálogo. **Chaves com valor nulo não saem**
+  na projeção de `navigation`: `_pick` do redator e o do client descartam
+  `None`, para o fio ter uma forma só.
 
 ---
 
@@ -150,6 +157,23 @@ navigation=navigation)`. `MessageResponse.navigation`
 (`src/app/api/responses/conversation_responses.py`) devolve o campo em
 `GET /conversations/{id}`.
 
+**5b. Navegar é capacidade da sessão, não do endpoint (R12).** O mesmo
+`POST /conversations/ask` atende dois clientes: o SPA do oráculo (sessão de
+cookie, `source="oracle_login"`) e o chat embutido na Platform (sessão de
+bearer, `source="platform_bearer"`). Só o segundo executa o `router.push` — o
+SPA não tem para onde navegar. Oferecer `navigate_platform` aos dois seria
+prometer ao modelo uma ação que metade dos clientes não cumpre, e ainda pagar
+a busca do catálogo em todo turno de quem nunca vai navegar.
+`AuthenticatedUser.session_source` carrega a origem (preenchida por
+`ResolveSessionAction` a partir de `session.source` e por `ResolveBearerAction`
+nos dois caminhos), e `_build_extra_config` deriva
+`navigation_enabled = session_source == "platform_bearer"`. Com ele desligado,
+`_answer_model` liga `tool_node_tools()` (só `web_search` e
+`fetch_notion_page`), `_answer_messages` monta o system message sem o
+`NAVIGATION_PROMPT_BLOCK` (`build_system_prompt`, `src/support/agent/prompts.py`)
+e o catálogo nem é buscado (`navigation_catalog_text = None`). O contrato do
+cliente não muda: nada disso aparece no body nem nos eventos.
+
 **6. Regra 4 (nada confidencial, nada que não devia cruzar o port) cobre
 navegação em duas camadas.** `NavigationResult.to_public()`
 (`src/support/clients/borderless/borderless_navigation_client.py`) já corta
@@ -159,7 +183,10 @@ vê de volta no fio, só na resposta HTTP que ele mesmo recebeu como
 frasear). O `EventRedactor` (`src/support/agent/graph/runner.py`,
 `_project_navigation`) não confia nesse formato e reaplica uma allowlist
 própria (`_NAV_TARGET_KEYS`, `_NAV_SIGNAL_KEYS`, `_NAV_UNLOCK_KEYS`) — segunda
-barreira, testável sem depender do client HTTP. `navigate` entra em
+barreira, testável sem depender do client HTTP. As duas allowlists descartam
+chaves de valor `None` (R14): o client já fazia isso e o redator passou a
+fazer também, para o cliente não ter que distinguir "chave ausente" de "chave
+nula" — o fio tem uma forma só. `navigate` entra em
 `_STEP_NODES`: emite `on_chain_start`/`on_chain_end` como passo (abre e fecha
 uma vez por run, mesmo que o modelo insista após um destino inválido), e é o
 `on_chain_end` desse nó — refletido no chunk `["updates", {"navigate":
@@ -194,6 +221,12 @@ evento final.
   classe, compartilhado entre turnos do mesmo worker). Processos que reiniciam
   com frequência (ex.: deploy) pagam esse custo mais vezes que o "cache no
   boot" original da spec previa.
+- O catálogo passou a ter cache NEGATIVO (`NAVIGATION_CATALOG_RETRY_S`,
+  default 60 s): uma falha da API de navegação guarda o snapshot como resposta
+  cacheada e serve por esse tempo, em vez de re-tentar a chamada (com o timeout
+  dela) no caminho crítico de todo turno seguinte. O preço é que a volta da API
+  demora até um minuto para ser percebida. Combinado com R12, um turno sem
+  navegação não faz chamada nenhuma.
 - **Pendência operacional, fora do código:** a spec (§5.4, último bullet;
   §9, item 5) prevê criar a página "Mapa da plataforma" no Notion, aprovada
   na KB, a partir da transcrição do vídeo de navegação, para o Oracle poder

@@ -12,8 +12,8 @@ from pydantic import BaseModel, Field
 
 from src.support.agent.graph.state import TurnState
 from src.support.agent.models import build_chat_model, build_small_model
-from src.support.agent.prompts import SYSTEM_PROMPT
-from src.support.agent.tools import build_tools, format_knowledge
+from src.support.agent.prompts import build_system_prompt
+from src.support.agent.tools import build_tools, format_knowledge, tool_node_tools
 from src.support.core.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -163,6 +163,14 @@ async def _nearest_or_none(deps, query: str) -> float | None:
         return None
 
 
+def _navigation_enabled(config) -> bool:
+    """R12 (ADR-0022): navegação só para sessões que sabem executar um
+    redirect — o bearer da Platform. O controller decide e carimba
+    `navigation_enabled` no `configurable`; sem ele (SPA do oráculo, eval de
+    conhecimento) o turno não vê a tool nem o bloco de prompt."""
+    return bool(config.get("configurable", {}).get("navigation_enabled"))
+
+
 def _answer_messages(state: TurnState, config) -> list:
     """Histórico, contexto embrulhado, pergunta — e, depois dela, perfil do
     usuário (quando presente na config), idioma da resposta e, para intent
@@ -184,7 +192,8 @@ def _answer_messages(state: TurnState, config) -> list:
     if state.get("intent") == "navigate":
         parts.append("Intenção: navegação (não use a RESPOSTA PADRÃO)")
 
-    return [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content="\n\n".join(parts))]
+    system = build_system_prompt(_navigation_enabled(config))
+    return [SystemMessage(content=system), HumanMessage(content="\n\n".join(parts))]
 
 
 def _answer_model(config, enable_tools: bool = True):
@@ -193,6 +202,11 @@ def _answer_model(config, enable_tools: bool = True):
     model = injected or build_chat_model()
     if not enable_tools:
         return model
+    if not _navigation_enabled(config):
+        # R12: sem capacidade de navegar, o modelo só vê web_search e
+        # fetch_notion_page — oferecer `navigate_platform` a um cliente que não
+        # executa redirect é prometer uma ação que ninguém cumpre.
+        return model.bind_tools(tool_node_tools())
     # O catálogo ao vivo (buscado com o token do turno) vai na descrição da tool
     # de navegação; sem ele, `build_tools` cai no snapshot embutido.
     return model.bind_tools(build_tools(cfg.get("navigation_catalog_text")))

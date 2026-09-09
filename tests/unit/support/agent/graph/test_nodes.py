@@ -528,3 +528,52 @@ async def test_a_rewrite_equal_to_the_question_never_searches_twice():
     await retrieve_node({"question": "pergunta", "search_query": "pergunta"}, config)
 
     assert search.queries == ["pergunta"]
+
+
+# --- R12: navegação só para sessões que sabem navegar (ADR-0022) ----------
+
+
+class _ToolRecordingChatModel(_FakeChatModel):
+    """Guarda as tools ligadas — é o que prova que `navigate_platform` não foi
+    oferecida a um cliente que não sabe executar redirect."""
+
+    def __init__(self, message=None):
+        super().__init__(message)
+        self.bound: list = []
+
+    def bind_tools(self, tools):
+        self.bound = [t.name for t in tools]
+        return self
+
+
+@pytest.mark.asyncio
+async def test_without_navigation_enabled_the_model_never_sees_navigate_platform():
+    model = _ToolRecordingChatModel()
+    config = _answer_config(TurnSignals(), model=model)
+
+    await answer_node({"question": "q", "history": [], "knowledge": []}, config)
+
+    assert "navigate_platform" not in model.bound
+    assert {"web_search", "fetch_notion_page"} == set(model.bound)
+
+
+@pytest.mark.asyncio
+async def test_with_navigation_enabled_the_model_sees_navigate_platform():
+    model = _ToolRecordingChatModel()
+    config = _answer_config(TurnSignals(), model=model)
+    config["configurable"]["navigation_enabled"] = True
+
+    await answer_node({"question": "q", "history": [], "knowledge": []}, config)
+
+    assert "navigate_platform" in model.bound
+
+
+def test_the_system_message_carries_the_navigation_block_only_when_enabled():
+    from src.support.agent.graph.nodes import _answer_messages
+
+    state = {"question": "q", "history": [], "knowledge": []}
+    off = str(_answer_messages(state, {"configurable": {}})[0].content)
+    on = str(_answer_messages(state, {"configurable": {"navigation_enabled": True}})[0].content)
+
+    assert "NAVEGAÇÃO" not in off and "navigate_platform" not in off
+    assert "NAVEGAÇÃO" in on and "navigate_platform" in on

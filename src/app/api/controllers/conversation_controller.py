@@ -19,6 +19,7 @@ from src.domain.conversations.actions.open_turn_action import OpenTurnAction
 from src.domain.conversations.actions.run_turn_action import RunTurnAction
 from src.domain.observability.actions.record_turn_trace_action import RecordTurnTraceAction
 from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
+from src.domain.users.actions.resolve_bearer_action import SOURCE_PLATFORM_BEARER
 from src.support.agent.graph import get_turn_graph_runner
 from src.support.agent.navigation_catalog import NavigationCatalog
 from src.support.agent.ports import GraphEvent, citations_of, navigation_of, text_of
@@ -163,12 +164,22 @@ async def _build_extra_config(user) -> dict:
     0021): token e perfil alimentam a tool `navigate_platform` e o prompt de
     navegação. Roda no escopo do request: `NavigationCatalog().describe` é HTTP
     puro, não captura sessão. Um catálogo indisponível não pode derrubar o
-    turno — cai para o snapshot embutido. O token NUNCA entra no log."""
-    try:
-        catalog_text = await NavigationCatalog().describe(user.platform_access_token)
-    except Exception:
-        logger.warning("catálogo de navegação indisponível; usando snapshot embutido", exc_info=True)
-        catalog_text = NavigationCatalog.snapshot_text()
+    turno — cai para o snapshot embutido. O token NUNCA entra no log.
+
+    R12 (ADR-0022): navegar é capacidade da SESSÃO, não do endpoint. Só o
+    cliente embutido na Platform (sessão `platform_bearer`) executa o redirect;
+    o SPA do oráculo não sabe navegar, então não recebe a tool, o bloco de
+    prompt nem paga a busca do catálogo.
+    """
+    navigation_enabled = user.session_source == SOURCE_PLATFORM_BEARER
+
+    catalog_text = None
+    if navigation_enabled:
+        try:
+            catalog_text = await NavigationCatalog().describe(user.platform_access_token)
+        except Exception:
+            logger.warning("catálogo de navegação indisponível; usando snapshot embutido", exc_info=True)
+            catalog_text = NavigationCatalog.snapshot_text()
 
     return {
         "platform_token": user.platform_access_token,
@@ -177,6 +188,7 @@ async def _build_extra_config(user) -> dict:
             "seniority": user.seniority,
             "careerStage": user.career_stage,
         },
+        "navigation_enabled": navigation_enabled,
         "navigation_catalog_text": catalog_text,
     }
 

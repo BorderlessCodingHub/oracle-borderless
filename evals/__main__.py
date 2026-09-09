@@ -61,6 +61,9 @@ def _navigation_config() -> dict:
     ]
     return {
         "platform_token": "eval",
+        # R12/ADR-0022: a tool e o bloco de prompt de navegação só existem para
+        # sessões que sabem navegar — o eval de navegação simula uma delas.
+        "navigation_enabled": True,
         "navigation_client": FakeNavigationClient(results=results, catalog=catalog),
     }
 

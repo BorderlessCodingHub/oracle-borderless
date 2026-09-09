@@ -9,7 +9,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
-from tests.fakes.auth import auth_headers
+from tests.fakes.auth import auth_headers, bearer_headers, seed_bearer_session
 from tests.fakes.fake_turn_graph import FailingInPreludeTurnGraph, FailingInStreamTurnGraph, FakeTurnGraph
 from tests.fakes.stream_events import (
     ask_body,
@@ -274,13 +274,23 @@ async def _get_conversation(client: AsyncClient, conversation_id: str, headers: 
 async def test_ask_in_navigate_mode_streams_the_destination_before_any_answer_token_and_persists_it(monkeypatch):
     """Task 9: o controller leva token/perfil/catálogo ao grafo (extra_config) e
     captura `navigation_of` — o destino chega ANTES da frase final (spec §5.3)
-    e é persistido na mensagem do assistente."""
+    e é persistido na mensagem do assistente.
+
+    Pelo caminho REAL da navegação: `Authorization: Bearer` do proxy da
+    Platform (ADR-0022), a única sessão que habilita a tool (R12)."""
     graph = FakeTurnGraph(answer="Vamos praticar!", navigation=RESULT_PUBLIC)
     _patch(monkeypatch, graph=graph)
     from main import app
 
     body = ask_body("quero praticar algoritmos", mode="navigate", locale="en")
-    headers = await auth_headers("navigator@x.com")
+    token = await seed_bearer_session(
+        "navigator@x.com",
+        platform_token="bearer-da-platform-1",
+        membership="PRO",
+        seniority="SENIOR",
+        career_stage="already_global",
+    )
+    headers = bearer_headers(token)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/conversations/ask", json=body, headers=headers)
         assert resp.status_code == 200
@@ -312,8 +322,11 @@ async def test_ask_in_navigate_mode_streams_the_destination_before_any_answer_to
 
     assert graph.received_mode == "navigate"
     assert graph.received_locale == "en"
-    assert graph.received_extra_config["platform_token"] == "plat-token-teste"
-    assert set(graph.received_extra_config["user_profile"]) == {"membership", "seniority", "careerStage"}
+    assert graph.received_extra_config["platform_token"] == "bearer-da-platform-1"
+    assert graph.received_extra_config["user_profile"] == {
+        "membership": "PRO", "seniority": "SENIOR", "careerStage": "already_global",
+    }
+    assert graph.received_extra_config["navigation_enabled"] is True
     assert graph.received_extra_config["navigation_catalog_text"] == _FAKE_CATALOG_TEXT
 
     await _roles(UUID(_thread(body)))  # limpa a conversa criada
@@ -345,7 +358,9 @@ async def test_ask_with_default_body_keeps_navigation_none(monkeypatch):
 @pytest.mark.asyncio
 async def test_ask_falls_back_to_the_embedded_snapshot_when_the_catalog_is_unavailable(monkeypatch):
     """Um catálogo indisponível (API fora, token recusado, etc.) nunca pode
-    derrubar o turno — o controller cai para `NavigationCatalog.snapshot_text()`."""
+    derrubar o turno — o controller cai para `NavigationCatalog.snapshot_text()`.
+    Só sessões de bearer chegam a buscar o catálogo (R12), então é por uma
+    delas que este caminho é exercitado."""
     import src.app.api.controllers.conversation_controller as ctrl
     from src.support.agent.navigation_catalog import NavigationCatalog
 
@@ -360,8 +375,9 @@ async def test_ask_falls_back_to_the_embedded_snapshot_when_the_catalog_is_unava
     from main import app
 
     body = ask_body("o que é o onboarding?")
+    headers = bearer_headers(await seed_bearer_session("asker3@x.com", platform_token="bearer-da-platform-2"))
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/conversations/ask", json=body, headers=await auth_headers("asker3@x.com"))
+        resp = await client.post("/conversations/ask", json=body, headers=headers)
         assert resp.status_code == 200
         evs = events(resp.text)
         assert root_end(evs) is not None  # o turno seguiu apesar da falha do catálogo

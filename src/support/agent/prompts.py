@@ -1,4 +1,8 @@
-"""System prompt do oráculo. Grounding, citação, recusa e anti-injection."""
+"""System prompt do oráculo. Grounding, citação, recusa e anti-injection.
+
+O bloco de NAVEGAÇÃO é separado (`NAVIGATION_PROMPT_BLOCK`) e montado por
+`build_system_prompt(navigation_enabled)`: só sessões que sabem navegar
+(bearer da Platform — R12/ADR-0022) o recebem."""
 
 SYSTEM_PROMPT = """\
 Você é o Oracle Borderless, um oráculo confiável e amigável do ecossistema tech global.
@@ -53,6 +57,15 @@ FLUXO:
   a contexto insuficiente.)
 - Use `fetch_notion_page` quando precisar do conteúdo completo/atualizado de uma
   página específica do Notion.
+"""
+
+# Bloco de NAVEGAÇÃO. Anexado ao SYSTEM_PROMPT **só** quando a sessão sabe
+# navegar (`navigation_enabled`, R12/ADR-0022): o SPA do oráculo não executa
+# redirect nenhum, então descrever `navigate_platform` para ele seria prometer
+# ao modelo uma capacidade que aquele cliente não tem. A emenda da regra 1
+# ("perguntas substantivas") fica no prompt base — é inofensiva sem navegação
+# e continua valendo para conversa fiada.
+NAVIGATION_PROMPT_BLOCK = """\
 
 NAVEGAÇÃO:
 - Quando o usuário quer IR a um lugar da plataforma, ENCONTRAR um conteúdo ou
@@ -72,3 +85,9 @@ NAVEGAÇÃO:
   Em "Intenção: navegação" sem destino identificável, responda em uma frase e
   sugira abrir o chat — nunca use a RESPOSTA PADRÃO.
 """
+
+
+def build_system_prompt(navigation_enabled: bool) -> str:
+    """Prompt do sistema do turno: base sempre, bloco de navegação só para
+    sessões que sabem navegar."""
+    return SYSTEM_PROMPT + NAVIGATION_PROMPT_BLOCK if navigation_enabled else SYSTEM_PROMPT

@@ -615,7 +615,8 @@ async def test_a_navigate_tool_call_puts_the_destination_on_the_wire_before_the_
     run = runner.run(
         "quero praticar algoritmos", [], _deps(_RecordingSearch([])), signals,
         mode="navigate",
-        extra_config={"answer_model": _navigate_model(), "platform_token": "tok", "navigation_client": client},
+        extra_config={"answer_model": _navigate_model(), "platform_token": "tok",
+                      "navigation_enabled": True, "navigation_client": client},
     )
 
     events = await _run_all(run)
@@ -665,7 +666,8 @@ async def test_a_retried_navigation_opens_the_navigate_step_once_but_still_deliv
     run = runner.run(
         "quero praticar algoritmos", [], _deps(_RecordingSearch([])), signals,
         mode="navigate",
-        extra_config={"answer_model": model, "platform_token": "tok", "navigation_client": client},
+        extra_config={"answer_model": model, "platform_token": "tok",
+                      "navigation_enabled": True, "navigation_client": client},
     )
 
     events = await _run_all(run)
