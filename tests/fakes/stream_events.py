@@ -8,9 +8,20 @@ from uuid import uuid4
 STEP_NODES = ("gate", "retrieve", "refuse", "answer")
 
 
-def ask_body(question: str, thread_id: str | None = None, run_id: str | None = None) -> dict:
+def ask_body(
+    question: str,
+    thread_id: str | None = None,
+    run_id: str | None = None,
+    mode: str | None = None,
+    locale: str | None = None,
+) -> dict:
+    input_ = {"question": question}
+    if mode is not None:
+        input_["mode"] = mode
+    if locale is not None:
+        input_["locale"] = locale
     return {
-        "input": {"question": question},
+        "input": input_,
         "config": {
             "run_id": run_id or str(uuid4()),
             "configurable": {"thread_id": thread_id or str(uuid4())},

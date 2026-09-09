@@ -16,3 +16,5 @@ class OpenedTurn:
     history: list[AgentMessage]
     draft: TurnTraceDraft
     signals: TurnSignals  # o MESMO objeto pendurado em draft.signals
+    mode: str = "chat"
+    locale: str = "pt-BR"

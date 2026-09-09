@@ -193,16 +193,32 @@ def _mark_engine_end(signals: TurnSignals) -> None:
 
 
 def _initial_state(
-    question: str, history: list[AgentMessage], knowledge: list[KnowledgeSnippet] | None
+    question: str,
+    history: list[AgentMessage],
+    knowledge: list[KnowledgeSnippet] | None,
+    mode: str = "chat",
+    locale: str = "pt-BR",
 ) -> dict:
-    """`preset_knowledge` liga a aresta que pula gate/retrieve (eval adversarial)."""
-    return {
+    """`preset_knowledge` liga a aresta que pula gate/retrieve (eval adversarial).
+
+    `mode`/`locale` vêm do input do cliente. Em `mode == "navigate"` a barra já
+    fixou a intenção: o state nasce com `intent`/`retrieve`/`search_query`/
+    `degraded` preset, sem passar pelo gate (spec §5.3; as arestas que usam
+    isso são a Task 4)."""
+    state = {
         "question": question,
         "history": history,
         "knowledge": list(knowledge) if knowledge is not None else [],
         "preset_knowledge": knowledge is not None,
         "messages": [],
+        "mode": mode,
+        "locale": locale,
+        "navigation": None,
     }
+    if mode == "navigate":
+        # A barra fixa a intenção: sem gate, sem RAG, sem recusa (spec §5.3).
+        state.update({"intent": "navigate", "retrieve": False, "search_query": "", "degraded": False})
+    return state
 
 
 def _is_answer_entry(event: GraphEvent) -> bool:
@@ -313,10 +329,12 @@ class TurnGraphRunner:
         deps: TurnDependencies,
         signals: TurnSignals,
         knowledge: list[KnowledgeSnippet] | None = None,
+        mode: str = "chat",
+        locale: str = "pt-BR",
         extra_config: dict | None = None,
     ) -> TurnRun:
         agen = self._graph.astream_events(
-            _initial_state(question, history, knowledge),
+            _initial_state(question, history, knowledge, mode=mode, locale=locale),
             config=self._config(deps, signals, extra_config),
             version="v2",
             stream_mode=["values", "updates"],

@@ -207,12 +207,17 @@ class TurnGraphPort(Protocol):
         deps: TurnDependencies,
         signals: TurnSignals,
         knowledge: list[KnowledgeSnippet] | None = None,
+        mode: str = "chat",
+        locale: str = "pt-BR",
         extra_config: dict | None = None,
     ) -> TurnRun:
         """Monta o turno. Síncrono: só constrói o gerador do grafo e o emitter.
 
         `knowledge` pré-semeado pula gate e retrieval e vai direto ao nó de
         resposta; é o que o eval usa nos casos adversariais.
+
+        `mode`/`locale` vêm do input do cliente (a barra manda "navigate", o
+        chat manda "chat") e entram no state inicial do grafo.
 
         `extra_config` injeta entradas no `configurable` do grafo — existe para
         os testes passarem modelos fakes sem monkeypatch.

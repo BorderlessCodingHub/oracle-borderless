@@ -22,7 +22,7 @@ from src.domain.conversations.services.out_of_scope_reply import (
 )
 from src.domain.shared.value_objects.citation import Citation
 from src.support.agent.graph.builder import build_turn_graph
-from src.support.agent.graph.runner import TurnGraphRunner
+from src.support.agent.graph.runner import TurnGraphRunner, _initial_state
 from src.support.agent.ports import (
     ROOT_NAME,
     GraphEvent,
@@ -166,6 +166,32 @@ def _tool_loop_graph(executed: dict):
     builder.add_conditional_edges("answer", tools_condition, {"tools": "tools", END: END})
     builder.add_edge("tools", "answer")
     return builder.compile()
+
+
+# --- _initial_state (mode/locale) --------------------------------------------
+
+
+def test_initial_state_defaults_to_chat_mode_and_pt_br_locale_with_no_intent():
+    """Sem `mode`, o estado não presume navegação: `intent` fica ausente (o
+    gate de verdade decide)."""
+    state = _initial_state("q", [], None)
+
+    assert state["mode"] == "chat"
+    assert state["locale"] == "pt-BR"
+    assert state["navigation"] is None
+    assert "intent" not in state
+
+
+def test_initial_state_navigate_mode_presets_intent_and_skips_the_gate():
+    """A barra manda `mode="navigate"`: o state já nasce com a intenção fixa e
+    `retrieve=False` — sem gate, sem RAG (spec §5.3)."""
+    state = _initial_state("q", [], None, mode="navigate", locale="en")
+
+    assert state["mode"] == "navigate"
+    assert state["locale"] == "en"
+    assert state["intent"] == "navigate"
+    assert state["retrieve"] is False
+    assert state["navigation"] is None
 
 
 # --- fases ------------------------------------------------------------------
