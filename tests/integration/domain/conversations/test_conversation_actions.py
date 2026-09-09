@@ -36,6 +36,29 @@ async def test_append_assistant_persists_with_sources(db_session):
 
 
 @pytest.mark.asyncio
+async def test_append_assistant_persists_with_navigation(db_session):
+    conv = await _conv(db_session)
+    navigation = {"destination": {"route": "/students/123"}, "access": "allowed"}
+    await AppendAssistantMessageAction().execute(conv.uuid, "vou te levar lá", [], navigation=navigation)
+    await db_session.flush()
+
+    _, messages = await GetConversationAction().execute(conv.uuid, None)
+    assert len(messages) == 1
+    assert messages[0].navigation == navigation
+
+
+@pytest.mark.asyncio
+async def test_append_assistant_persists_with_navigation_none_by_default(db_session):
+    conv = await _conv(db_session)
+    await AppendAssistantMessageAction().execute(conv.uuid, "resposta sem navegação", [])
+    await db_session.flush()
+
+    _, messages = await GetConversationAction().execute(conv.uuid, None)
+    assert len(messages) == 1
+    assert messages[0].navigation is None
+
+
+@pytest.mark.asyncio
 async def test_get_conversation_not_found_raises(db_session):
     with pytest.raises(NotFoundError):
         await GetConversationAction().execute(uuid4(), None)

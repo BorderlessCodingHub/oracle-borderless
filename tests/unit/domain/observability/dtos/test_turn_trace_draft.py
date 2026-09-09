@@ -37,3 +37,23 @@ def test_outcome_accepts_only_the_three_known_values(outcome):
     draft = TurnTraceDraft(question="x")
     draft.outcome = outcome
     assert draft.to_entity(conversation_id=uuid4()).outcome == outcome
+
+
+def test_navigation_fields_default_and_carry_to_entity():
+    draft = TurnTraceDraft(question="x")
+    entity = draft.to_entity(conversation_id=uuid4())
+    assert entity.intent is None
+    assert entity.navigation_called is False
+    assert entity.navigation_access is None
+
+
+def test_navigation_fields_carry_when_set_by_the_graph():
+    draft = TurnTraceDraft(question="me leve para meu painel")
+    draft.intent = "navigate"
+    draft.navigation_called = True
+    draft.navigation_access = "allowed"
+
+    entity = draft.to_entity(conversation_id=uuid4())
+    assert entity.intent == "navigate"
+    assert entity.navigation_called is True
+    assert entity.navigation_access == "allowed"

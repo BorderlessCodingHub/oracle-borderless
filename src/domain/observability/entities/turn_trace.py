@@ -39,6 +39,9 @@ class TurnTrace:
     output_tokens: int | None = None
     error: str | None = None
     langsmith_run_id: str | None = None
+    intent: str | None = None
+    navigation_called: bool = False
+    navigation_access: str | None = None
 
     def is_refusal(self) -> bool:
         return self.outcome == "refusal"

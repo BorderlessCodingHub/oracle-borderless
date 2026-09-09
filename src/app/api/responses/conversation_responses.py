@@ -16,6 +16,7 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     sources: list[CitationResponse] | None = None
+    navigation: dict | None = None
 
     @classmethod
     def from_entity(cls, m) -> "MessageResponse":
@@ -33,7 +34,7 @@ class MessageResponse(BaseModel):
             if m.sources
             else None
         )
-        return cls(role=m.role, content=m.content, sources=sources)
+        return cls(role=m.role, content=m.content, sources=sources, navigation=m.navigation)
 
 
 class ConversationSummaryResponse(BaseModel):

@@ -15,3 +15,4 @@ class Message:
     content: str
     created_at: datetime
     sources: list[Citation] | None = None
+    navigation: dict | None = None

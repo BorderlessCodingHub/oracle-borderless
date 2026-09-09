@@ -41,6 +41,7 @@ def test_message_empty_sources_roundtrip_preserves_empty_list():
         uuid = uuid4(); conversation_id = uuid4(); role = "assistant"; content = "oi"
         created_at = now
         sources = []
+        navigation = None
 
     entity = MessageMapper.to_entity(FakeModel())
     assert entity.sources == []
@@ -51,6 +52,47 @@ def test_message_to_entity_deserializes_sources():
         uuid = uuid4(); conversation_id = uuid4(); role = "assistant"; content = "oi"
         created_at = datetime(2026, 7, 10, tzinfo=timezone.utc)
         sources = [{"source_type": "web", "title": "T", "url": "https://x", "snippet": "s", "page_id": None}]
+        navigation = None
 
     entity = MessageMapper.to_entity(FakeModel())
     assert entity.sources[0] == Citation("web", "T", "https://x", "s", None)
+
+
+def test_message_to_model_attrs_carries_navigation_as_is():
+    now = datetime(2026, 7, 10, tzinfo=timezone.utc)
+    navigation = {"destination": {"route": "/students/123"}, "access": "allowed"}
+    msg = Message(
+        uuid=uuid4(), conversation_id=uuid4(), role="assistant", content="oi",
+        created_at=now, navigation=navigation,
+    )
+    assert MessageMapper.to_model_attrs(msg)["navigation"] == navigation
+
+
+def test_message_to_model_attrs_none_navigation():
+    now = datetime(2026, 7, 10, tzinfo=timezone.utc)
+    msg = Message(uuid=uuid4(), conversation_id=uuid4(), role="user", content="q", created_at=now)
+    assert MessageMapper.to_model_attrs(msg)["navigation"] is None
+
+
+def test_message_to_entity_carries_navigation_as_is():
+    nav_data = {"destination": {"route": "/students/123"}, "access": "allowed"}
+
+    class FakeModel:
+        uuid = uuid4(); conversation_id = uuid4(); role = "assistant"; content = "oi"
+        created_at = datetime(2026, 7, 10, tzinfo=timezone.utc)
+        sources = None
+        navigation = nav_data
+
+    entity = MessageMapper.to_entity(FakeModel())
+    assert entity.navigation == nav_data
+
+
+def test_message_to_entity_none_navigation():
+    class FakeModel:
+        uuid = uuid4(); conversation_id = uuid4(); role = "assistant"; content = "oi"
+        created_at = datetime(2026, 7, 10, tzinfo=timezone.utc)
+        sources = None
+        navigation = None
+
+    entity = MessageMapper.to_entity(FakeModel())
+    assert entity.navigation is None
