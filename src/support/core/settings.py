@@ -50,6 +50,7 @@ class Settings(BaseSettings):
 
     # --- Navegação (agente): API de navegação da borderless-api (spec §4) ---
     NAVIGATION_CATALOG_TTL_S: int = 3600
+    NAVIGATION_CATALOG_RETRY_S: int = 60  # cache negativo: espera antes de tentar a API de novo
     NAVIGATION_TIMEOUT_SECONDS: float = 8.0
 
     # --- CORS ---

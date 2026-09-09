@@ -65,3 +65,44 @@ def test_snapshot_text_usa_o_mesmo_formato_de_describe():
     text = NavigationCatalog.snapshot_text()
     assert "trail (dynamic)" in text and "home (static)" in text
     assert text.count("\n") == 16
+
+
+@pytest.mark.asyncio
+async def test_uma_falha_e_cacheada_negativamente_e_nao_repete_a_chamada_dentro_do_retry():
+    """R13: sem cache negativo, cada turno seguinte repagava a chamada (e o
+    timeout dela) no caminho crítico enquanto a API estivesse fora."""
+    now = {"t": 1000.0}
+    client = FakeNavigationClient(results={}, catalog=ExternalServiceUnavailableError("fora"))
+    catalog = NavigationCatalog(client=client, clock=lambda: now["t"])
+
+    first = await catalog.describe("tok")
+    now["t"] += 59
+    second = await catalog.describe("tok")
+
+    assert "trail (dynamic)" in first and second == first  # snapshot embutido nas duas
+    assert len([c for c in client.calls if c["op"] == "catalog"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_falha_cacheada_expira_no_retry_e_a_api_e_tentada_de_novo():
+    now = {"t": 1000.0}
+    client = FakeNavigationClient(results={}, catalog=ExternalServiceUnavailableError("fora"))
+    catalog = NavigationCatalog(client=client, clock=lambda: now["t"])
+
+    await catalog.describe("tok")
+    now["t"] += 61
+    await catalog.describe("tok")
+
+    assert len([c for c in client.calls if c["op"] == "catalog"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_volta_da_api_substitui_o_cache_negativo_pelo_catalogo_ao_vivo():
+    now = {"t": 1000.0}
+    client = FakeNavigationClient(results={}, catalog=ExternalServiceUnavailableError("fora"))
+    catalog = NavigationCatalog(client=client, clock=lambda: now["t"])
+    await catalog.describe("tok")
+
+    now["t"] += 61
+    back = NavigationCatalog(client=FakeNavigationClient(results={}, catalog=[ENTRY]), clock=lambda: now["t"])
+    assert "code_breakers (static): Algorithm challenges" in await back.describe("tok")

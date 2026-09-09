@@ -3,7 +3,12 @@
 A API exige token de usuário, então o catálogo é buscado com o token do turno
 corrente e cacheado por processo (NAVIGATION_CATALOG_TTL_S). Sem token ou com a
 API fora, vale o snapshot embutido — a API continua sendo a fonte da verdade:
-um id fora do catálogo dela volta como 400 com `validDestinations`."""
+um id fora do catálogo dela volta como 400 com `validDestinations`.
+
+A FALHA também é cacheada (R13, `NAVIGATION_CATALOG_RETRY_S`): sem isso, com a
+API fora, cada turno seguinte repagava a chamada — e o timeout dela — no
+caminho crítico. Durante o retry o snapshot é servido do cache; passado o
+prazo, a API é tentada de novo."""
 
 import json
 import logging
@@ -23,6 +28,10 @@ _SNAPSHOT = Path(__file__).with_name("navigation_catalog_snapshot.json")
 class _CachedCatalog:
     at: float
     entries: list[dict]
+    negative: bool = False  # entries é o snapshot embutido: a API falhou
+
+    def ttl(self) -> float:
+        return settings.NAVIGATION_CATALOG_RETRY_S if self.negative else settings.NAVIGATION_CATALOG_TTL_S
 
 
 def _format_entries(entries: list[dict]) -> str:
@@ -59,15 +68,19 @@ class NavigationCatalog:
 
     async def entries(self, access_token: str | None) -> list[dict]:
         cache = type(self)._cache
-        if cache is not None and self._clock() - cache.at < settings.NAVIGATION_CATALOG_TTL_S:
+        if cache is not None and self._clock() - cache.at < cache.ttl():
             return cache.entries
         if not access_token:
+            # Turno sem token não pode nem tentar — e não envenena o cache do
+            # processo com uma falha que nunca chegou a acontecer.
             return self.snapshot()
         try:
             entries = await self._client.catalog(access_token)
         except Exception:  # snapshot cobre; a API segue sendo a fonte da verdade
             logger.warning("catálogo de navegação indisponível; usando snapshot", exc_info=True)
-            return self.snapshot()
+            snapshot = self.snapshot()
+            type(self)._cache = _CachedCatalog(at=self._clock(), entries=snapshot, negative=True)
+            return snapshot
         type(self)._cache = _CachedCatalog(at=self._clock(), entries=entries)
         return entries
 
