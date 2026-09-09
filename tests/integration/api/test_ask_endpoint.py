@@ -385,3 +385,76 @@ async def test_ask_falls_back_to_the_embedded_snapshot_when_the_catalog_is_unava
     assert graph.received_extra_config["navigation_catalog_text"] == NavigationCatalog.snapshot_text()
 
     await _roles(UUID(_thread(body)))  # limpa a conversa criada
+
+
+@pytest.mark.asyncio
+async def test_ask_from_the_oracle_spa_cookie_session_gets_no_navigation_capability(monkeypatch):
+    """R12/ADR-0022: a mesma pergunta pela sessão de COOKIE (SPA do oráculo,
+    que não executa redirect) não habilita navegação nem paga o catálogo."""
+    graph = FakeTurnGraph(answer="Vamos praticar!")
+    _patch(monkeypatch, graph=graph)
+    from main import app
+
+    body = ask_body("quero praticar algoritmos", mode="navigate", locale="en")
+    headers = await auth_headers("spa-user@x.com")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/conversations/ask", json=body, headers=headers)
+        assert resp.status_code == 200
+
+    assert graph.received_extra_config["navigation_enabled"] is False
+    assert graph.received_extra_config["navigation_catalog_text"] is None
+
+    await _roles(UUID(_thread(body)))  # limpa a conversa criada
+
+
+@pytest.mark.asyncio
+async def test_an_unseen_bearer_is_validated_once_and_becomes_a_platform_bearer_session(monkeypatch):
+    """Primeiro turno vindo do proxy da Platform: não há linha em `sessions`
+    ainda. `require_user` valida o bearer UMA vez em /api/users/profile e a
+    sessão nasce com `source="platform_bearer"`."""
+    from src.support.clients.borderless.borderless_auth_client import BorderlessAuthClient, PlatformProfile
+    from src.support.utils.session_tokens import hash_session_token
+
+    raw_bearer = "bearer-nunca-visto-1"
+    profile = PlatformProfile(
+        id="u-99", email="fresh@x.com", name="Fresh", username="fresh",
+        membership="PRO", community_role="MEMBER", seniority="SENIOR",
+        career_stage="already_global",
+    )
+
+    async def _fake_get_profile(self, access_token):
+        assert access_token == raw_bearer
+        return profile
+
+    monkeypatch.setattr(BorderlessAuthClient, "get_profile", _fake_get_profile)
+
+    graph = FakeTurnGraph(answer="resposta de teste")
+    _patch(monkeypatch, graph=graph)
+    from main import app
+
+    body = ask_body("o que é o onboarding?")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/conversations/ask", json=body, headers=bearer_headers(raw_bearer))
+        assert resp.status_code == 200
+
+    assert graph.received_extra_config["navigation_enabled"] is True
+    assert graph.received_extra_config["platform_token"] == raw_bearer
+
+    from src.support.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as s:
+        row = (
+            await s.execute(
+                text("SELECT source, user_email FROM sessions WHERE token_hash = :h"),
+                {"h": hash_session_token(raw_bearer)},
+            )
+        ).first()
+        assert row is not None and row.source == "platform_bearer"
+        assert row.user_email == "fresh@x.com"
+        await s.execute(
+            text("DELETE FROM sessions WHERE token_hash = :h"),
+            {"h": hash_session_token(raw_bearer)},
+        )
+        await s.commit()
+
+    await _roles(UUID(_thread(body)))  # limpa a conversa criada
