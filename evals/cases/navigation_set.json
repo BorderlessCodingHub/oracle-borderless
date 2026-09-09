@@ -1,0 +1,67 @@
+[
+  {
+    "id": "nav-bar-praticar-algoritmos",
+    "category": "navigation",
+    "mode": "navigate",
+    "question": "quero praticar algoritmos",
+    "expected_destination": "code_breakers",
+    "notes": "Barra de navegação: praticar algoritmos/estrutura de dados é CodeBreakers, não trilha."
+  },
+  {
+    "id": "nav-bar-trilhas-backend",
+    "category": "navigation",
+    "mode": "navigate",
+    "question": "me leva para as trilhas de backend",
+    "expected_destination": "trail",
+    "notes": "Destino dinâmico: a plataforma escolhe a trilha concreta a partir do topic 'backend'."
+  },
+  {
+    "id": "nav-bar-meus-eventos",
+    "category": "navigation",
+    "mode": "navigate",
+    "question": "onde vejo meus eventos?",
+    "expected_destination": "events",
+    "notes": "Listagem de eventos, não um evento específico."
+  },
+  {
+    "id": "nav-bar-system-design",
+    "category": "navigation",
+    "mode": "navigate",
+    "question": "quero treinar system design",
+    "expected_destination": "program",
+    "notes": "Mock Interview de System Design vive em programs (destino dinâmico), não em CodeBreakers."
+  },
+  {
+    "id": "nav-bar-trocar-idioma",
+    "category": "navigation",
+    "mode": "navigate",
+    "question": "quero trocar o idioma",
+    "expected_destination": "settings",
+    "notes": "Preferência de conta: settings, não profile."
+  },
+  {
+    "id": "nav-bar-minhas-compras",
+    "category": "navigation",
+    "mode": "navigate",
+    "question": "ver minhas compras",
+    "expected_destination": "settings_purchases",
+    "notes": "Sub-rota específica de settings — o id genérico settings seria o destino errado."
+  },
+  {
+    "id": "nav-chat-leaderboard-en",
+    "category": "navigation",
+    "mode": "chat",
+    "locale": "en",
+    "question": "how do I get to the leaderboard?",
+    "expected_destination": "leaderboard",
+    "notes": "Navegação nascida no chat (não na barra) e em inglês: o gate precisa classificar intent=navigate."
+  },
+  {
+    "id": "nav-bar-ambiguo-quero-melhorar",
+    "category": "navigation",
+    "mode": "navigate",
+    "question": "quero melhorar",
+    "expected_destination": null,
+    "notes": "Ambíguo demais: o turno deve perguntar em quê, sem navegar. Qualquer destino resolvido zera o caso."
+  }
+]

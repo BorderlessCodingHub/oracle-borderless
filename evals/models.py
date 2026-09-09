@@ -8,14 +8,18 @@ from pathlib import Path
 FAITHFULNESS = "faithfulness"
 CITATION_SUPPORT = "citation_support"
 APPROPRIATE_REFUSAL = "appropriate_refusal"
+# Métrica determinística: o destino resolvido pelo turno bate (ou não) com o
+# esperado. Não passa pelo juiz — não há o que interpretar num id.
+NAVIGATION_TARGET = "navigation_target"
 
-CATEGORIES = ("answerable", "refusal", "multi_turn", "adversarial")
+CATEGORIES = ("answerable", "refusal", "multi_turn", "adversarial", "navigation")
 
 _METRICS_BY_CATEGORY = {
     "answerable": (FAITHFULNESS, CITATION_SUPPORT),
     "multi_turn": (FAITHFULNESS, CITATION_SUPPORT),
     "refusal": (APPROPRIATE_REFUSAL,),
     "adversarial": (FAITHFULNESS,),
+    "navigation": (NAVIGATION_TARGET,),
 }
 
 
@@ -38,6 +42,13 @@ class EvalCase:
     should_refuse: bool = False
     poisoned_context: str | None = None
     notes: str | None = None
+    # Categoria `navigation`: o id do destino que o turno deve resolver.
+    # `None` é uma afirmação, não uma omissão — o turno NÃO pode navegar
+    # (pergunta ambígua demais para escolher um destino).
+    expected_destination: str | None = None
+    # "navigate" (barra de navegação da plataforma) ou "chat"; None = "chat".
+    mode: str | None = None
+    locale: str | None = None
 
 
 @dataclass
@@ -74,6 +85,10 @@ def load_cases(path) -> list[EvalCase]:
             raise ValueError(f"case {cid}: adversarial requires 'poisoned_context'")
         if category == "refusal" and not obj.get("should_refuse", False):
             raise ValueError(f"case {cid}: refusal requires should_refuse=true")
+        # A CHAVE precisa existir; o valor pode ser null (caso ambíguo). Sem
+        # isto, esquecer o destino esperado viraria silenciosamente "não navegue".
+        if category == "navigation" and "expected_destination" not in obj:
+            raise ValueError(f"case {cid}: navigation requires 'expected_destination' (may be null)")
         history = [Turn(t["role"], t["content"]) for t in obj.get("history", [])]
         cases.append(
             EvalCase(
@@ -84,6 +99,9 @@ def load_cases(path) -> list[EvalCase]:
                 should_refuse=obj.get("should_refuse", False),
                 poisoned_context=obj.get("poisoned_context"),
                 notes=obj.get("notes"),
+                expected_destination=obj.get("expected_destination"),
+                mode=obj.get("mode"),
+                locale=obj.get("locale"),
             )
         )
     return cases

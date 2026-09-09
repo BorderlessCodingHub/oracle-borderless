@@ -26,8 +26,10 @@ class _FakeGraph:
         self.received_history = None
         self.received_knowledge = None
         self.received_deps = None
+        self.received_mode = None
 
-    def run(self, question, history, deps, signals, knowledge=None, extra_config=None):
+    def run(self, question, history, deps, signals, knowledge=None, mode="chat", locale="pt-BR", extra_config=None):
+        self.received_mode = mode
         self.received_question = question
         self.received_history = history
         self.received_knowledge = knowledge
@@ -114,6 +116,7 @@ async def test_answerable_retrieves_with_rewritten_query_and_scores():
     assert graph.received_question == "e as renovações?"  # raw question ao grafo
     assert graph.received_knowledge is None  # não pré-semeado fora de adversarial
     assert graph.received_deps.search is search
+    assert graph.received_mode == "chat"  # categorias antigas não mexem no modo
 
 
 @pytest.mark.asyncio
