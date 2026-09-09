@@ -412,6 +412,72 @@ async def test_a_tool_loop_reentry_reuses_the_state_messages_and_returns_only_th
     assert out["messages"] == [reply]
 
 
+# --- profile, locale and navigation intent in the answer prompt ----------
+
+
+def test_answer_messages_builds_profile_locale_and_navigation_lines():
+    from src.support.agent.graph.nodes import _answer_messages
+
+    state = {"question": "q", "history": [], "knowledge": [], "locale": "en", "intent": "navigate"}
+    config = {
+        "configurable": {
+            "user_profile": {
+                "membership": "FREE",
+                "seniority": "JUNIOR",
+                "careerStage": "junior_transition",
+            }
+        }
+    }
+
+    human = str(_answer_messages(state, config)[-1].content)
+
+    assert "Idioma da resposta: en" in human
+    assert "membership=FREE" in human
+    assert "Intenção: navegação" in human
+
+
+def test_answer_messages_with_a_knowledge_intent_has_no_navigation_marker():
+    from src.support.agent.graph.nodes import _answer_messages
+
+    human = str(
+        _answer_messages(
+            {"question": "q", "history": [], "knowledge": [], "intent": "knowledge"}, {"configurable": {}}
+        )[-1].content
+    )
+
+    assert "Intenção: navegação" not in human
+
+
+def test_answer_messages_skips_the_profile_line_when_absent():
+    from src.support.agent.graph.nodes import _answer_messages
+
+    human = str(_answer_messages({"question": "q", "history": [], "knowledge": []}, {"configurable": {}})[-1].content)
+
+    assert "Perfil do usuário" not in human
+    assert "Idioma da resposta: pt-BR" in human
+
+
+@pytest.mark.asyncio
+async def test_answer_node_passes_the_full_config_through_to_the_prompt():
+    """answer_node precisa repassar `config` (não só `cfg`) para
+    `_answer_messages` — senão user_profile e locale nunca chegam ao prompt."""
+    model = _FakeChatModel()
+    signals = TurnSignals()
+    config = _answer_config(signals, model=model)
+    config["configurable"]["user_profile"] = {
+        "membership": "PRO",
+        "seniority": "SENIOR",
+        "careerStage": "already_global",
+    }
+    state = {"question": "q", "history": [], "knowledge": [], "locale": "es"}
+
+    await answer_node(state, config)
+
+    prompt = "\n".join(str(m) for m in model.received)
+    assert "membership=PRO" in prompt
+    assert "Idioma da resposta: es" in prompt
+
+
 class _FakeSearchByQuery:
     """Devolve snippets por query — simula reescrita que embeda pior que a pergunta."""
 

@@ -163,12 +163,27 @@ async def _nearest_or_none(deps, query: str) -> float | None:
         return None
 
 
-def _answer_messages(state: TurnState) -> list:
-    """Mesmo prompt de sempre: histórico, contexto embrulhado, pergunta."""
+def _answer_messages(state: TurnState, config) -> list:
+    """Histórico, contexto embrulhado, pergunta — e, depois dela, perfil do
+    usuário (quando presente na config), idioma da resposta e, para intent
+    navigate, o marcador que afasta a RESPOSTA PADRÃO (ver bloco NAVEGAÇÃO)."""
     parts = [f"{m.role}: {m.content}" for m in state.get("history", [])]
     parts.append("Contexto recuperado da base de conhecimento:")
     parts.append(format_knowledge(state.get("knowledge", [])))
     parts.append(f"Pergunta do usuário: {state['question']}")
+
+    profile = config.get("configurable", {}).get("user_profile")
+    if profile:
+        membership = profile.get("membership") or "None"
+        seniority = profile.get("seniority") or "None"
+        career_stage = profile.get("careerStage") or "None"
+        parts.append(
+            f"Perfil do usuário: membership={membership}, seniority={seniority}, careerStage={career_stage}"
+        )
+    parts.append(f"Idioma da resposta: {state.get('locale', 'pt-BR')}")
+    if state.get("intent") == "navigate":
+        parts.append("Intenção: navegação (não use a RESPOSTA PADRÃO)")
+
     return [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content="\n\n".join(parts))]
 
 
@@ -212,7 +227,7 @@ async def answer_node(state: TurnState, config) -> dict:
         signals.answer_started_at = time.monotonic()
 
     existing_messages = state.get("messages")
-    messages = existing_messages or _answer_messages(state)
+    messages = existing_messages or _answer_messages(state, config)
     model = _answer_model(config, enable_tools=cfg.get("enable_tools", True))
     message = await model.ainvoke(messages)
 
