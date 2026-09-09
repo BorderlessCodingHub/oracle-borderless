@@ -39,16 +39,25 @@ _TOOL_FAILURE_PREFIX = "(falha"
 _ARGS_VISIBLE_TOOLS = frozenset({"web_search"})
 
 # Nós que viram passo na linha do tempo. `tools` não: tool calls têm eventos
-# próprios (on_tool_start/end/error).
-_STEP_NODES = frozenset({"gate", "retrieve", "refuse", "answer"})
+# próprios (on_tool_start/end/error). `navigate` sim: é um passo com nome, e é
+# o `on_chain_end` dele que carrega o destino ao cliente (spec §5.3).
+_STEP_NODES = frozenset({"gate", "retrieve", "refuse", "answer", "navigate"})
 
 # O que do `metadata` do LangChain/LangGraph pode sair. Fora: user_hash (hash do
 # e-mail), langgraph_path/triggers/checkpoint_ns (ruído interno), lc_versions.
 _METADATA_KEYS = ("langgraph_node", "langgraph_step", "thread_id", "ls_provider", "ls_model_name")
 
 # Chaves do state copiadas tal como estão pela projeção. `knowledge` vira
-# `kept`; `citations` é copiada como lista; tudo o mais cai.
-_STATE_KEYS = ("retrieve", "degraded", "answer", "outcome")
+# `kept`; `citations` é copiada como lista; `navigation` passa pela allowlist
+# abaixo; tudo o mais cai.
+_STATE_KEYS = ("retrieve", "degraded", "answer", "outcome", "intent")
+
+# Allowlist do destino resolvido (spec §5.3). O `to_public()` do client já corta
+# `signals.profile` (membership/senioridade do usuário); esta é a segunda
+# barreira — o redator não confia no formato que o nó escreveu no state.
+_NAV_TARGET_KEYS = ("id", "path", "labelKey", "label")
+_NAV_SIGNAL_KEYS = ("matchedTags", "inProgress", "difficulty", "fallback")
+_NAV_UNLOCK_KEYS = ("action", "path", "membership")
 
 
 def _text_of(message) -> str:
@@ -71,6 +80,26 @@ def _tool_status(message: ToolMessage) -> str:
     return "error" if text.startswith(_TOOL_FAILURE_PREFIX) else "ok"
 
 
+def _pick(source, keys: tuple[str, ...]) -> dict:
+    return {key: source[key] for key in keys if key in source}
+
+
+def _project_navigation(navigation) -> dict:
+    """Projeção pública do destino: só as chaves que a barra precisa para
+    navegar e explicar o acesso."""
+    if not isinstance(navigation, dict):
+        return {}
+    unlock = navigation.get("unlock")
+    alternatives = navigation.get("alternatives") or []
+    return {
+        "destination": _pick(navigation.get("destination") or {}, _NAV_TARGET_KEYS),
+        "access": navigation.get("access"),
+        "unlock": _pick(unlock, _NAV_UNLOCK_KEYS) if isinstance(unlock, dict) else None,
+        "signals": _pick(navigation.get("signals") or {}, _NAV_SIGNAL_KEYS),
+        "alternatives": [_pick(a, _NAV_TARGET_KEYS) for a in alternatives if isinstance(a, dict)],
+    }
+
+
 def _project(state) -> dict:
     """Projeção pública do state (spec 07/09, §1.2). Aplicada a saídas de nó, a
     cada valor de um chunk `updates` e ao snapshot de `values`."""
@@ -81,6 +110,8 @@ def _project(state) -> dict:
         out["kept"] = len(state["knowledge"] or [])
     if "citations" in state:
         out["citations"] = list(state["citations"] or [])
+    if state.get("navigation"):
+        out["navigation"] = _project_navigation(state["navigation"])
     return out
 
 

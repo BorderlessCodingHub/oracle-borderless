@@ -1,15 +1,37 @@
 """Ferramentas do oráculo. Conteúdo de fonte SEMPRE entre <<TOOL_CONTENT>> (dado
 não-confiável). web_search e fetch_notion_page são HTTP (não tocam o banco), então
-rodam com segurança durante o streaming."""
+rodam com segurança durante o streaming.
+
+`navigate_platform` é declarada aqui junto das outras — é assim que o modelo a
+vê — mas NÃO é executada pelo ToolNode: o corpo levanta RuntimeError de
+propósito. Quem a executa é o nó `navigate` (spec §5.3), para que o destino
+resolvido entre no state e saia no fio antes da frase final. Por isso o
+`ToolNode` recebe `tool_node_tools()`, e não `build_tools()`.
+"""
 
 import logging
+from typing import Literal
 
 from src.domain.shared.value_objects.citation import Citation
+from src.support.agent.navigation_catalog import NavigationCatalog
 from src.support.agent.ports import KnowledgeSnippet
 from src.support.clients.notion.notion_client import NotionClient
 from src.support.clients.tavily.tavily_client import TavilyClient
 
 logger = logging.getLogger(__name__)
+
+NAVIGATE_TOOL_NAME = "navigate_platform"
+NAVIGATE_TOOL_DOC = """Leva o usuário a um destino da Borderless Platform. Use quando ele quer IR a
+um lugar, ENCONTRAR um conteúdo ou COMEÇAR uma atividade. A resolução do destino
+concreto e do acesso é feita pela plataforma a partir do perfil do usuário.
+
+destination: um id do catálogo abaixo. topic: tema livre quando houver (ex.:
+"backend node.js", "system design", "python"). goal: learn | practice | network |
+interview | manage_account.
+
+Catálogo:
+{catalog}
+"""
 
 _OPEN = "<<TOOL_CONTENT>>"
 _CLOSE = "<</TOOL_CONTENT>>"
@@ -64,11 +86,15 @@ class FetchNotionTool:
         return wrap_tool_content(f"[{page.title} — {page.url}]\n{page.content}")
 
 
-def build_tools() -> list:
-    """As duas tools no formato LangChain.
+def build_tools(navigation_catalog_text: str | None = None) -> list:
+    """As três tools no formato LangChain.
 
     O `config` é injetado pelo runtime — o modelo não o vê. É por ele que vêm o
     coletor de citações e o `signals` deste turno; nada de estado global.
+
+    `navigation_catalog_text` é o catálogo ao vivo da plataforma (buscado com o
+    token do turno). Sem ele — turno sem token, API fora — vale o snapshot
+    embutido: a API continua sendo a fonte da verdade e recusa id inválido.
     """
     from langchain_core.runnables import RunnableConfig
     from langchain_core.tools import tool
@@ -96,4 +122,22 @@ def build_tools() -> list:
             logger.exception("fetch_notion_page tool failed")
             return wrap_tool_content(f"(falha ao buscar página do Notion: {exc})")
 
-    return [web_search, fetch_notion_page]
+    catalog = navigation_catalog_text or NavigationCatalog.snapshot_text()
+
+    @tool(NAVIGATE_TOOL_NAME, description=NAVIGATE_TOOL_DOC.format(catalog=catalog))
+    async def navigate_platform(
+        destination: str,
+        topic: str | None = None,
+        goal: Literal["learn", "practice", "network", "interview", "manage_account"] | None = None,
+    ) -> str:
+        # Declaração sem execução: o nó `navigate` intercepta a chamada antes do
+        # ToolNode. Chegar aqui significa que a aresta `after_answer` deixou
+        # passar — erro de programação, não condição de runtime.
+        raise RuntimeError("navigate_platform é executada pelo nó navigate, não pelo ToolNode")
+
+    return [web_search, fetch_notion_page, navigate_platform]
+
+
+def tool_node_tools() -> list:
+    """Só as tools que o ToolNode executa — navigate_platform vai ao nó próprio."""
+    return [t for t in build_tools() if t.name != NAVIGATE_TOOL_NAME]

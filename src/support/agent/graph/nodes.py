@@ -173,9 +173,14 @@ def _answer_messages(state: TurnState) -> list:
 
 
 def _answer_model(config, enable_tools: bool = True):
-    injected = config.get("configurable", {}).get("answer_model")
+    cfg = config.get("configurable", {})
+    injected = cfg.get("answer_model")
     model = injected or build_chat_model()
-    return model.bind_tools(build_tools()) if enable_tools else model
+    if not enable_tools:
+        return model
+    # O catálogo ao vivo (buscado com o token do turno) vai na descrição da tool
+    # de navegação; sem ele, `build_tools` cai no snapshot embutido.
+    return model.bind_tools(build_tools(cfg.get("navigation_catalog_text")))
 
 
 def _fill_usage(signals, message: AIMessage) -> None:

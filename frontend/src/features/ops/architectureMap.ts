@@ -127,7 +127,7 @@ export const ARCHITECTURE_MAP: MapBand[] = [
       {
         id: "graph",
         label: "Grafo do turno",
-        description: "StateGraph LangGraph: gate → retrieval → recusa ou resposta → tool loop. As três decisões são arestas condicionais, testadas isoladamente.",
+        description: "StateGraph LangGraph: gate → retrieval → recusa ou resposta → tool loop, com o nó navigate ao lado do ToolNode. As decisões são arestas condicionais, testadas isoladamente.",
         files: [
           "src/support/agent/graph/builder.py",
           "src/support/agent/graph/edges.py",
@@ -144,6 +144,16 @@ export const ARCHITECTURE_MAP: MapBand[] = [
           "src/support/agent/prompts.py",
         ],
         metric: "engine",
+      },
+      {
+        id: "navigate",
+        label: "Nó navigate",
+        description: "Executa navigate_platform fora do ToolNode: resolve o destino na borderless-api e projeta navigation no chunk updates antes da frase final.",
+        files: [
+          "src/support/agent/graph/navigate_node.py",
+          "src/support/clients/borderless/borderless_navigation_client.py",
+          "src/support/agent/navigation_catalog.py",
+        ],
       },
       {
         id: "runner",

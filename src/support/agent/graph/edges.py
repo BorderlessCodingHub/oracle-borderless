@@ -1,9 +1,14 @@
-"""As três decisões do turno. Funções puras: recebem estado, devolvem o nome do
-próximo nó. Tradução 1:1 do if/else que vivia em AnswerQuestionAction."""
+"""As decisões do turno. Funções puras: recebem estado, devolvem o nome do
+próximo nó. As três primeiras são tradução 1:1 do if/else que vivia em
+AnswerQuestionAction; `after_answer` substitui o `tools_condition` do prebuilt
+para poder desviar a navegação ao nó próprio."""
 
 from typing import Literal
 
+from langgraph.graph import END
+
 from src.support.agent.graph.state import TurnState
+from src.support.agent.tools import NAVIGATE_TOOL_NAME
 
 
 def route_entry(state: TurnState) -> Literal["answer", "gate"]:
@@ -36,3 +41,16 @@ def has_grounding(state: TurnState) -> Literal["refuse", "answer"]:
     if state.get("knowledge"):
         return "answer"
     return "answer" if state.get("degraded") else "refuse"
+
+
+def after_answer(state: TurnState) -> Literal["navigate", "tools", "__end__"]:
+    """Sucede `tools_condition`: sem tool call o turno acaba; uma chamada a
+    `navigate_platform` vai ao nó `navigate` (que também responde às outras tool
+    calls da mesma mensagem); o resto vai ao ToolNode."""
+    message = state["messages"][-1] if state.get("messages") else None
+    calls = getattr(message, "tool_calls", None) or []
+    if not calls:
+        return END
+    if any(call["name"] == NAVIGATE_TOOL_NAME for call in calls):
+        return "navigate"
+    return "tools"
