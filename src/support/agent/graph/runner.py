@@ -118,10 +118,17 @@ def _project(state) -> dict:
 class EventRedactor:
     """Allowlist + projeção. Um por run: guarda se o `answer` já abriu (o tool
     loop re-entra no nó e o passo não pode reabrir) e segura o `on_chain_end`
-    do `answer` para que ele saia uma vez só, antes do fim do raiz."""
+    do `answer` para que ele saia uma vez só, antes do fim do raiz. O `navigate`
+    também re-entra (o modelo pode insistir depois de um destino inválido) e
+    tem o mesmo guarda: o PASSO abre e fecha uma vez por turno. O que não é
+    silenciado é o chunk `updates` — uma segunda tentativa que dá certo precisa
+    entregar `{"navigate": {"navigation": ...}}` ao cliente, senão a barra não
+    navega."""
 
     def __init__(self) -> None:
         self._answer_started = False
+        self._navigate_started = False
+        self._navigate_ended = False
         self.pending_answer_end: GraphEvent | None = None
 
     def redact(self, raw: dict) -> GraphEvent | None:
@@ -184,7 +191,15 @@ class EventRedactor:
                 if self._answer_started:
                     return None
                 self._answer_started = True
+            if name == "navigate":
+                if self._navigate_started:
+                    return None
+                self._navigate_started = True
             return {}
+        if name == "navigate":
+            if self._navigate_ended:
+                return None
+            self._navigate_ended = True
         return {"output": _project(data.get("output"))}
 
     def _token(self, data: dict) -> dict | None:

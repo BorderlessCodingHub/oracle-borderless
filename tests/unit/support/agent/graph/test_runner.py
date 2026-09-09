@@ -33,7 +33,10 @@ from src.support.agent.ports import (
     navigation_of,
     text_of,
 )
-from src.support.clients.borderless.borderless_navigation_client import NavigationResult
+from src.support.clients.borderless.borderless_navigation_client import (
+    NavigationResult,
+    NavigationValidationError,
+)
 from tests.fakes.fake_navigation_client import FakeNavigationClient
 from tests.fakes.scripted_chat_model import ScriptedChatModel
 
@@ -640,3 +643,47 @@ async def test_a_navigate_tool_call_puts_the_destination_on_the_wire_before_the_
     for e in events:
         assert not (set(_keys(e.data)) & forbidden), (e.event, e.name, e.data)
         assert "tok" not in repr(e.metadata)
+
+
+@pytest.mark.asyncio
+async def test_a_retried_navigation_opens_the_navigate_step_once_but_still_delivers_the_destination():
+    """O modelo pode insistir depois de um destino inválido: o nó `navigate`
+    re-entra. O PASSO abre e fecha uma vez (mesmo padrão do `answer`), mas o
+    chunk `updates` da tentativa que deu certo continua saindo — é por ele que
+    a barra recebe o destino."""
+    client = FakeNavigationClient({
+        "moon": NavigationValidationError("Unknown", ["code_breakers"]),
+        "code_breakers": NAV_RESULT,
+    })
+    model = ScriptedChatModel(replies=[
+        AIMessage(content="", tool_calls=[{"name": "navigate_platform", "args": {"destination": "moon"}, "id": "nav-1"}]),
+        AIMessage(content="", tool_calls=[{"name": "navigate_platform", "args": {"destination": "code_breakers"}, "id": "nav-2"}]),
+        AIMessage(content="Te levei para o CodeBreakers"),
+    ])
+    signals = TurnSignals()
+    runner = TurnGraphRunner(graph=build_turn_graph(), enable_tools=True)
+    run = runner.run(
+        "quero praticar algoritmos", [], _deps(_RecordingSearch([])), signals,
+        mode="navigate",
+        extra_config={"answer_model": model, "platform_token": "tok", "navigation_client": client},
+    )
+
+    events = await _run_all(run)
+
+    assert [c["destination"] for c in client.calls] == ["moon", "code_breakers"]
+    steps = _steps(events)
+    assert steps.count(("navigate", "start")) == 1, steps
+    assert steps.count(("navigate", "end")) == 1, steps
+    assert steps.count(("answer", "start")) == 1 and steps.count(("answer", "end")) == 1
+
+    update_at = next(
+        i for i, e in enumerate(events)
+        if e.event == "on_chain_stream" and e.is_root
+        and e.data["chunk"][0] == "updates" and (e.data["chunk"][1].get("navigate") or {}).get("navigation")
+    )
+    first_token_at = next(i for i, e in enumerate(events) if e.event == "on_chat_model_stream")
+    assert update_at < first_token_at
+    assert navigation_of(events[update_at]) == NAV_RESULT.to_public()
+    assert navigation_of(events[-1]) == NAV_RESULT.to_public()
+    assert signals.tool_calls == 2
+    assert signals.navigation_called is True and signals.navigation_access == "allowed"
