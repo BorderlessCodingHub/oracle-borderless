@@ -141,7 +141,7 @@ async def search_lesson(query: str, config: RunnableConfig) -> str:
 
 ## 6. borderless-api — rotas internas e adapters
 
-Duas rotas novas sob `/api/internal/`, protegidas por **segredo compartilhado em header** (`MENTOR_INGEST_SECRET`), não por `fastify.authenticate`. Motivo: a ingestão é um lote offline sem usuário, e um token de admin expirando no meio de 30 aulas é um modo de falha ruim.
+Duas rotas novas sob `/api/internal/`, protegidas por **segredo compartilhado em header** (`X-Internal-Secret`), não por `fastify.authenticate`. O mesmo valor tem nome próprio em cada repo — `MENTOR_INGEST_SECRET` na `borderless-api`, `BORDERLESS_INTERNAL_SECRET` no Oracle (seção 7) — e precisa ser configurado igual nos dois lados. Motivo: a ingestão é um lote offline sem usuário, e um token de admin expirando no meio de 30 aulas é um modo de falha ruim.
 
 ```
 GET /api/internal/programs/:slug/lessons
