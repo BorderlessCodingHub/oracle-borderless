@@ -35,7 +35,7 @@ class RunTurnAction:
         self.graph = graph
         self.embeddings = embeddings
 
-    def execute(self, turn: OpenedTurn) -> TurnRun:
+    def execute(self, turn: OpenedTurn, extra_config: dict | None = None) -> TurnRun:
         search = SearchKnowledgeBaseAction(embeddings=self.embeddings)
         deps = TurnDependencies(
             search=search,
@@ -43,4 +43,7 @@ class RunTurnAction:
             refusal=build_out_of_scope_reply,
             nearest=_NearestDistance(search, DocumentChunkRepository()),
         )
-        return self.graph.run(turn.question, turn.history, deps, turn.signals)
+        return self.graph.run(
+            turn.question, turn.history, deps, turn.signals,
+            mode=turn.mode, locale=turn.locale, extra_config=extra_config,
+        )

@@ -75,6 +75,22 @@ async def test_order_is_deterministic_within_same_transaction(db_session):
 
 
 @pytest.mark.asyncio
+async def test_append_and_list_roundtrips_navigation(db_session):
+    conv = await _new_conversation(db_session)
+    repo = MessageRepository()
+    navigation = {"destination": {"route": "/students/123"}, "access": "allowed"}
+    with_nav = Message(uuid7(), conv.uuid, "assistant", "vou te levar lá", datetime.now(timezone.utc), navigation=navigation)
+    without_nav = Message(uuid7(), conv.uuid, "assistant", "sem navegação", datetime.now(timezone.utc))
+    await repo.append(with_nav)
+    await repo.append(without_nav)
+    await db_session.flush()
+
+    msgs = await repo.list_by_conversation(conv.uuid)
+    assert msgs[0].navigation == navigation
+    assert msgs[1].navigation is None
+
+
+@pytest.mark.asyncio
 async def test_append_bumps_conversation_updated_at(db_session):
     conv = await _new_conversation(db_session)
     before = (await ConversationRepository().get_by_id(conv.uuid)).updated_at

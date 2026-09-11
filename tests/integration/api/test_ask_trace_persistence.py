@@ -17,6 +17,16 @@ from tests.fakes.auth import auth_headers
 from tests.fakes.fake_turn_graph import FailingInPreludeTurnGraph, FailingInStreamTurnGraph, FakeTurnGraph
 from tests.fakes.stream_events import ask_body, event_names, events, is_root, text_of
 
+# Shape público de `NavigationResult.to_public()` (borderless_navigation_client.py):
+# o que o nó `navigate` real escreve em `state["navigation"]`.
+RESULT_PUBLIC = {
+    "destination": {"id": "code-breakers", "path": "/code-breakers", "labelKey": "nav.codeBreakers", "label": "Code Breakers"},
+    "access": "allowed",
+    "unlock": None,
+    "signals": {"matchedTags": ["algorithms"], "inProgress": False, "difficulty": "medium", "fallback": False},
+    "alternatives": [],
+}
+
 
 @pytest_asyncio.fixture(autouse=True)
 async def _dispose_db_engine_between_tests():
@@ -34,6 +44,13 @@ def _patch_controller(monkeypatch, graph=None):
     monkeypatch.setattr(ctrl, "get_turn_graph_runner", lambda **kw: graph.with_config(**kw))
     monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
 
+    # NavigationCatalog().describe() faz HTTP real contra BORDERLESS_AUTH_URL —
+    # inalcançável/fake no ambiente de teste. Determinístico e offline.
+    async def _fake_describe(self, access_token):
+        return "- code-breakers (hub): pratique algoritmos em desafios"
+
+    monkeypatch.setattr(ctrl.NavigationCatalog, "describe", _fake_describe)
+
 
 async def _fetch_trace(conversation_id: UUID) -> dict:
     from src.support.core.database import AsyncSessionLocal
@@ -44,7 +61,7 @@ async def _fetch_trace(conversation_id: UUID) -> dict:
                 text(
                     "SELECT question, gate_retrieve, retrieval_kept, outcome, engine_ms, "
                     "first_token_ms, tool_calls, input_tokens, output_tokens, "
-                    "langsmith_run_id, error "
+                    "langsmith_run_id, error, intent, navigation_called, navigation_access "
                     "FROM agent_traces WHERE conversation_id = :cid"
                 ),
                 {"cid": conversation_id},
@@ -94,6 +111,34 @@ async def test_trace_row_exists_after_a_successful_ask(monkeypatch):
     # ADR-0021: o config.run_id do cliente É o run do LangSmith — um turno da
     # tela liga ao trace sem intermediário.
     assert trace["langsmith_run_id"] == body["config"]["run_id"]
+    # Task 9: body default (mode="chat", sem navegação) não deixa rastro de
+    # navegação no trace.
+    assert trace["intent"] is None
+    assert trace["navigation_called"] is False
+    assert trace["navigation_access"] is None
+
+
+@pytest.mark.asyncio
+async def test_navigate_mode_trace_records_intent_and_navigation_columns(monkeypatch):
+    """Task 9: `mode == "navigate"` presета `signals.intent` no runner real
+    (ver TurnGraphRunner.run); o nó `navigate` escreve `navigation_called`/
+    `navigation_access`. `_absorb_engine_metrics` precisa copiar os três para
+    o draft, senão a coluna fica sempre vazia mesmo com o grafo escrevendo."""
+    graph = FakeTurnGraph(answer="Vamos praticar!", navigation=RESULT_PUBLIC)
+    _patch_controller(monkeypatch, graph=graph)
+    from main import app
+
+    body = ask_body("quero praticar algoritmos", mode="navigate", locale="en")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/conversations/ask", json=body, headers=await auth_headers("navigator@x.com"))
+        assert resp.status_code == 200
+        last = events(resp.text)[-1]
+        assert last["event"] == "on_chain_end" and is_root(last)
+
+    trace = await _fetch_trace(UUID(body["config"]["configurable"]["thread_id"]))
+    assert trace["intent"] == "navigate"
+    assert trace["navigation_called"] is True
+    assert trace["navigation_access"] == "allowed"
 
 
 @pytest.mark.asyncio

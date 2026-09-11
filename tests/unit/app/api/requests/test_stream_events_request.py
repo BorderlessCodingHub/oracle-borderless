@@ -64,6 +64,26 @@ def test_extra_keys_are_ignored_at_every_level():
     assert not hasattr(req.config.configurable, "deps")
 
 
+def test_mode_and_locale_default_to_chat_and_pt_br():
+    req = StreamEventsRequest.model_validate(_body())
+    assert (req.mode, req.locale) == ("chat", "pt-BR")
+
+
+def test_mode_navigate_and_locale_en_are_accepted():
+    body = _body()
+    body["input"].update({"mode": "navigate", "locale": "en"})
+    req = StreamEventsRequest.model_validate(body)
+    assert (req.mode, req.locale) == ("navigate", "en")
+
+
+@pytest.mark.parametrize("field,value", [("mode", "fly"), ("locale", "es")])
+def test_unknown_mode_or_locale_is_rejected(field, value):
+    body = _body()
+    body["input"][field] = value
+    with pytest.raises(ValidationError):
+        StreamEventsRequest.model_validate(body)
+
+
 def test_ids_are_canonicalised():
     """Um UUID válido mas não-canônico (sem dashes, ou com case diferente) vira
     a forma canônica — é o que entra no run_id do LangSmith e no

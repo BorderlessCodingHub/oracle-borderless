@@ -76,13 +76,23 @@ class FakeTurnRun:
             yield ev.values({"retrieve": g._retrieve, "degraded": g._degraded, "kept": 0, **refusal})
             yield ev.root("on_chain_end", {"output": {"outcome": "refusal", "citations": []}})
             return
+        if g._navigation is not None:
+            # Mirror do nó `navigate` real (navigate_node.py): entra, resolve o
+            # destino, sai — e SÓ DEPOIS o `answer` retoma os tokens da frase
+            # final (spec §5.3: o destino chega ao cliente antes da frase).
+            yield ev.node("on_chain_start", "navigate", {})
+            yield ev.updates("navigate", {"navigation": g._navigation})
+            yield ev.node("on_chain_end", "navigate", {"output": {"navigation": g._navigation}})
         for token in g._answer.split():
             yield ev.token(token + " ")
         final = {"citations": list(g._citations), "outcome": "answer"}
         yield ev.updates("answer", final)
         yield ev.values({"retrieve": g._retrieve, "degraded": g._degraded, "kept": g._retrieval_kept, **final})
         yield ev.node("on_chain_end", "answer", {"output": final})
-        yield ev.root("on_chain_end", {"output": final})
+        root_output = dict(final)
+        if g._navigation is not None:
+            root_output["navigation"] = g._navigation
+        yield ev.root("on_chain_end", {"output": root_output})
 
     async def aclose(self) -> None:
         return None
@@ -102,6 +112,7 @@ class FakeTurnGraph:
         output_tokens: int | None = None,
         first_token_ms: int = 7,
         engine_ms: int = 42,
+        navigation: dict | None = None,
     ) -> None:
         self._answer = answer
         self._citations = citations or [Citation("notion", "Doc", "https://n/a", "trecho")]
@@ -109,6 +120,7 @@ class FakeTurnGraph:
         self._retrieve = retrieve
         self._retrieval_kept = retrieval_kept
         self._degraded = degraded
+        self._navigation = navigation
         self._tool_calls = tool_calls
         self._input_tokens = input_tokens
         self._output_tokens = output_tokens
@@ -121,6 +133,9 @@ class FakeTurnGraph:
         self.received_history = None
         self.received_deps = None
         self.received_signals = None
+        self.received_mode = None
+        self.received_locale = None
+        self.received_extra_config = None
         self.last_run: FakeTurnRun | None = None
 
     def with_config(self, **kw) -> "FakeTurnGraph":
@@ -139,6 +154,8 @@ class FakeTurnGraph:
         deps=None,
         signals=None,
         knowledge: list[KnowledgeSnippet] | None = None,
+        mode: str = "chat",
+        locale: str = "pt-BR",
         extra_config: dict | None = None,
     ) -> FakeTurnRun:
         self.question = question
@@ -146,6 +163,9 @@ class FakeTurnGraph:
         self.received_history = history
         self.received_deps = deps
         self.received_signals = signals
+        self.received_mode = mode
+        self.received_locale = locale
+        self.received_extra_config = extra_config
         if signals is not None:
             signals.outcome = self._outcome
             signals.gate_retrieve = self._retrieve
@@ -159,6 +179,14 @@ class FakeTurnGraph:
                 signals.answer_started_at = 0.0
                 signals.first_token_ms = self._first_token_ms
                 signals.engine_ms = self._engine_ms
+            if self._navigation is not None:
+                # R8: mirror do que o grafo real escreve (navigate_node.py +
+                # TurnGraphRunner.run) para que asserções de trace nos testes
+                # de integração sejam possíveis sem reimplementar o grafo.
+                signals.navigation_called = True
+                signals.navigation_access = self._navigation.get("access")
+                if mode == "navigate":
+                    signals.intent = "navigate"
         self.last_run = FakeTurnRun(self)
         return self.last_run
 
@@ -199,7 +227,7 @@ class _FailingGraph:
         self.run_id = kw.get("run_id") or self.run_id
         return self
 
-    def run(self, question, history, deps=None, signals=None, knowledge=None, extra_config=None):
+    def run(self, question, history, deps=None, signals=None, knowledge=None, mode="chat", locale="pt-BR", extra_config=None):
         if signals is not None:
             if self.where == "stream":
                 signals.outcome = "answer"

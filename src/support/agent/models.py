@@ -24,6 +24,12 @@ def _build(anthropic_model: str, openai_model: str) -> BaseChatModel:
         return ChatOpenAI(
             model=openai_model,
             api_key=_require(settings.OPENAI_API_KEY, "OPENAI_API_KEY"),
+            # Modelos de raciocínio (gpt-5*) recusam function tools junto de
+            # reasoning_effort em /v1/chat/completions, e o langchain_openai
+            # manda reasoning_effort sozinho ao reconhecer o modelo pelo nome.
+            # /v1/responses aceita as duas coisas — e a tool de navegação É uma
+            # function tool, então sem isto todo turno estoura em 400.
+            use_responses_api=True,
         )
     return ChatAnthropic(
         model=anthropic_model,

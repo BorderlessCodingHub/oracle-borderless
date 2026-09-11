@@ -60,6 +60,8 @@ class PlatformProfile:
     username: str | None
     membership: str | None
     community_role: str | None
+    seniority: str | None = None
+    career_stage: str | None = None
 
 
 def _error_envelope(response: httpx.Response) -> tuple[str | None, str | None]:
@@ -180,6 +182,8 @@ class BorderlessAuthClient:
                 username=user.get("username"),
                 membership=user.get("membership"),
                 community_role=user.get("communityRole"),
+                seniority=user.get("seniority"),
+                career_stage=user.get("careerStage"),
             )
         except (KeyError, TypeError, ValueError) as exc:
             logger.error("profile 200 fora do contrato: %s", type(exc).__name__)

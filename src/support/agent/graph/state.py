@@ -15,6 +15,13 @@ class TurnState(TypedDict, total=False):
     history: list[AgentMessage]
     # knowledge injetado de fora (eval adversarial) em vez de recuperado
     preset_knowledge: bool
+    # a barra manda mode="navigate" (locale sempre presente); intent é preset
+    # nesse modo — sem gate, sem RAG (spec §5.3). navigation fica None até a
+    # Task 4 escrever a decisão de navegação.
+    mode: str
+    locale: str
+    intent: str
+    navigation: dict | None
 
     # tool loop — o reducer add_messages acumula as idas e voltas
     messages: Annotated[list[AnyMessage], add_messages]

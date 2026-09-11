@@ -39,16 +39,25 @@ _TOOL_FAILURE_PREFIX = "(falha"
 _ARGS_VISIBLE_TOOLS = frozenset({"web_search"})
 
 # Nós que viram passo na linha do tempo. `tools` não: tool calls têm eventos
-# próprios (on_tool_start/end/error).
-_STEP_NODES = frozenset({"gate", "retrieve", "refuse", "answer"})
+# próprios (on_tool_start/end/error). `navigate` sim: é um passo com nome, e é
+# o `on_chain_end` dele que carrega o destino ao cliente (spec §5.3).
+_STEP_NODES = frozenset({"gate", "retrieve", "refuse", "answer", "navigate"})
 
 # O que do `metadata` do LangChain/LangGraph pode sair. Fora: user_hash (hash do
 # e-mail), langgraph_path/triggers/checkpoint_ns (ruído interno), lc_versions.
 _METADATA_KEYS = ("langgraph_node", "langgraph_step", "thread_id", "ls_provider", "ls_model_name")
 
 # Chaves do state copiadas tal como estão pela projeção. `knowledge` vira
-# `kept`; `citations` é copiada como lista; tudo o mais cai.
-_STATE_KEYS = ("retrieve", "degraded", "answer", "outcome")
+# `kept`; `citations` é copiada como lista; `navigation` passa pela allowlist
+# abaixo; tudo o mais cai.
+_STATE_KEYS = ("retrieve", "degraded", "answer", "outcome", "intent")
+
+# Allowlist do destino resolvido (spec §5.3). O `to_public()` do client já corta
+# `signals.profile` (membership/senioridade do usuário); esta é a segunda
+# barreira — o redator não confia no formato que o nó escreveu no state.
+_NAV_TARGET_KEYS = ("id", "path", "labelKey", "label")
+_NAV_SIGNAL_KEYS = ("matchedTags", "inProgress", "difficulty", "fallback")
+_NAV_UNLOCK_KEYS = ("action", "path", "membership")
 
 
 def _text_of(message) -> str:
@@ -71,6 +80,30 @@ def _tool_status(message: ToolMessage) -> str:
     return "error" if text.startswith(_TOOL_FAILURE_PREFIX) else "ok"
 
 
+def _pick(source, keys: tuple[str, ...]) -> dict:
+    """Allowlist que também DESCARTA valores nulos (R14): é o que
+    `NavigationResult.to_public()` já fazia no client, e o fio precisa ter uma
+    forma só — o cliente não deve ter que distinguir chave ausente de chave
+    nula na mesma projeção."""
+    return {key: source[key] for key in keys if key in source and source[key] is not None}
+
+
+def _project_navigation(navigation) -> dict:
+    """Projeção pública do destino: só as chaves que a barra precisa para
+    navegar e explicar o acesso."""
+    if not isinstance(navigation, dict):
+        return {}
+    unlock = navigation.get("unlock")
+    alternatives = navigation.get("alternatives") or []
+    return {
+        "destination": _pick(navigation.get("destination") or {}, _NAV_TARGET_KEYS),
+        "access": navigation.get("access"),
+        "unlock": _pick(unlock, _NAV_UNLOCK_KEYS) if isinstance(unlock, dict) else None,
+        "signals": _pick(navigation.get("signals") or {}, _NAV_SIGNAL_KEYS),
+        "alternatives": [_pick(a, _NAV_TARGET_KEYS) for a in alternatives if isinstance(a, dict)],
+    }
+
+
 def _project(state) -> dict:
     """Projeção pública do state (spec 07/09, §1.2). Aplicada a saídas de nó, a
     cada valor de um chunk `updates` e ao snapshot de `values`."""
@@ -81,16 +114,25 @@ def _project(state) -> dict:
         out["kept"] = len(state["knowledge"] or [])
     if "citations" in state:
         out["citations"] = list(state["citations"] or [])
+    if state.get("navigation"):
+        out["navigation"] = _project_navigation(state["navigation"])
     return out
 
 
 class EventRedactor:
     """Allowlist + projeção. Um por run: guarda se o `answer` já abriu (o tool
     loop re-entra no nó e o passo não pode reabrir) e segura o `on_chain_end`
-    do `answer` para que ele saia uma vez só, antes do fim do raiz."""
+    do `answer` para que ele saia uma vez só, antes do fim do raiz. O `navigate`
+    também re-entra (o modelo pode insistir depois de um destino inválido) e
+    tem o mesmo guarda: o PASSO abre e fecha uma vez por turno. O que não é
+    silenciado é o chunk `updates` — uma segunda tentativa que dá certo precisa
+    entregar `{"navigate": {"navigation": ...}}` ao cliente, senão a barra não
+    navega."""
 
     def __init__(self) -> None:
         self._answer_started = False
+        self._navigate_started = False
+        self._navigate_ended = False
         self.pending_answer_end: GraphEvent | None = None
 
     def redact(self, raw: dict) -> GraphEvent | None:
@@ -153,7 +195,15 @@ class EventRedactor:
                 if self._answer_started:
                     return None
                 self._answer_started = True
+            if name == "navigate":
+                if self._navigate_started:
+                    return None
+                self._navigate_started = True
             return {}
+        if name == "navigate":
+            if self._navigate_ended:
+                return None
+            self._navigate_ended = True
         return {"output": _project(data.get("output"))}
 
     def _token(self, data: dict) -> dict | None:
@@ -193,16 +243,32 @@ def _mark_engine_end(signals: TurnSignals) -> None:
 
 
 def _initial_state(
-    question: str, history: list[AgentMessage], knowledge: list[KnowledgeSnippet] | None
+    question: str,
+    history: list[AgentMessage],
+    knowledge: list[KnowledgeSnippet] | None,
+    mode: str = "chat",
+    locale: str = "pt-BR",
 ) -> dict:
-    """`preset_knowledge` liga a aresta que pula gate/retrieve (eval adversarial)."""
-    return {
+    """`preset_knowledge` liga a aresta que pula gate/retrieve (eval adversarial).
+
+    `mode`/`locale` vêm do input do cliente. Em `mode == "navigate"` a barra já
+    fixou a intenção: o state nasce com `intent`/`retrieve`/`search_query`/
+    `degraded` preset, sem passar pelo gate (spec §5.3; as arestas que usam
+    isso são a Task 4)."""
+    state = {
         "question": question,
         "history": history,
         "knowledge": list(knowledge) if knowledge is not None else [],
         "preset_knowledge": knowledge is not None,
         "messages": [],
+        "mode": mode,
+        "locale": locale,
+        "navigation": None,
     }
+    if mode == "navigate":
+        # A barra fixa a intenção: sem gate, sem RAG, sem recusa (spec §5.3).
+        state.update({"intent": "navigate", "retrieve": False, "search_query": "", "degraded": False})
+    return state
 
 
 def _is_answer_entry(event: GraphEvent) -> bool:
@@ -313,10 +379,17 @@ class TurnGraphRunner:
         deps: TurnDependencies,
         signals: TurnSignals,
         knowledge: list[KnowledgeSnippet] | None = None,
+        mode: str = "chat",
+        locale: str = "pt-BR",
         extra_config: dict | None = None,
     ) -> TurnRun:
+        if mode == "navigate":
+            # O gate é pulado em mode == "navigate" (route_entry) — sem isto,
+            # signals.intent nunca seria escrito e o trace persistido do turno
+            # da barra ficaria sem intent == "navigate" (ruling R5).
+            signals.intent = "navigate"
         agen = self._graph.astream_events(
-            _initial_state(question, history, knowledge),
+            _initial_state(question, history, knowledge, mode=mode, locale=locale),
             config=self._config(deps, signals, extra_config),
             version="v2",
             stream_mode=["values", "updates"],

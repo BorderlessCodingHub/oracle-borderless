@@ -497,20 +497,55 @@ Não existe client HTTP de LLM próprio: o único acesso ao modelo é via um `St
                       END ◄───────────────┘
 ```
 
+`mode` (`chat` | `navigate`) e `locale` (`en` | `pt-BR`) entram pelo `input` do
+turno (ADR-0021) e atravessam o `TurnState`; em `mode=navigate` o `gate` é
+pulado e o turno já nasce com `intent="navigate"`. O gate também classifica
+`intent` (`knowledge` | `navigate` | `chit_chat`) quando roda; `should_retrieve`
+só manda para `retrieve` com `intent == "knowledge"`. `tools_condition` do
+diagrama acima foi substituído por `after_answer` (ADR-0022): sem tool call
+vai a `END`; uma chamada a `navigate_platform` vai a um nó próprio, `navigate`
+— não ao `ToolNode` — para que o destino resolvido entre no state e saia no
+fio antes da frase final; qualquer outra tool call vai ao `ToolNode`. Os dois
+voltam para `answer`.
+
 ```
 src/support/agent/
-├── ports.py              # TurnDependencies, TurnGraphPort — fronteira com o domínio
-├── models.py             # seleção de provider (Claude/GPT) num ponto único
-├── tools.py              # WebSearchTool / FetchNotionTool (HTTP-only, por decisão)
+├── ports.py               # TurnDependencies, TurnGraphPort — fronteira com o domínio
+├── models.py              # seleção de provider (Claude/GPT) num ponto único
+├── tools.py               # WebSearchTool / FetchNotionTool / navigate_platform (declarada, não executada)
+├── navigation_catalog.py  # NavigationCatalog — catálogo de destinos por turno, cache 1h, snapshot de fallback
 └── graph/
-    ├── state.py           # TurnState
-    ├── nodes.py           # gate · retrieve · refuse · answer
-    ├── edges.py           # should_retrieve · has_grounding (funções puras)
-    ├── builder.py         # build_turn_graph() — compilado uma vez no módulo, sem checkpointer
-    └── runner.py          # TurnGraphRunner — implementa TurnGraphPort
+    ├── state.py            # TurnState (mode, locale, intent, navigation)
+    ├── nodes.py             # gate · retrieve · refuse · answer
+    ├── navigate_node.py     # navigate — resolve navigate_platform, HTTP-only (ADR-0022)
+    ├── edges.py             # should_retrieve · has_grounding · after_answer (funções puras)
+    ├── builder.py           # build_turn_graph() — compilado uma vez no módulo, sem checkpointer
+    └── runner.py            # TurnGraphRunner — implementa TurnGraphPort
 ```
 
 O domínio consome o grafo por um único Protocol fino, `TurnGraphPort` (`src/support/agent/ports.py`) — nunca importa `langgraph` nem `langchain*`. A fronteira é protegida por `tests/unit/support/agent/test_domain_boundary.py`. Na direção oposta, os nós do grafo recebem as Actions de domínio (`SearchKnowledgeBaseAction`, `ListKnowledgeSectionsAction`, `build_out_of_scope_reply`) injetadas via `TurnDependencies`, sem que `support/` importe `domain/`.
+
+**Navegação (ADR-0022).** `navigate_platform` é declarada em `build_tools()` só
+para o modelo — o corpo levanta `RuntimeError` de propósito, porque quem a
+executa é o nó `navigate` (`tool_node_tools()` a exclui do `ToolNode`). O nó
+chama `BorderlessNavigationClient.resolve(...)` (HTTP puro, roda em
+`stream()` sem sessão de banco, como `web_search`) com o bearer de
+`configurable["platform_token"]`, escreve `navigation` no state e impõe uma
+navegação por turno checando `state["navigation"]`. A descrição da tool inclui
+o catálogo de destinos, buscado por turno com o token do usuário e cacheado 1h
+por processo (`NavigationCatalog`, `NAVIGATION_CATALOG_TTL_S`), com um
+snapshot embutido (`navigation_catalog_snapshot.json`) como fallback. O
+`EventRedactor` (`runner.py`) projeta `navigation` por allowlist antes de
+cruzar o port — mesma regra 4 do ADR-0021.
+
+**Autenticação por bearer (ADR-0022).** Além do cookie `ob_session`
+(ADR-0018), `require_user` aceita `Authorization: Bearer <token>` — o caminho
+usado pelo proxy da Platform. Um bearer novo cria uma sessão em `sessions` via
+`ResolveBearerAction` (`source="platform_bearer"`, chaveada pelo hash do
+token, com snapshot de perfil `membership`/`seniority`/`careerStage`); um
+bearer já conhecido segue direto para `ResolveSessionAction`, reaproveitando o
+mesmo cache de 60s e fail-open de 10min do caminho por cookie. Detalhes em
+`docs/autenticacao.md` e ADR-0022.
 
 **Consumo em duas fases, ambas no corpo SSE (ADR-0020).** `TurnGraphPort.run()` é síncrono e devolve um `TurnRun`. O controller abre `async_session_scope()` (`src/support/core/session_scope.py`) dentro do corpo do `StreamingResponse`, constrói os `deps` ali via `RunTurnAction` e consome `prelude()` — gate → retrieve → (refuse | entrada do nó `answer`) — até o fim; depois fecha o escopo e consome `stream()` sem sessão. O corte é a **entrada real** do nó `answer`, sinalizada pelo `on_chain_start` do nó no `astream_events` (não o primeiro token: uma resposta que abre só com `tool_calls` não produz token nenhum, e o laço `answer -> tools -> answer` rodaria com a conexão de banco presa). Na recusa, o corte é o `on_chain_end` do nó `refuse`. Ver **ADR-0016** (por que duas fases), **ADR-0020** (por que no corpo) e **ADR-0021** (o critério de corte no formato novo).
 

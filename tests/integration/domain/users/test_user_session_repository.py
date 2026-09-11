@@ -57,6 +57,44 @@ async def test_delete_remove_a_sessao(db_session):
 
 
 @pytest.mark.asyncio
+async def test_create_persiste_source_e_snapshot_do_perfil(db_session):
+    session = _session("s" * 64)
+    session.source = "platform_bearer"
+    session.user_membership = "STARTER"
+    session.user_seniority = "JUNIOR"
+    session.user_career_stage = "junior_transition"
+    repo = UserSessionRepository()
+    created = await repo.create(session)
+    found = await repo.get_by_token_hash("s" * 64)
+    assert found is not None
+    assert created.source == "platform_bearer"
+    assert (found.source, found.user_membership, found.user_seniority, found.user_career_stage) == (
+        "platform_bearer", "STARTER", "JUNIOR", "junior_transition",
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_usa_o_default_oracle_login_quando_source_nao_e_informado(db_session):
+    repo = UserSessionRepository()
+    created = await repo.create(_session("o" * 64))
+    assert created.source == "oracle_login"
+    assert (created.user_membership, created.user_seniority, created.user_career_stage) == (None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_update_profile_snapshot_atualiza_colunas_e_o_carimbo(db_session):
+    repo = UserSessionRepository()
+    created = await repo.create(_session("p" * 64))
+    later = created.last_platform_check_at + timedelta(minutes=5)
+    await repo.update_profile_snapshot(created.uuid, later, "STARTER", "JUNIOR", "junior_transition")
+    found = await repo.get_by_token_hash("p" * 64)
+    assert found.last_platform_check_at == later
+    assert (found.user_membership, found.user_seniority, found.user_career_stage) == (
+        "STARTER", "JUNIOR", "junior_transition",
+    )
+
+
+@pytest.mark.asyncio
 async def test_delete_idle_since_apaga_so_as_anteriores_ao_corte(db_session):
     repo = UserSessionRepository()
     now = datetime.now(timezone.utc)

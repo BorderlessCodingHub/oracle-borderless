@@ -33,6 +33,9 @@ def _entity(**overrides) -> TurnTrace:
         output_tokens=300,
         error=None,
         langsmith_run_id="run-abc",
+        intent="navigate",
+        navigation_called=True,
+        navigation_access="allowed",
         created_at=datetime(2026, 8, 3, tzinfo=timezone.utc),
     )
     base.update(overrides)
@@ -49,6 +52,9 @@ def test_to_model_attrs_carries_every_flat_field():
     assert attrs["retrieval_best_distance"] == 0.427
     assert attrs["outcome"] == "answer"
     assert attrs["langsmith_run_id"] == "run-abc"
+    assert attrs["intent"] == "navigate"
+    assert attrs["navigation_called"] is True
+    assert attrs["navigation_access"] == "allowed"
     # created_at é server_default — o mapper não o envia
     assert "created_at" not in attrs
 
@@ -82,6 +88,9 @@ def test_optional_fields_survive_as_none():
         output_tokens=None,
         error="timeout do modelo",
         outcome="error",
+        intent=None,
+        navigation_called=False,
+        navigation_access=None,
     )
     back = TurnTraceMapper.to_entity_from_attrs(
         TurnTraceMapper.to_model_attrs(entity), created_at=entity.created_at

@@ -29,7 +29,14 @@ class OpenTurnAction:
         self.conversations = ConversationRepository()
         self.messages = MessageRepository()
 
-    async def execute(self, question: str, conversation_id: UUID, user_email: str | None) -> OpenedTurn:
+    async def execute(
+        self,
+        question: str,
+        conversation_id: UUID,
+        user_email: str | None,
+        mode: str = "chat",
+        locale: str = "pt-BR",
+    ) -> OpenedTurn:
         now = datetime.now(timezone.utc)
         draft = TurnTraceDraft(question=question, user_email=user_email)
 
@@ -75,4 +82,6 @@ class OpenTurnAction:
             history=history,
             draft=draft,
             signals=signals,
+            mode=mode,
+            locale=locale,
         )

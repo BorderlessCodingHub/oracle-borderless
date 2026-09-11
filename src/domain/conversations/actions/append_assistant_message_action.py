@@ -16,7 +16,11 @@ class AppendAssistantMessageAction:
         self.messages = MessageRepository()
 
     async def execute(
-        self, conversation_id: UUID, content: str, citations: list[Citation]
+        self,
+        conversation_id: UUID,
+        content: str,
+        citations: list[Citation],
+        navigation: dict | None = None,
     ) -> None:
         await self.messages.append(
             Message(
@@ -26,5 +30,6 @@ class AppendAssistantMessageAction:
                 content=content,
                 created_at=datetime.now(timezone.utc),
                 sources=list(citations) if citations else None,
+                navigation=navigation,
             )
         )

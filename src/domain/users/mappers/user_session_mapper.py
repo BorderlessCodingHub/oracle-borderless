@@ -16,6 +16,10 @@ class UserSessionMapper:
             last_platform_check_at=model.last_platform_check_at,
             created_at=model.created_at,
             updated_at=model.updated_at,
+            source=model.source,
+            user_membership=model.user_membership,
+            user_seniority=model.user_seniority,
+            user_career_stage=model.user_career_stage,
         )
 
     @staticmethod
@@ -29,4 +33,8 @@ class UserSessionMapper:
             "user_name": entity.user_name,
             "user_username": entity.user_username,
             "last_platform_check_at": entity.last_platform_check_at,
+            "source": entity.source,
+            "user_membership": entity.user_membership,
+            "user_seniority": entity.user_seniority,
+            "user_career_stage": entity.user_career_stage,
         }

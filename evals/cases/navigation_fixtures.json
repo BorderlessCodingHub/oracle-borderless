@@ -1,0 +1,205 @@
+{
+  "_comment": "Respostas enlatadas de POST /api/navigation/resolve, uma por destination id usado em navigation_set.json. O eval NÃO chama a borderless-api: o que se mede aqui é a ESCOLHA do destino pelo modelo, não a resolução da plataforma. Os `path` seguem src/support/agent/navigation_catalog_snapshot.json (dinâmicos já resolvidos, como a API faria).",
+  "code_breakers": {
+    "destination": {
+      "id": "code_breakers",
+      "path": "/code-breakers",
+      "labelKey": "navigation.destinations.code_breakers",
+      "label": "CodeBreakers"
+    },
+    "access": "allowed",
+    "unlock": null,
+    "signals": {
+      "matchedTags": ["algorithms", "data-structures"],
+      "inProgress": true,
+      "difficulty": "INTERMEDIATE",
+      "fallback": false,
+      "profile": {"membership": "PSP", "seniority": "PLENO", "careerStage": "EMPLOYED"}
+    },
+    "alternatives": []
+  },
+  "trail": {
+    "destination": {
+      "id": "trail",
+      "path": "/trails/backend-node-js",
+      "labelKey": "navigation.destinations.trail",
+      "label": "Backend com Node.js"
+    },
+    "access": "allowed",
+    "unlock": null,
+    "signals": {
+      "matchedTags": ["backend", "node"],
+      "inProgress": true,
+      "difficulty": "INTERMEDIATE",
+      "fallback": false,
+      "profile": {"membership": "PSP", "seniority": "PLENO", "careerStage": "EMPLOYED"}
+    },
+    "alternatives": [
+      {"id": "trails", "path": "/trails", "labelKey": "navigation.destinations.trails", "label": "Trilhas"}
+    ]
+  },
+  "trails": {
+    "destination": {
+      "id": "trails",
+      "path": "/trails",
+      "labelKey": "navigation.destinations.trails",
+      "label": "Trilhas"
+    },
+    "access": "allowed",
+    "unlock": null,
+    "signals": {
+      "matchedTags": [],
+      "inProgress": false,
+      "difficulty": null,
+      "fallback": true,
+      "profile": {"membership": "PSP", "seniority": "PLENO", "careerStage": "EMPLOYED"}
+    },
+    "alternatives": []
+  },
+  "events": {
+    "destination": {
+      "id": "events",
+      "path": "/events",
+      "labelKey": "navigation.destinations.events",
+      "label": "Eventos"
+    },
+    "access": "allowed",
+    "unlock": null,
+    "signals": {
+      "matchedTags": [],
+      "inProgress": false,
+      "difficulty": null,
+      "fallback": false,
+      "profile": {"membership": "PSP", "seniority": "PLENO", "careerStage": "EMPLOYED"}
+    },
+    "alternatives": []
+  },
+  "program": {
+    "destination": {
+      "id": "program",
+      "path": "/programs/mock-interview-system-design",
+      "labelKey": "navigation.destinations.program",
+      "label": "Mock Interview — System Design"
+    },
+    "access": "allowed",
+    "unlock": null,
+    "signals": {
+      "matchedTags": ["system-design", "interview"],
+      "inProgress": false,
+      "difficulty": "ADVANCED",
+      "fallback": false,
+      "profile": {"membership": "PSP", "seniority": "PLENO", "careerStage": "EMPLOYED"}
+    },
+    "alternatives": [
+      {"id": "programs", "path": "/programs", "labelKey": "navigation.destinations.programs", "label": "Programas"}
+    ]
+  },
+  "programs": {
+    "destination": {
+      "id": "programs",
+      "path": "/programs",
+      "labelKey": "navigation.destinations.programs",
+      "label": "Programas"
+    },
+    "access": "allowed",
+    "unlock": null,
+    "signals": {
+      "matchedTags": [],
+      "inProgress": false,
+      "difficulty": null,
+      "fallback": true,
+      "profile": {"membership": "PSP", "seniority": "PLENO", "careerStage": "EMPLOYED"}
+    },
+    "alternatives": []
+  },
+  "settings": {
+    "destination": {
+      "id": "settings",
+      "path": "/settings",
+      "labelKey": "navigation.destinations.settings",
+      "label": "Configurações"
+    },
+    "access": "allowed",
+    "unlock": null,
+    "signals": {
+      "matchedTags": [],
+      "inProgress": false,
+      "difficulty": null,
+      "fallback": false,
+      "profile": {"membership": "PSP", "seniority": "PLENO", "careerStage": "EMPLOYED"}
+    },
+    "alternatives": []
+  },
+  "settings_purchases": {
+    "destination": {
+      "id": "settings_purchases",
+      "path": "/settings/purchases",
+      "labelKey": "navigation.destinations.settings_purchases",
+      "label": "Compras"
+    },
+    "access": "allowed",
+    "unlock": null,
+    "signals": {
+      "matchedTags": [],
+      "inProgress": false,
+      "difficulty": null,
+      "fallback": false,
+      "profile": {"membership": "PSP", "seniority": "PLENO", "careerStage": "EMPLOYED"}
+    },
+    "alternatives": []
+  },
+  "leaderboard": {
+    "destination": {
+      "id": "leaderboard",
+      "path": "/leaderboard",
+      "labelKey": "navigation.destinations.leaderboard",
+      "label": "Leaderboard"
+    },
+    "access": "allowed",
+    "unlock": null,
+    "signals": {
+      "matchedTags": [],
+      "inProgress": false,
+      "difficulty": null,
+      "fallback": false,
+      "profile": {"membership": "PSP", "seniority": "PLENO", "careerStage": "EMPLOYED"}
+    },
+    "alternatives": []
+  },
+  "home": {
+    "destination": {
+      "id": "home",
+      "path": "/",
+      "labelKey": "navigation.destinations.home",
+      "label": "Home"
+    },
+    "access": "allowed",
+    "unlock": null,
+    "signals": {
+      "matchedTags": [],
+      "inProgress": false,
+      "difficulty": null,
+      "fallback": true,
+      "profile": {"membership": "PSP", "seniority": "PLENO", "careerStage": "EMPLOYED"}
+    },
+    "alternatives": []
+  },
+  "profile": {
+    "destination": {
+      "id": "profile",
+      "path": "/profile",
+      "labelKey": "navigation.destinations.profile",
+      "label": "Perfil"
+    },
+    "access": "allowed",
+    "unlock": null,
+    "signals": {
+      "matchedTags": [],
+      "inProgress": false,
+      "difficulty": null,
+      "fallback": false,
+      "profile": {"membership": "PSP", "seniority": "PLENO", "careerStage": "EMPLOYED"}
+    },
+    "alternatives": []
+  }
+}

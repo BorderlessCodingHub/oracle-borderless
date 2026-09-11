@@ -36,6 +36,21 @@ PROFILE_BODY = {
             "username": "hello",
             "communityRole": "MEMBER",
             "membership": "BASE",
+            "seniority": "JUNIOR",
+            "careerStage": "junior_transition",
+        }
+    }
+}
+
+PROFILE_BODY_SEM_SNAPSHOT = {
+    "data": {
+        "user": {
+            "id": "u-1",
+            "name": "Hello",
+            "email": "hello@example.com",
+            "username": "hello",
+            "communityRole": "MEMBER",
+            "membership": "BASE",
         }
     }
 }
@@ -175,6 +190,15 @@ async def test_get_profile_200_manda_bearer_sem_cookie_e_parseia():
     assert profile.email == "hello@example.com"
     assert profile.membership == "BASE"
     assert profile.community_role == "MEMBER"
+    assert profile.seniority == "JUNIOR"
+    assert profile.career_stage == "junior_transition"
+
+
+@pytest.mark.asyncio
+async def test_get_profile_sem_seniority_e_career_stage_devolve_none_nos_dois():
+    profile = await _client(lambda _: httpx.Response(200, json=PROFILE_BODY_SEM_SNAPSHOT)).get_profile("x")
+    assert profile.seniority is None
+    assert profile.career_stage is None
 
 
 @pytest.mark.asyncio

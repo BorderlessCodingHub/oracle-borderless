@@ -37,6 +37,7 @@ por `---`. Fluxo recomendado:
 | [0019](0019-contrato-ag-ui-do-turno.md) | O turno do oráculo é entregue como eventos AG-UI | *contrato substituído pelo 0021 (regra 4 e passos mantidos)* |
 | [0020](0020-fase-1-do-turno-no-corpo-sse.md) | A fase 1 do turno roda no corpo SSE, em escopo de sessão próprio | Aceito |
 | [0021](0021-turno-como-stream-event.md) | O turno é entregue como `StreamEvent` do `astream_events` (substitui o contrato do 0019) | Aceito |
+| [0022](0022-tool-de-navegacao.md) | Tool de navegação: nó `navigate` dedicado, sessões por bearer e catálogo por turno | Aceito |
 
 > ADR-0001–0006 são citados pelo `CLAUDE.md` mas ainda não foram escritos como arquivo.
 > As regras já estão em vigor (ver `CLAUDE.md` → "Regras inegociáveis"). Backfill quando

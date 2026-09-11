@@ -88,6 +88,35 @@ def test_execute_is_synchronous_and_forwards_question_history_and_signals(sentin
     assert graph.knowledge is None  # o turno real nunca pré-semeia knowledge
 
 
+def test_mode_and_locale_are_forwarded_from_the_turn(sentinel_session):
+    graph = FakeTurnGraph()
+    turn = _turn()
+    turn.mode = "navigate"
+    turn.locale = "en"
+
+    RunTurnAction(graph, _FakeEmbeddings()).execute(turn)
+
+    assert graph.received_mode == "navigate"
+    assert graph.received_locale == "en"
+
+
+def test_default_mode_and_locale_are_forwarded_when_the_turn_uses_defaults(sentinel_session):
+    graph = FakeTurnGraph()
+
+    RunTurnAction(graph, _FakeEmbeddings()).execute(_turn())
+
+    assert graph.received_mode == "chat"
+    assert graph.received_locale == "pt-BR"
+
+
+def test_extra_config_is_forwarded_to_the_graph(sentinel_session):
+    graph = FakeTurnGraph()
+
+    RunTurnAction(graph, _FakeEmbeddings()).execute(_turn(), extra_config={"answer_model": "fake"})
+
+    assert graph.received_extra_config == {"answer_model": "fake"}
+
+
 def test_the_refusal_builder_is_the_domain_one(sentinel_session):
     from src.domain.conversations.services.out_of_scope_reply import build_out_of_scope_reply
 

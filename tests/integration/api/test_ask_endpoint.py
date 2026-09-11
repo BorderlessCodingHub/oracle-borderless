@@ -9,9 +9,31 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
-from tests.fakes.auth import auth_headers
+from tests.fakes.auth import auth_headers, bearer_headers, seed_bearer_session
 from tests.fakes.fake_turn_graph import FailingInPreludeTurnGraph, FailingInStreamTurnGraph, FakeTurnGraph
-from tests.fakes.stream_events import ask_body, event_names, events, is_root, root_end, sources_of, steps, text_of
+from tests.fakes.stream_events import (
+    ask_body,
+    event_names,
+    events,
+    is_root,
+    navigation_of,
+    root_end,
+    sources_of,
+    steps,
+    text_of,
+)
+
+# Shape público de `NavigationResult.to_public()` (borderless_navigation_client.py):
+# o que o nó `navigate` real escreve em `state["navigation"]`.
+RESULT_PUBLIC = {
+    "destination": {"id": "code-breakers", "path": "/code-breakers", "labelKey": "nav.codeBreakers", "label": "Code Breakers"},
+    "access": "allowed",
+    "unlock": None,
+    "signals": {"matchedTags": ["algorithms"], "inProgress": False, "difficulty": "medium", "fallback": False},
+    "alternatives": [],
+}
+
+_FAKE_CATALOG_TEXT = "- code-breakers (hub): pratique algoritmos em desafios"
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -29,6 +51,15 @@ def _patch(monkeypatch, graph=None):
     graph = graph or FakeTurnGraph(answer="resposta de teste")
     monkeypatch.setattr(ctrl, "get_turn_graph_runner", lambda **kw: graph.with_config(**kw))
     monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
+
+    # NavigationCatalog().describe() faz HTTP real contra BORDERLESS_AUTH_URL —
+    # inalcançável/fake no ambiente de teste. Determinístico e offline: um
+    # texto fixo no lugar da chamada de rede (a Action que consome o catálogo
+    # real já tem cobertura própria).
+    async def _fake_describe(self, access_token):
+        return _FAKE_CATALOG_TEXT
+
+    monkeypatch.setattr(ctrl.NavigationCatalog, "describe", _fake_describe)
 
 
 def _thread(body: dict) -> str:
@@ -231,3 +262,199 @@ async def test_a_prelude_failure_emits_on_chain_error_after_the_steps_that_ran_a
     assert steps(evs) == [("gate", "start"), ("gate", "end"), ("retrieve", "start")]
 
     assert await _roles(UUID(_thread(body))) == ["user"]
+
+
+async def _get_conversation(client: AsyncClient, conversation_id: str, headers: dict) -> dict:
+    resp = await client.get(f"/conversations/{conversation_id}", headers=headers)
+    assert resp.status_code == 200
+    return resp.json()
+
+
+@pytest.mark.asyncio
+async def test_ask_in_navigate_mode_streams_the_destination_before_any_answer_token_and_persists_it(monkeypatch):
+    """Task 9: o controller leva token/perfil/catálogo ao grafo (extra_config) e
+    captura `navigation_of` — o destino chega ANTES da frase final (spec §5.3)
+    e é persistido na mensagem do assistente.
+
+    Pelo caminho REAL da navegação: `Authorization: Bearer` do proxy da
+    Platform (ADR-0022), a única sessão que habilita a tool (R12)."""
+    graph = FakeTurnGraph(answer="Vamos praticar!", navigation=RESULT_PUBLIC)
+    _patch(monkeypatch, graph=graph)
+    from main import app
+
+    body = ask_body("quero praticar algoritmos", mode="navigate", locale="en")
+    token = await seed_bearer_session(
+        "navigator@x.com",
+        platform_token="bearer-da-platform-1",
+        membership="PRO",
+        seniority="SENIOR",
+        career_stage="already_global",
+    )
+    headers = bearer_headers(token)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/conversations/ask", json=body, headers=headers)
+        assert resp.status_code == 200
+        evs = events(resp.text)
+
+        nav = navigation_of(evs)
+        assert nav is not None
+        assert nav["destination"]["path"] == "/code-breakers"
+        assert nav["access"] == "allowed"
+
+        # O destino chega no chunk `updates` ANTES do primeiro token do modelo.
+        nav_index = next(
+            i
+            for i, e in enumerate(evs)
+            if e["event"] == "on_chain_stream"
+            and is_root(e)
+            and e["data"]["chunk"][0] == "updates"
+            and "navigate" in e["data"]["chunk"][1]
+        )
+        first_token_index = next(i for i, e in enumerate(evs) if e["event"] == "on_chat_model_stream")
+        assert nav_index < first_token_index
+
+        assert root_end(evs)["data"]["output"]["navigation"] == nav
+
+        detail = await _get_conversation(client, _thread(body), headers)
+
+    assert detail["messages"][-1]["role"] == "assistant"
+    assert detail["messages"][-1]["navigation"] == RESULT_PUBLIC
+
+    assert graph.received_mode == "navigate"
+    assert graph.received_locale == "en"
+    assert graph.received_extra_config["platform_token"] == "bearer-da-platform-1"
+    assert graph.received_extra_config["user_profile"] == {
+        "membership": "PRO", "seniority": "SENIOR", "careerStage": "already_global",
+    }
+    assert graph.received_extra_config["navigation_enabled"] is True
+    assert graph.received_extra_config["navigation_catalog_text"] == _FAKE_CATALOG_TEXT
+
+    await _roles(UUID(_thread(body)))  # limpa a conversa criada
+
+
+@pytest.mark.asyncio
+async def test_ask_with_default_body_keeps_navigation_none(monkeypatch):
+    graph = FakeTurnGraph(answer="resposta de teste")
+    _patch(monkeypatch, graph=graph)
+    from main import app
+
+    body = ask_body("o que é o onboarding?")
+    headers = await auth_headers("asker2@x.com")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/conversations/ask", json=body, headers=headers)
+        assert resp.status_code == 200
+        evs = events(resp.text)
+        assert navigation_of(evs) is None
+        assert root_end(evs)["data"]["output"].get("navigation") is None
+
+        detail = await _get_conversation(client, _thread(body), headers)
+
+    assert detail["messages"][-1]["navigation"] is None
+    assert graph.received_mode == "chat"
+
+    await _roles(UUID(_thread(body)))  # limpa a conversa criada
+
+
+@pytest.mark.asyncio
+async def test_ask_falls_back_to_the_embedded_snapshot_when_the_catalog_is_unavailable(monkeypatch):
+    """Um catálogo indisponível (API fora, token recusado, etc.) nunca pode
+    derrubar o turno — o controller cai para `NavigationCatalog.snapshot_text()`.
+    Só sessões de bearer chegam a buscar o catálogo (R12), então é por uma
+    delas que este caminho é exercitado."""
+    import src.app.api.controllers.conversation_controller as ctrl
+    from src.support.agent.navigation_catalog import NavigationCatalog
+
+    graph = FakeTurnGraph(answer="resposta de teste")
+    _patch(monkeypatch, graph=graph)
+
+    async def _raising_describe(self, access_token):
+        raise RuntimeError("catálogo fora do ar")
+
+    monkeypatch.setattr(ctrl.NavigationCatalog, "describe", _raising_describe)
+
+    from main import app
+
+    body = ask_body("o que é o onboarding?")
+    headers = bearer_headers(await seed_bearer_session("asker3@x.com", platform_token="bearer-da-platform-2"))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/conversations/ask", json=body, headers=headers)
+        assert resp.status_code == 200
+        evs = events(resp.text)
+        assert root_end(evs) is not None  # o turno seguiu apesar da falha do catálogo
+
+    assert graph.received_extra_config["navigation_catalog_text"] == NavigationCatalog.snapshot_text()
+
+    await _roles(UUID(_thread(body)))  # limpa a conversa criada
+
+
+@pytest.mark.asyncio
+async def test_ask_from_the_oracle_spa_cookie_session_gets_no_navigation_capability(monkeypatch):
+    """R12/ADR-0022: a mesma pergunta pela sessão de COOKIE (SPA do oráculo,
+    que não executa redirect) não habilita navegação nem paga o catálogo."""
+    graph = FakeTurnGraph(answer="Vamos praticar!")
+    _patch(monkeypatch, graph=graph)
+    from main import app
+
+    body = ask_body("quero praticar algoritmos", mode="navigate", locale="en")
+    headers = await auth_headers("spa-user@x.com")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/conversations/ask", json=body, headers=headers)
+        assert resp.status_code == 200
+
+    assert graph.received_extra_config["navigation_enabled"] is False
+    assert graph.received_extra_config["navigation_catalog_text"] is None
+
+    await _roles(UUID(_thread(body)))  # limpa a conversa criada
+
+
+@pytest.mark.asyncio
+async def test_an_unseen_bearer_is_validated_once_and_becomes_a_platform_bearer_session(monkeypatch):
+    """Primeiro turno vindo do proxy da Platform: não há linha em `sessions`
+    ainda. `require_user` valida o bearer UMA vez em /api/users/profile e a
+    sessão nasce com `source="platform_bearer"`."""
+    from src.support.clients.borderless.borderless_auth_client import BorderlessAuthClient, PlatformProfile
+    from src.support.utils.session_tokens import hash_session_token
+
+    raw_bearer = "bearer-nunca-visto-1"
+    profile = PlatformProfile(
+        id="u-99", email="fresh@x.com", name="Fresh", username="fresh",
+        membership="PRO", community_role="MEMBER", seniority="SENIOR",
+        career_stage="already_global",
+    )
+
+    async def _fake_get_profile(self, access_token):
+        assert access_token == raw_bearer
+        return profile
+
+    monkeypatch.setattr(BorderlessAuthClient, "get_profile", _fake_get_profile)
+
+    graph = FakeTurnGraph(answer="resposta de teste")
+    _patch(monkeypatch, graph=graph)
+    from main import app
+
+    body = ask_body("o que é o onboarding?")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/conversations/ask", json=body, headers=bearer_headers(raw_bearer))
+        assert resp.status_code == 200
+
+    assert graph.received_extra_config["navigation_enabled"] is True
+    assert graph.received_extra_config["platform_token"] == raw_bearer
+
+    from src.support.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as s:
+        row = (
+            await s.execute(
+                text("SELECT source, user_email FROM sessions WHERE token_hash = :h"),
+                {"h": hash_session_token(raw_bearer)},
+            )
+        ).first()
+        assert row is not None and row.source == "platform_bearer"
+        assert row.user_email == "fresh@x.com"
+        await s.execute(
+            text("DELETE FROM sessions WHERE token_hash = :h"),
+            {"h": hash_session_token(raw_bearer)},
+        )
+        await s.commit()
+
+    await _roles(UUID(_thread(body)))  # limpa a conversa criada

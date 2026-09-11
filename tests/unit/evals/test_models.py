@@ -6,6 +6,7 @@ from evals.models import (
     APPROPRIATE_REFUSAL,
     CITATION_SUPPORT,
     FAITHFULNESS,
+    NAVIGATION_TARGET,
     load_cases,
     metrics_for_category,
 )
@@ -54,3 +55,37 @@ def test_load_cases_rejects_duplicate_ids(tmp_path):
     ]))
     with pytest.raises(ValueError, match="duplicate"):
         load_cases(p)
+
+
+def test_navigation_metric_mapping():
+    assert metrics_for_category("navigation") == (NAVIGATION_TARGET,)
+
+
+def test_load_cases_reads_the_navigation_set():
+    cases = load_cases("evals/cases/navigation_set.json")
+    assert len(cases) >= 8
+    assert {c.category for c in cases} == {"navigation"}
+    # o caso ambíguo pede AUSÊNCIA de navegação — destino esperado nulo
+    assert any(c.expected_destination is None for c in cases)
+    assert {c.expected_destination for c in cases} >= {
+        "code_breakers", "trail", "events", "program", "settings",
+        "settings_purchases", "leaderboard",
+    }
+    assert any(c.mode == "navigate" for c in cases)
+
+
+def test_load_cases_requires_expected_destination_key_for_navigation(tmp_path):
+    p = tmp_path / "bad.json"
+    p.write_text(json.dumps([{"id": "x", "category": "navigation", "question": "q"}]))
+    with pytest.raises(ValueError, match="expected_destination"):
+        load_cases(p)
+
+
+def test_load_cases_accepts_null_expected_destination(tmp_path):
+    p = tmp_path / "ok.json"
+    p.write_text(json.dumps([
+        {"id": "x", "category": "navigation", "question": "q", "expected_destination": None, "mode": "navigate"}
+    ]))
+    case = load_cases(p)[0]
+    assert case.expected_destination is None
+    assert case.mode == "navigate"

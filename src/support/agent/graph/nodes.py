@@ -5,14 +5,15 @@ request (regra 3)."""
 import asyncio
 import logging
 import time
+from typing import Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from src.support.agent.graph.state import TurnState
 from src.support.agent.models import build_chat_model, build_small_model
-from src.support.agent.prompts import SYSTEM_PROMPT
-from src.support.agent.tools import build_tools, format_knowledge
+from src.support.agent.prompts import build_system_prompt
+from src.support.agent.tools import build_tools, format_knowledge, tool_node_tools
 from src.support.core.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,14 @@ GATE_SYSTEM_PROMPT = """\
 Você é um roteador para a base de conhecimento do Oracle Borderless (documentos
 curados do Notion: SOPs, processos de negócio, editoriais, dados operacionais).
 Decida se responder à ÚLTIMA mensagem do usuário exige buscar nessa base.
+
+Classifique também `intent`:
+- navigate: o usuário quer IR a algum lugar da plataforma, ENCONTRAR um conteúdo
+  ou COMEÇAR uma atividade (ex.: "quero praticar algoritmos", "me leva para as
+  trilhas de backend", "onde vejo meus eventos?", "quero treinar system design").
+  Para navigate, retrieve=false e search_query="".
+- chit_chat: saudações, agradecimentos, conversa fiada, perguntas sobre você.
+- knowledge: qualquer pergunta substantiva sobre o ecossistema, suas regras ou dados.
 
 - retrieve=false para: saudações, agradecimentos, conversa fiada, perguntas sobre
   você mesmo, e qualquer coisa totalmente respondível pelo histórico da conversa.
@@ -45,6 +54,13 @@ class _GateOutput(BaseModel):
 
     retrieve: bool = Field(description="true se a pergunta exige buscar na base")
     search_query: str = Field(default="", description="query autônoma, ou '' quando retrieve=false")
+    intent: Literal["knowledge", "navigate", "chit_chat"] = Field(
+        default="knowledge",
+        description=(
+            "knowledge=pergunta sobre a base; navigate=quer ir a um lugar/começar "
+            "uma atividade na plataforma; chit_chat=saudação/conversa"
+        ),
+    )
 
 
 def _gate_prompt(state: TurnState) -> list[dict]:
@@ -72,18 +88,22 @@ async def gate_node(state: TurnState, config) -> dict:
         out = await asyncio.wait_for(
             model.ainvoke(_gate_prompt(state)), timeout=settings.GATE_TIMEOUT_SECONDS
         )
-        query = out.search_query.strip() or question if out.retrieve else ""
-        result = {"retrieve": out.retrieve, "search_query": query, "degraded": False}
+        # navigate nunca retrieva, mesmo se o modelo devolveu retrieve=True junto:
+        # a classificação de intent tem prioridade sobre o campo retrieve solto.
+        retrieve = out.retrieve and out.intent == "knowledge"
+        query = out.search_query.strip() or question if retrieve else ""
+        result = {"retrieve": retrieve, "search_query": query, "degraded": False, "intent": out.intent}
     except Exception:
         # fail-open: uma recuperação a mais > uma perdida. degraded=True avisa a
         # aresta has_grounding de que NÃO houve classificação — só um chute.
         logger.warning("retrieval gate falhou; fail-open (query crua)", exc_info=True)
-        result = {"retrieve": True, "search_query": question, "degraded": True}
+        result = {"retrieve": True, "search_query": question, "degraded": True, "intent": "knowledge"}
 
     signals.gate_ms = int((time.monotonic() - started) * 1000)
     signals.gate_retrieve = result["retrieve"]
     signals.gate_search_query = result["search_query"] or None
     signals.gate_degraded = result["degraded"]
+    signals.intent = result["intent"]
     return result
 
 
@@ -143,19 +163,53 @@ async def _nearest_or_none(deps, query: str) -> float | None:
         return None
 
 
-def _answer_messages(state: TurnState) -> list:
-    """Mesmo prompt de sempre: histórico, contexto embrulhado, pergunta."""
+def _navigation_enabled(config) -> bool:
+    """R12 (ADR-0022): navegação só para sessões que sabem executar um
+    redirect — o bearer da Platform. O controller decide e carimba
+    `navigation_enabled` no `configurable`; sem ele (SPA do oráculo, eval de
+    conhecimento) o turno não vê a tool nem o bloco de prompt."""
+    return bool(config.get("configurable", {}).get("navigation_enabled"))
+
+
+def _answer_messages(state: TurnState, config) -> list:
+    """Histórico, contexto embrulhado, pergunta — e, depois dela, perfil do
+    usuário (quando presente na config), idioma da resposta e, para intent
+    navigate, o marcador que afasta a RESPOSTA PADRÃO (ver bloco NAVEGAÇÃO)."""
     parts = [f"{m.role}: {m.content}" for m in state.get("history", [])]
     parts.append("Contexto recuperado da base de conhecimento:")
     parts.append(format_knowledge(state.get("knowledge", [])))
     parts.append(f"Pergunta do usuário: {state['question']}")
-    return [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content="\n\n".join(parts))]
+
+    profile = config.get("configurable", {}).get("user_profile")
+    if profile:
+        membership = profile.get("membership") or "None"
+        seniority = profile.get("seniority") or "None"
+        career_stage = profile.get("careerStage") or "None"
+        parts.append(
+            f"Perfil do usuário: membership={membership}, seniority={seniority}, careerStage={career_stage}"
+        )
+    parts.append(f"Idioma da resposta: {state.get('locale', 'pt-BR')}")
+    if state.get("intent") == "navigate":
+        parts.append("Intenção: navegação (não use a RESPOSTA PADRÃO)")
+
+    system = build_system_prompt(_navigation_enabled(config))
+    return [SystemMessage(content=system), HumanMessage(content="\n\n".join(parts))]
 
 
 def _answer_model(config, enable_tools: bool = True):
-    injected = config.get("configurable", {}).get("answer_model")
+    cfg = config.get("configurable", {})
+    injected = cfg.get("answer_model")
     model = injected or build_chat_model()
-    return model.bind_tools(build_tools()) if enable_tools else model
+    if not enable_tools:
+        return model
+    if not _navigation_enabled(config):
+        # R12: sem capacidade de navegar, o modelo só vê web_search e
+        # fetch_notion_page — oferecer `navigate_platform` a um cliente que não
+        # executa redirect é prometer uma ação que ninguém cumpre.
+        return model.bind_tools(tool_node_tools())
+    # O catálogo ao vivo (buscado com o token do turno) vai na descrição da tool
+    # de navegação; sem ele, `build_tools` cai no snapshot embutido.
+    return model.bind_tools(build_tools(cfg.get("navigation_catalog_text")))
 
 
 def _fill_usage(signals, message: AIMessage) -> None:
@@ -187,7 +241,7 @@ async def answer_node(state: TurnState, config) -> dict:
         signals.answer_started_at = time.monotonic()
 
     existing_messages = state.get("messages")
-    messages = existing_messages or _answer_messages(state)
+    messages = existing_messages or _answer_messages(state, config)
     model = _answer_model(config, enable_tools=cfg.get("enable_tools", True))
     message = await model.ainvoke(messages)
 

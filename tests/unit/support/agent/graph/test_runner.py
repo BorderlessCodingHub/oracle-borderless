@@ -22,7 +22,7 @@ from src.domain.conversations.services.out_of_scope_reply import (
 )
 from src.domain.shared.value_objects.citation import Citation
 from src.support.agent.graph.builder import build_turn_graph
-from src.support.agent.graph.runner import TurnGraphRunner
+from src.support.agent.graph.runner import TurnGraphRunner, _initial_state, _project
 from src.support.agent.ports import (
     ROOT_NAME,
     GraphEvent,
@@ -30,8 +30,14 @@ from src.support.agent.ports import (
     TurnDependencies,
     TurnSignals,
     citations_of,
+    navigation_of,
     text_of,
 )
+from src.support.clients.borderless.borderless_navigation_client import (
+    NavigationResult,
+    NavigationValidationError,
+)
+from tests.fakes.fake_navigation_client import FakeNavigationClient
 from tests.fakes.scripted_chat_model import ScriptedChatModel
 
 FORBIDDEN_KEYS = {"messages", "knowledge", "question", "history", "search_query", "preset_knowledge", "user_hash", "page_id"}
@@ -168,7 +174,57 @@ def _tool_loop_graph(executed: dict):
     return builder.compile()
 
 
+# --- _initial_state (mode/locale) --------------------------------------------
+
+
+def test_initial_state_defaults_to_chat_mode_and_pt_br_locale_with_no_intent():
+    """Sem `mode`, o estado não presume navegação: `intent` fica ausente (o
+    gate de verdade decide)."""
+    state = _initial_state("q", [], None)
+
+    assert state["mode"] == "chat"
+    assert state["locale"] == "pt-BR"
+    assert state["navigation"] is None
+    assert "intent" not in state
+
+
+def test_initial_state_navigate_mode_presets_intent_and_skips_the_gate():
+    """A barra manda `mode="navigate"`: o state já nasce com a intenção fixa e
+    `retrieve=False` — sem gate, sem RAG (spec §5.3)."""
+    state = _initial_state("q", [], None, mode="navigate", locale="en")
+
+    assert state["mode"] == "navigate"
+    assert state["locale"] == "en"
+    assert state["intent"] == "navigate"
+    assert state["retrieve"] is False
+    assert state["navigation"] is None
+
+
 # --- fases ------------------------------------------------------------------
+
+
+def test_run_sets_signals_intent_to_navigate_in_navigate_mode():
+    """R5: em mode="navigate" o gate é pulado, então nada mais escreveria
+    signals.intent — o trace persistido precisa de intent == "navigate" para
+    turnos da barra (task futura). O runner fixa isso antes de montar o
+    gerador."""
+    signals = TurnSignals()
+
+    _runner().run(
+        "q", [], _deps(_RecordingSearch([])), signals, mode="navigate", extra_config=_models(),
+    )
+
+    assert signals.intent == "navigate"
+
+
+def test_run_leaves_signals_intent_unset_in_default_chat_mode():
+    """No modo padrão, o gate ainda não rodou (run() é síncrono) — intent
+    continua None até prelude() ser iterado."""
+    signals = TurnSignals()
+
+    _runner().run("q", [], _deps(_RecordingSearch([])), signals, extra_config=_models())
+
+    assert signals.intent is None
 
 
 def test_run_is_synchronous_and_executes_nothing_until_prelude_is_iterated():
@@ -411,7 +467,7 @@ async def test_the_full_turn_has_the_langgraph_order_and_ends_with_the_root_end(
     assert all(e.node == "answer" for e in tokens)
     assert [c.title for c in citations_of(events[-1])] == ["Doc PSP"]
     by_node_end = {e.name: e.data["output"] for e in events if e.event == "on_chain_end" and not e.is_root}
-    assert by_node_end["gate"] == {"retrieve": True, "degraded": False}
+    assert by_node_end["gate"] == {"retrieve": True, "degraded": False, "intent": "knowledge"}
     assert by_node_end["retrieve"] == {"kept": 1}
     assert by_node_end["answer"]["outcome"] == "answer"
 
@@ -499,3 +555,169 @@ async def test_first_token_and_engine_ms_are_measured_from_the_answer_node():
     assert signals.first_token_ms >= 50, f"first_token_ms={signals.first_token_ms}: a medida está começando depois do handoff"
     assert signals.engine_ms is not None
     assert signals.engine_ms >= signals.first_token_ms
+
+
+# --- navegação ------------------------------------------------------------
+
+NAV_RESULT = NavigationResult(
+    destination={"id": "code_breakers", "path": "/code-breakers", "labelKey": "navigation.destinations.code_breakers"},
+    access="allowed",
+    unlock=None,
+    signals={"matchedTags": ["algoritmos"], "inProgress": False, "difficulty": None, "fallback": False,
+             "profile": {"membership": "FREE", "seniority": "JUNIOR"}},
+    alternatives=[],
+)
+
+
+def _navigate_model():
+    """Primeira resposta só com a tool call de navegação; depois, a frase."""
+    return ScriptedChatModel(replies=[
+        AIMessage(content="", tool_calls=[{"name": "navigate_platform", "args": {"destination": "code_breakers"}, "id": "nav-1"}]),
+        AIMessage(content="Te levei para o CodeBreakers"),
+    ])
+
+
+def test_project_keeps_only_the_allowlisted_keys_of_the_navigation():
+    """O destino atravessa o redator por allowlist própria — `signals.profile`
+    (membership/senioridade do usuário) e qualquer extra da API ficam de fora."""
+    out = _project({"navigation": {
+        "destination": {"id": "code_breakers", "path": "/code-breakers", "labelKey": "k", "label": "CodeBreakers", "internal": "x"},
+        "access": "locked",
+        "unlock": {"action": "upgrade", "path": "/planos", "membership": "PRO", "secret": "s"},
+        "signals": {"matchedTags": ["algoritmos"], "inProgress": False, "difficulty": "medium", "fallback": False,
+                    "profile": {"membership": "FREE"}},
+        "alternatives": [{"id": "trails", "path": "/trilhas", "labelKey": "t", "label": "Trilhas", "score": 0.9}],
+        "raw": "não pode sair",
+    }})
+
+    assert out == {"navigation": {
+        "destination": {"id": "code_breakers", "path": "/code-breakers", "labelKey": "k", "label": "CodeBreakers"},
+        "access": "locked",
+        "unlock": {"action": "upgrade", "path": "/planos", "membership": "PRO"},
+        "signals": {"matchedTags": ["algoritmos"], "inProgress": False, "difficulty": "medium", "fallback": False},
+        "alternatives": [{"id": "trails", "path": "/trilhas", "labelKey": "t", "label": "Trilhas"}],
+    }}
+    assert "profile" not in repr(out) and "secret" not in repr(out)
+
+
+def test_project_omits_the_navigation_key_when_the_turn_did_not_navigate():
+    assert _project({"navigation": None, "outcome": "answer"}) == {"outcome": "answer"}
+
+
+@pytest.mark.asyncio
+async def test_a_navigate_tool_call_puts_the_destination_on_the_wire_before_the_final_sentence():
+    """O ponto central da spec §5.3: o cliente recebe o destino no chunk
+    `updates` do nó `navigate` — antes do primeiro token da frase final — e o
+    vê repetido no `on_chain_end` do raiz."""
+    client = FakeNavigationClient({"code_breakers": NAV_RESULT})
+    signals = TurnSignals()
+    runner = TurnGraphRunner(graph=build_turn_graph(), enable_tools=True)
+    run = runner.run(
+        "quero praticar algoritmos", [], _deps(_RecordingSearch([])), signals,
+        mode="navigate",
+        extra_config={"answer_model": _navigate_model(), "platform_token": "tok",
+                      "navigation_enabled": True, "navigation_client": client},
+    )
+
+    events = await _run_all(run)
+
+    assert client.calls == [{"op": "resolve", "token": "tok", "destination": "code_breakers", "topic": None, "goal": None}]
+    assert _steps(events) == [("answer", "start"), ("navigate", "start"), ("navigate", "end"), ("answer", "end")]
+
+    update_at = next(
+        i for i, e in enumerate(events)
+        if e.event == "on_chain_stream" and e.is_root
+        and e.data["chunk"][0] == "updates" and "navigate" in e.data["chunk"][1]
+    )
+    first_token_at = next(i for i, e in enumerate(events) if e.event == "on_chat_model_stream")
+    assert update_at < first_token_at, "o destino chegou depois da frase — a barra navegaria tarde"
+    assert events[update_at].data["chunk"][1] == {"navigate": {"navigation": NAV_RESULT.to_public()}}
+
+    assert navigation_of(events[update_at]) == NAV_RESULT.to_public()
+    assert navigation_of(events[-1]) == NAV_RESULT.to_public()
+    assert _text(events) == "Te levei para o CodeBreakers"
+    assert signals.tool_calls == 1
+    assert signals.navigation_called is True and signals.navigation_access == "allowed"
+    assert signals.intent == "navigate"
+
+    forbidden = FORBIDDEN_KEYS | {"platform_token", "profile"}
+    for e in events:
+        assert not (set(_keys(e.data)) & forbidden), (e.event, e.name, e.data)
+        # Não basta a chave sumir: o VALOR do bearer não pode aparecer em
+        # lugar nenhum do fio — nem no payload, nem no metadata.
+        assert "tok" not in repr(e.data), (e.event, e.name, e.data)
+        assert "tok" not in repr(e.metadata)
+
+
+@pytest.mark.asyncio
+async def test_a_retried_navigation_opens_the_navigate_step_once_but_still_delivers_the_destination():
+    """O modelo pode insistir depois de um destino inválido: o nó `navigate`
+    re-entra. O PASSO abre e fecha uma vez (mesmo padrão do `answer`), mas o
+    chunk `updates` da tentativa que deu certo continua saindo — é por ele que
+    a barra recebe o destino."""
+    client = FakeNavigationClient({
+        "moon": NavigationValidationError("Unknown", ["code_breakers"]),
+        "code_breakers": NAV_RESULT,
+    })
+    model = ScriptedChatModel(replies=[
+        AIMessage(content="", tool_calls=[{"name": "navigate_platform", "args": {"destination": "moon"}, "id": "nav-1"}]),
+        AIMessage(content="", tool_calls=[{"name": "navigate_platform", "args": {"destination": "code_breakers"}, "id": "nav-2"}]),
+        AIMessage(content="Te levei para o CodeBreakers"),
+    ])
+    signals = TurnSignals()
+    runner = TurnGraphRunner(graph=build_turn_graph(), enable_tools=True)
+    run = runner.run(
+        "quero praticar algoritmos", [], _deps(_RecordingSearch([])), signals,
+        mode="navigate",
+        extra_config={"answer_model": model, "platform_token": "tok",
+                      "navigation_enabled": True, "navigation_client": client},
+    )
+
+    events = await _run_all(run)
+
+    assert [c["destination"] for c in client.calls] == ["moon", "code_breakers"]
+    steps = _steps(events)
+    assert steps.count(("navigate", "start")) == 1, steps
+    assert steps.count(("navigate", "end")) == 1, steps
+    assert steps.count(("answer", "start")) == 1 and steps.count(("answer", "end")) == 1
+
+    update_at = next(
+        i for i, e in enumerate(events)
+        if e.event == "on_chain_stream" and e.is_root
+        and e.data["chunk"][0] == "updates" and (e.data["chunk"][1].get("navigate") or {}).get("navigation")
+    )
+    first_token_at = next(i for i, e in enumerate(events) if e.event == "on_chat_model_stream")
+    assert update_at < first_token_at
+    assert navigation_of(events[update_at]) == NAV_RESULT.to_public()
+    assert navigation_of(events[-1]) == NAV_RESULT.to_public()
+    assert signals.tool_calls == 2
+    assert signals.navigation_called is True and signals.navigation_access == "allowed"
+
+    forbidden = FORBIDDEN_KEYS | {"platform_token", "profile"}
+    for e in events:
+        assert not (set(_keys(e.data)) & forbidden), (e.event, e.name, e.data)
+        assert "tok" not in repr(e.data), (e.event, e.name, e.data)
+        assert "tok" not in repr(e.metadata)
+
+
+def test_project_drops_null_valued_keys_of_the_navigation():
+    """R14: `NavigationResult.to_public()` já descartava chaves nulas no client;
+    o redator descartava só as fora da allowlist. Duas formas para o mesmo
+    campo no fio — o cliente teria que distinguir chave ausente de chave nula
+    conforme o caminho. Agora as duas projeções descartam nulo."""
+    out = _project({"navigation": {
+        "destination": {"id": "trail", "path": "/trilhas", "labelKey": None, "label": None},
+        "access": "allowed",
+        "unlock": {"action": "upgrade", "path": None, "membership": None},
+        "signals": {"matchedTags": ["python"], "inProgress": False, "difficulty": None, "fallback": None},
+        "alternatives": [{"id": "trails", "path": "/trilhas", "labelKey": None, "label": None}],
+    }})
+
+    assert out["navigation"] == {
+        "destination": {"id": "trail", "path": "/trilhas"},
+        "access": "allowed",
+        "unlock": {"action": "upgrade"},
+        "signals": {"matchedTags": ["python"], "inProgress": False},
+        "alternatives": [{"id": "trails", "path": "/trilhas"}],
+    }
+    assert "None" not in repr(out["navigation"])

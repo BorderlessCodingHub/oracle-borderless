@@ -47,6 +47,10 @@ class TurnTraceDraft:
 
     langsmith_run_id: str | None = None
 
+    intent: str | None = None
+    navigation_called: bool = False
+    navigation_access: str | None = None
+
     def to_entity(self, conversation_id: UUID) -> TurnTrace:
         return TurnTrace(
             uuid=uuid7(),
@@ -75,5 +79,8 @@ class TurnTraceDraft:
             output_tokens=self.output_tokens,
             error=self.error,
             langsmith_run_id=self.langsmith_run_id,
+            intent=self.intent,
+            navigation_called=self.navigation_called,
+            navigation_access=self.navigation_access,
             created_at=datetime.now(timezone.utc),
         )

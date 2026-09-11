@@ -38,6 +38,7 @@ class MessageMapper:
             content=model.content,
             created_at=model.created_at,
             sources=sources,
+            navigation=model.navigation,
         )
 
     @staticmethod
@@ -53,4 +54,5 @@ class MessageMapper:
             "role": entity.role,
             "content": entity.content,
             "sources": sources,
+            "navigation": entity.navigation,
         }

@@ -29,6 +29,9 @@ _FLAT_FIELDS = (
     "output_tokens",
     "error",
     "langsmith_run_id",
+    "intent",
+    "navigation_called",
+    "navigation_access",
 )
 
 

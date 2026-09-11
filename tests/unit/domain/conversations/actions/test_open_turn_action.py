@@ -144,6 +144,26 @@ async def test_draft_carries_the_question_user_and_the_same_signals_object():
 
 
 @pytest.mark.asyncio
+async def test_mode_and_locale_default_to_chat_and_pt_br():
+    turn = await _make(_FakeConvRepo(), _FakeMsgRepo()).execute("oi", uuid4(), "a@x.com")
+
+    assert turn.mode == "chat"
+    assert turn.locale == "pt-BR"
+
+
+@pytest.mark.asyncio
+async def test_mode_and_locale_are_stored_on_the_opened_turn():
+    """A barra manda mode="navigate"; a Action só guarda — quem decide o que
+    fazer com isso é o grafo (Task 4)."""
+    turn = await _make(_FakeConvRepo(), _FakeMsgRepo()).execute(
+        "onde fica o onboarding?", uuid4(), "a@x.com", mode="navigate", locale="en",
+    )
+
+    assert turn.mode == "navigate"
+    assert turn.locale == "en"
+
+
+@pytest.mark.asyncio
 async def test_history_tokens_are_estimated_from_the_loaded_recency():
     class _WithHistory(_FakeMsgRepo):
         async def load_recent(self, conversation_id):

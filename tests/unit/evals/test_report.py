@@ -6,6 +6,7 @@ from evals.models import (
     APPROPRIATE_REFUSAL,
     CITATION_SUPPORT,
     FAITHFULNESS,
+    NAVIGATION_TARGET,
     CaseResult,
     MetricScore,
 )
@@ -154,3 +155,24 @@ def test_judge_error_zeros_in_composed_run_fails_report():
     assert report.passed is False  # fail-safe zeros pull overall mean below threshold
     faith = next(m for m in report.metrics if m.metric == FAITHFULNESS)
     assert faith.passed is False
+
+
+def test_navigation_metric_has_a_threshold_and_is_aggregated():
+    results = [
+        _r("n1", "navigation", navigation_target=1.0),
+        _r("n2", "navigation", navigation_target=1.0),
+    ]
+    report = aggregate(results)
+    nav = next(m for m in report.metrics if m.metric == NAVIGATION_TARGET)
+    assert nav.n == 2 and nav.threshold == pytest.approx(0.9)
+    assert report.passed is True
+
+
+def test_navigation_case_below_floor_hard_fails_even_if_means_pass():
+    results = [
+        _r("n1", "navigation", navigation_target=0.0),
+        *[_r(f"nk{i}", "navigation", navigation_target=1.0) for i in range(19)],
+    ]
+    report = aggregate(results)
+    assert report.passed is False
+    assert any(hf[0] == "n1" and hf[1] == "navigation" for hf in report.hard_failures)

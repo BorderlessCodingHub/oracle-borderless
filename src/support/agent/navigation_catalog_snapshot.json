@@ -1,0 +1,124 @@
+[
+  {
+    "id": "home",
+    "kind": "static",
+    "path": "/",
+    "labelKey": "navigation.destinations.home",
+    "description": "Dashboard: progress of enrolled trails, history (trails in progress, code-ups written, upcoming events joined, likes received), forum posts and calls to action."
+  },
+  {
+    "id": "blog",
+    "kind": "static",
+    "path": "/blog",
+    "labelKey": "navigation.destinations.blog",
+    "description": "Editorial articles written by the community and staff."
+  },
+  {
+    "id": "events",
+    "kind": "static",
+    "path": "/events",
+    "labelKey": "navigation.destinations.events",
+    "description": "Calendar with every event: PSP activities, webinars, masterclasses, free events. Register for events here."
+  },
+  {
+    "id": "forum",
+    "kind": "static",
+    "path": "/forum",
+    "labelKey": "navigation.destinations.forum",
+    "description": "Community discussions: posts, comments and likes."
+  },
+  {
+    "id": "code_up",
+    "kind": "static",
+    "path": "/code-up",
+    "labelKey": "navigation.destinations.code_up",
+    "description": "The member's own learning notes (formerly Notes). Write and revisit what you learned."
+  },
+  {
+    "id": "programs",
+    "kind": "static",
+    "path": "/programs",
+    "labelKey": "navigation.destinations.programs",
+    "description": "Masterclasses, webinars, PSP and Base follow-up programs, Mock Interviews (System Design, Data, Live Coding, Code Challenge, AI System Engineering, screening). Includes the 'Mapa do Labirinto' companion chapter for CodeBreakers inside the PSP follow-up."
+  },
+  {
+    "id": "trails",
+    "kind": "static",
+    "path": "/trails",
+    "labelKey": "navigation.destinations.trails",
+    "description": "Learning trails gated by membership (free, starter, base, PSP): AI, Backend, Node.js, Data Engineering, Full Stack, Python, iOS and more. Per-course progress tracking."
+  },
+  {
+    "id": "code_breakers",
+    "kind": "static",
+    "path": "/code-breakers",
+    "labelKey": "navigation.destinations.code_breakers",
+    "description": "Algorithm and data-structure challenges (arrays, hashing, two pointers, linked lists, trees, graphs) grouped by difficulty, with a progress bar."
+  },
+  {
+    "id": "leaderboard",
+    "kind": "static",
+    "path": "/leaderboard",
+    "labelKey": "navigation.destinations.leaderboard",
+    "description": "Season ranking with multipliers and rewards."
+  },
+  {
+    "id": "livestream",
+    "kind": "static",
+    "path": "/livestream",
+    "labelKey": "navigation.destinations.livestream",
+    "description": "The live event currently streaming. Only meaningful while a live is on and the member has permission."
+  },
+  {
+    "id": "profile",
+    "kind": "static",
+    "path": "/profile",
+    "labelKey": "navigation.destinations.profile",
+    "description": "The member's own profile: LinkedIn, GitHub, location, stack tags, seniority."
+  },
+  {
+    "id": "settings",
+    "kind": "static",
+    "path": "/settings",
+    "labelKey": "navigation.destinations.settings",
+    "description": "Account settings and language switch (English / Portuguese)."
+  },
+  {
+    "id": "settings_purchases",
+    "kind": "static",
+    "path": "/settings/purchases",
+    "labelKey": "navigation.destinations.settings_purchases",
+    "description": "Purchases, subscription and membership upgrade."
+  },
+  {
+    "id": "notifications",
+    "kind": "static",
+    "path": "/notifications",
+    "labelKey": "navigation.destinations.notifications",
+    "description": "The member's notifications."
+  },
+  {
+    "id": "trail",
+    "kind": "dynamic",
+    "path": "/trails/:trailId",
+    "labelKey": "navigation.destinations.trail",
+    "description": "One specific learning trail, chosen from the topic (e.g. 'backend node.js', 'python', 'ai') and the member's stack tags, seniority and enrollments.",
+    "fallbackId": "trails"
+  },
+  {
+    "id": "program",
+    "kind": "dynamic",
+    "path": "/programs/:programSlug",
+    "labelKey": "navigation.destinations.program",
+    "description": "One specific program (e.g. 'mock interview PSP', 'system design masterclass'), chosen from the topic.",
+    "fallbackId": "programs"
+  },
+  {
+    "id": "event",
+    "kind": "dynamic",
+    "path": "/events/:id",
+    "labelKey": "navigation.destinations.event",
+    "description": "One specific upcoming event, chosen from the topic (the soonest event matching the theme).",
+    "fallbackId": "events"
+  }
+]

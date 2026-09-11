@@ -80,6 +80,20 @@ def citations_of(event: GraphEvent) -> list[Citation] | None:
     return None
 
 
+def navigation_of(event: GraphEvent) -> dict | None:
+    """O destino resolvido: no chunk `updates` do nó `navigate` (antes do modelo
+    terminar a frase) e, repetido, no `on_chain_end` do raiz. None em qualquer
+    outro evento e em turnos que não navegaram."""
+    updates = _updates_chunk(event)
+    if updates is not None:
+        nav = (updates.get("navigate") or {}).get("navigation")
+        return dict(nav) if nav else None
+    if event.event == "on_chain_end" and event.is_root:
+        nav = (event.data.get("output") or {}).get("navigation")
+        return dict(nav) if nav else None
+    return None
+
+
 @dataclass
 class KnowledgeSnippet:
     """Trecho recuperado da base (RAG clássico), com sua fonte para citação."""
@@ -120,6 +134,14 @@ class TurnSignals:
     gate_search_query: str | None = None
     gate_degraded: bool = False
     gate_ms: int = 0
+    # Classificação do gate: "knowledge" | "navigate" | "chit_chat". None até o
+    # gate rodar (ou até o runner presetar "navigate" em mode == "navigate",
+    # que pula o gate — ver TurnGraphRunner.run).
+    intent: str | None = None
+    # Escritos pelo nó `navigate`: se `navigate_platform` foi chamada no turno e
+    # qual acesso a plataforma devolveu ("allowed" | "locked" | ...).
+    navigation_called: bool = False
+    navigation_access: str | None = None
 
     retrieval_ran: bool = False
     retrieval_top_k: int = 0
@@ -155,6 +177,15 @@ class KnowledgeSectionsPort(Protocol):
     """Satisfeito por ListKnowledgeSectionsAction, sem alteração."""
 
     async def execute(self) -> list[str]: ...
+
+
+class NavigationResolverPort(Protocol):
+    """Satisfeito por `BorderlessNavigationClient` — o nó `navigate` fala com a
+    plataforma por aqui, e os testes injetam um fake pelo `configurable`."""
+
+    async def resolve(
+        self, access_token: str, destination: str, topic: str | None = None, goal: str | None = None
+    ): ...
 
 
 class NearestDistancePort(Protocol):
@@ -207,12 +238,17 @@ class TurnGraphPort(Protocol):
         deps: TurnDependencies,
         signals: TurnSignals,
         knowledge: list[KnowledgeSnippet] | None = None,
+        mode: str = "chat",
+        locale: str = "pt-BR",
         extra_config: dict | None = None,
     ) -> TurnRun:
         """Monta o turno. Síncrono: só constrói o gerador do grafo e o emitter.
 
         `knowledge` pré-semeado pula gate e retrieval e vai direto ao nó de
         resposta; é o que o eval usa nos casos adversariais.
+
+        `mode`/`locale` vêm do input do cliente (a barra manda "navigate", o
+        chat manda "chat") e entram no state inicial do grafo.
 
         `extra_config` injeta entradas no `configurable` do grafo — existe para
         os testes passarem modelos fakes sem monkeypatch.
