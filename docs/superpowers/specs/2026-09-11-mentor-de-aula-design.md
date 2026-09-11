@@ -179,7 +179,7 @@ Por aula, em ordem:
 7. **Chunk + embed** — `TranscriptChunkingService` → `EmbeddingsClient.embed_documents` → `replace_for_lesson` em transação.
 8. **`ready`**, com `transcribed_at` e `failure_reason = NULL`.
 
-**Tolerância a falha.** Cada aula roda no seu próprio `try/except`: falha grava `failure_reason`, marca `failed` e **o lote continua**. A re-execução pega `pending` e `failed` com `attempts < MENTOR_MAX_ATTEMPTS` (default 3). O relatório final lista transcritas, puladas por hash, e falhas com motivo.
+**Tolerância a falha.** Cada aula roda no seu próprio `try/except`: falha grava `failure_reason`, marca `failed` e **o lote continua** — inclusive quando é a própria gravação da falha que falha (o registro é best-effort; o lote nunca morre por causa dele). A re-execução pega `pending` e `failed` com `attempts < MENTOR_MAX_ATTEMPTS` (default 3), **e também claims obsoletos**: aula em `transcribing` cujo `updated_at` tem mais de `MENTOR_CLAIM_STALE_MINUTES` (default 120) é tratada como abandonada por um processo que morreu (OOM, restart) e volta ao lote — sem isso ela ficaria presa para sempre. O relatório final lista transcritas, puladas por hash, e falhas com motivo.
 
 **Escolha do modelo de transcrição.** `whisper-1` é o default porque `verbose_json` devolve segmentos com timestamp, que é o que sustenta a citação temporal. Os modelos mais novos de transcrição têm qualidade melhor mas formato de saída diferente; a implementação confirma se devolvem segmentos equivalentes e só troca se devolverem.
 

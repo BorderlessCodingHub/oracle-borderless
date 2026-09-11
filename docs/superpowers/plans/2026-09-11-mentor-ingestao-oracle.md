@@ -18,7 +18,7 @@
 - Índice ANN criado por SQL cru na migration **e** declarado no `__table_args__` do model; sem as duas metades o `alembic check` acusa índice a remover (o `DocumentChunkModel` documenta o porquê).
 - PK sempre UUID v7 pelo mixin `HasUUID`. Timestamps pelo `HasTimestamps`.
 - Repositório pega a sessão de `CurrentAsyncSessionContext.get()` no `__init__`, como `DocumentRepository`.
-- Valores exatos de configuração desta fase: `MENTOR_CHUNK_SIZE=800`, `MENTOR_MAX_ATTEMPTS=3`, `MENTOR_AUDIO_SEGMENT_SECONDS=600`, `MENTOR_TRANSCRIBE_MODEL="whisper-1"`, `MENTOR_TRANSCRIBE_LANGUAGE="pt"`.
+- Valores exatos de configuração desta fase: `MENTOR_CHUNK_SIZE=800`, `MENTOR_MAX_ATTEMPTS=3`, `MENTOR_AUDIO_SEGMENT_SECONDS=600`, `MENTOR_TRANSCRIBE_MODEL="whisper-1"`, `MENTOR_TRANSCRIBE_LANGUAGE="pt"`, `MENTOR_CLAIM_STALE_MINUTES=120` (recuperação de claim obsoleto — ver spec §7).
 - O segredo `BORDERLESS_INTERNAL_SECRET` deste repo é o mesmo valor que a `borderless-api` chama de `MENTOR_INGEST_SECRET`.
 - Commits em português, seguindo o estilo do repo (`feat(mentor): ...`). Terminar com:
   `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`
