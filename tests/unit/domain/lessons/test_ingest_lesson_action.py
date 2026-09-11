@@ -7,6 +7,7 @@ from src.domain.lessons.actions.ingest_lesson_action import IngestLessonAction
 from src.domain.lessons.entities.lesson import Lesson
 from src.domain.lessons.entities.transcript_segment import TranscriptSegment
 from src.domain.lessons.enums import TranscriptStatus
+from src.support.core.context import CurrentAsyncSessionContext
 
 
 class FakeLessonRepo:
@@ -18,6 +19,35 @@ class FakeLessonRepo:
             Lesson(**{**lesson.__dict__})  # snapshot, não referência viva
         )
         return lesson
+
+
+class FakeSession:
+    """Sessão fake mínima: só precisa saber commitar o claim (spec §7 passo 1).
+
+    `events`, quando passado, recebe "commit" na ordem em que o commit
+    acontece — usado para provar que ele vem ANTES de qualquer chamada de
+    mídia/transcrição. `fail=True` simula um banco fora do ar no momento do
+    commit do claim.
+    """
+
+    def __init__(self, events: list[str] | None = None, fail: bool = False) -> None:
+        self._events = events
+        self._fail = fail
+
+    async def commit(self) -> None:
+        if self._fail:
+            raise RuntimeError("commit down")
+        if self._events is not None:
+            self._events.append("commit")
+
+
+@pytest.fixture(autouse=True)
+def default_session():
+    """A maioria dos testes deste arquivo não liga para o commit do claim —
+    só não pode ver o `execute` falhar por falta de sessão no contexto."""
+    CurrentAsyncSessionContext.set(FakeSession())
+    yield
+    CurrentAsyncSessionContext.clear()
 
 
 class FakeChunkRepo:
@@ -34,12 +64,15 @@ class FakeEmbeddings:
 
 
 class FakeClient:
-    def __init__(self, url="https://cdn.test/a.m3u8"):
+    def __init__(self, url="https://cdn.test/a.m3u8", events: list[str] | None = None):
         self.url = url
+        self._events = events
 
     async def get_media(self, video_id):
         from src.support.clients.borderless.borderless_lessons_client import LessonMedia
 
+        if self._events is not None:
+            self._events.append("get_media")
         return LessonMedia(url=self.url, expires_at=None, content_type=None)
 
 
@@ -61,7 +94,9 @@ def a_lesson(**overrides) -> Lesson:
     return Lesson(**base)
 
 
-def build_action(monkeypatch, segments=None, lesson_repo=None, chunk_repo=None, transcription=None):
+def build_action(
+    monkeypatch, segments=None, lesson_repo=None, chunk_repo=None, transcription=None, lessons_client=None
+):
     """Neutraliza o ffmpeg: a Task 5 já cobre o toolkit, aqui interessa o fluxo."""
     from src.domain.lessons.actions import ingest_lesson_action as module
 
@@ -80,7 +115,7 @@ def build_action(monkeypatch, segments=None, lesson_repo=None, chunk_repo=None, 
 
     return IngestLessonAction(
         embeddings=FakeEmbeddings(),
-        lessons_client=FakeClient(),
+        lessons_client=lessons_client or FakeClient(),
         transcription=transcription or FakeTranscription(segments or []),
         lesson_repo=lesson_repo or FakeLessonRepo(),
         chunk_repo=chunk_repo or FakeChunkRepo(),
@@ -237,3 +272,60 @@ async def test_multiple_audio_windows_get_their_offsets_applied(monkeypatch):
     chunks = chunk_repo.replaced[0][1]
     assert chunks[0].start_seconds == 30.0
     assert chunks[-1].end_seconds == 1240.0
+
+
+# --- claim: commit imediato (Controller Ruling B7 / spec §7 passo 1) ---
+
+
+@pytest.mark.asyncio
+async def test_claim_is_committed_before_media_is_fetched(monkeypatch):
+    """O commit do claim precisa acontecer ANTES de qualquer chamada de rede
+    (get_media) ou processamento de áudio — senão o claim fica preso na
+    transação aberta enquanto ffmpeg+Whisper rodam."""
+    events: list[str] = []
+    CurrentAsyncSessionContext.set(FakeSession(events=events))
+
+    action = build_action(
+        monkeypatch,
+        segments=[TranscriptSegment("olá", 0.0, 1.0)],
+        lessons_client=FakeClient(events=events),
+    )
+
+    result = await action.execute(a_lesson())
+
+    assert events == ["commit", "get_media"]
+    assert result.status == TranscriptStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_claim_commit_failure_returns_failed_without_raising(monkeypatch):
+    """Se o commit do claim falhar (ex.: banco fora do ar), `execute` não pode
+    propagar — e não tenta persistir FAILED de novo, porque foi justamente a
+    persistência que acabou de falhar."""
+    CurrentAsyncSessionContext.set(FakeSession(fail=True))
+    events: list[str] = []
+    action = build_action(monkeypatch, lessons_client=FakeClient(events=events))
+
+    result = await action.execute(a_lesson())
+
+    assert result.status == TranscriptStatus.FAILED
+    assert "commit down" in result.failure_reason
+    assert events == []  # nunca chegou a buscar mídia
+
+
+@pytest.mark.asyncio
+async def test_claim_save_failure_returns_failed_without_raising(monkeypatch):
+    """Finding 2: o claim (save + commit) precisa estar dentro da região
+    protegida — se o PRIMEIRO save() explodir, `execute` devolve FAILED em
+    vez de propagar a exceção."""
+
+    class BoomOnFirstSave(FakeLessonRepo):
+        async def save(self, lesson: Lesson) -> Lesson:
+            raise RuntimeError("db down")
+
+    action = build_action(monkeypatch, lesson_repo=BoomOnFirstSave())
+
+    result = await action.execute(a_lesson())
+
+    assert result.status == TranscriptStatus.FAILED
+    assert "db down" in result.failure_reason

@@ -1,6 +1,10 @@
 from uuid import uuid4
 
-from src.app.console.commands.mentor_ingest_command import MentorIngestCommand, _select_targets
+from src.app.console.commands.mentor_ingest_command import (
+    MentorIngestCommand,
+    _apply_limit,
+    _select_targets,
+)
 from src.domain.lessons.entities.lesson import Lesson
 from src.domain.lessons.enums import TranscriptStatus
 
@@ -83,3 +87,27 @@ def test_no_lesson_flag_returns_the_pending_list():
     )
     assert targets == pending_lessons
     assert message is None
+
+
+# --- --limit (finding 8: `--limit 0` não pode ser "sem limite") ---
+
+
+def test_no_limit_returns_every_target():
+    lessons = [_lesson("aula-1", TranscriptStatus.PENDING), _lesson("aula-2", TranscriptStatus.PENDING)]
+    targets, note = _apply_limit(lessons, None, "base")
+    assert targets == lessons
+    assert note is None
+
+
+def test_positive_limit_truncates_the_target_list():
+    lessons = [_lesson("aula-1", TranscriptStatus.PENDING), _lesson("aula-2", TranscriptStatus.PENDING)]
+    targets, note = _apply_limit(lessons, 1, "base")
+    assert targets == [lessons[0]]
+    assert note is None
+
+
+def test_limit_zero_processes_nothing_instead_of_meaning_unlimited():
+    lessons = [_lesson("aula-1", TranscriptStatus.PENDING)]
+    targets, note = _apply_limit(lessons, 0, "base")
+    assert targets == []
+    assert note == "--limit 0: nenhuma aula será processada em base"

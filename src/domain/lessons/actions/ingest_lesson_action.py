@@ -4,6 +4,11 @@ chunks → embeddings → ready.
 Cada aula falha sozinha. O `execute` não propaga exceção: ele grava
 `failure_reason`, marca `FAILED` e devolve o resultado, para que um lote de 30
 aulas não morra por causa de uma (spec §7).
+
+O claim (`TRANSCRIBING` + `attempts += 1`) leva um commit imediato — spec §7
+passo 1 — logo após o `save()`, e não só no fim do `execute`: sem isso a marca
+nunca sai da transação aberta, nenhuma execução concorrente a enxerga, e a
+recuperação de claim obsoleto em `list_pending` fica sem o que recuperar.
 """
 
 import hashlib
@@ -12,7 +17,8 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
+
+from uuid6 import uuid7
 
 from src.domain.lessons.entities.lesson import Lesson
 from src.domain.lessons.entities.lesson_chunk import LessonChunk
@@ -22,6 +28,7 @@ from src.domain.lessons.repositories.lesson_chunk_repository import LessonChunkR
 from src.domain.lessons.repositories.lesson_repository import LessonRepository
 from src.domain.lessons.services.transcript_chunking_service import TranscriptChunkingService
 from src.support.clients.transcription.audio_toolkit import AudioToolkit
+from src.support.core.context import CurrentAsyncSessionContext
 from src.support.core.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -54,10 +61,29 @@ class IngestLessonAction:
         self.chunking = TranscriptChunkingService()
 
     async def execute(self, lesson: Lesson, force: bool = False) -> IngestResult:
-        lesson.transcript_status = TranscriptStatus.TRANSCRIBING
-        lesson.attempts += 1
-        lesson.failure_reason = None
-        await self.lessons.save(lesson)
+        try:
+            lesson.transcript_status = TranscriptStatus.TRANSCRIBING
+            lesson.attempts += 1
+            lesson.failure_reason = None
+            await self.lessons.save(lesson)
+            # Commit imediato do claim — spec §7 passo 1: sem isso, o
+            # `save()` só dá flush, a marca `transcribing` nunca sai da
+            # transação aberta e nenhuma execução concorrente a enxerga —
+            # duas execuções processariam a mesma aula ao mesmo tempo e a
+            # recuperação de claim obsoleto em `list_pending` nunca teria uma
+            # linha `transcribing` committed para recuperar.
+            await CurrentAsyncSessionContext.get().commit()
+        except Exception as exc:
+            # O claim em si não commitou: não há nada seguro para persistir
+            # aqui (se o banco está fora do ar, tentar salvar FAILED só
+            # repetiria a mesma falha) — o resultado FAILED em memória é o
+            # que garante que o lote continue sem propagar a exceção.
+            logger.exception("falha ao registrar o claim da aula %s", lesson.platform_video_id)
+            reason = f"claim falhou: {type(exc).__name__}: {exc}"[:1000]
+            return IngestResult(
+                lesson.platform_video_id, TranscriptStatus.FAILED,
+                chunks=0, skipped=False, failure_reason=reason, content_hash=lesson.content_hash,
+            )
 
         try:
             segments = await self._transcribe(lesson)
@@ -144,7 +170,7 @@ class IngestLessonAction:
         vectors = await self.embeddings.embed([text for text, _, _ in pieces])
         entities = [
             LessonChunk(
-                uuid=uuid4(),
+                uuid=uuid7(),
                 lesson_id=lesson.uuid,
                 ordinal=i,
                 content=text,

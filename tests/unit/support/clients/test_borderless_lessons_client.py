@@ -48,7 +48,9 @@ async def test_the_secret_never_appears_in_the_url(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_unknown_program_raises_unavailable_with_the_status():
+async def test_unknown_program_raises_unavailable_with_the_status(monkeypatch):
+    monkeypatch.setattr(settings, "BORDERLESS_INTERNAL_SECRET", "test-secret")
+
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"error": {"message": "program not found"}})
 
@@ -58,7 +60,32 @@ async def test_unknown_program_raises_unavailable_with_the_status():
 
 
 @pytest.mark.asyncio
-async def test_media_maps_the_envelope():
+async def test_missing_internal_secret_fails_fast_without_a_request(monkeypatch):
+    monkeypatch.setattr(settings, "BORDERLESS_INTERNAL_SECRET", "")
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        pytest.fail("não deveria chamar a rede sem o segredo configurado")
+
+    with pytest.raises(LessonCatalogUnavailableError) as exc:
+        await client_with(handler).list_program_lessons("base")
+    assert "BORDERLESS_INTERNAL_SECRET" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_blank_internal_secret_also_fails_fast(monkeypatch):
+    monkeypatch.setattr(settings, "BORDERLESS_INTERNAL_SECRET", "   ")
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        pytest.fail("não deveria chamar a rede com segredo em branco")
+
+    with pytest.raises(LessonCatalogUnavailableError):
+        await client_with(handler).get_media("v1")
+
+
+@pytest.mark.asyncio
+async def test_media_maps_the_envelope(monkeypatch):
+    monkeypatch.setattr(settings, "BORDERLESS_INTERNAL_SECRET", "test-secret")
+
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/internal/videos/v1/media"
         return httpx.Response(200, json={"data": {
@@ -71,7 +98,9 @@ async def test_media_maps_the_envelope():
 
 
 @pytest.mark.asyncio
-async def test_lesson_row_missing_a_field_raises_unavailable():
+async def test_lesson_row_missing_a_field_raises_unavailable(monkeypatch):
+    monkeypatch.setattr(settings, "BORDERLESS_INTERNAL_SECRET", "test-secret")
+
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"data": {"lessons": [{
             "id": "v1", "programSlug": "base", "videoSlug": "a1",
@@ -84,7 +113,9 @@ async def test_lesson_row_missing_a_field_raises_unavailable():
 
 
 @pytest.mark.asyncio
-async def test_media_without_url_raises_unavailable():
+async def test_media_without_url_raises_unavailable(monkeypatch):
+    monkeypatch.setattr(settings, "BORDERLESS_INTERNAL_SECRET", "test-secret")
+
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"data": {
             "expiresAt": None, "contentType": "video/mp4",

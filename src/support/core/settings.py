@@ -134,6 +134,8 @@ class Settings(BaseSettings):
     MENTOR_TRANSCRIBE_LANGUAGE: str = "pt"
     MENTOR_FFMPEG_BIN: str = "ffmpeg"
     MENTOR_FFPROBE_BIN: str = "ffprobe"
+    # Teto de segurança: sem isso, um ffmpeg/ffprobe travado prende o processo para sempre.
+    MENTOR_SUBPROCESS_TIMEOUT_SECONDS: int = 900
     # Rótulos de cobertura — NÃO bloqueiam nada, só classificam (spec §9.2).
     MENTOR_COVERAGE_NEAR: float = 0.35
     MENTOR_COVERAGE_FAR: float = 0.55

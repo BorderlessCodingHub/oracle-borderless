@@ -5,7 +5,7 @@ estado de transcrição de propósito, para que re-sincronizar não jogue fora
 trabalho já feito.
 """
 
-from uuid import uuid4
+from uuid6 import uuid7
 
 from src.domain.lessons.entities.lesson import Lesson
 from src.domain.lessons.enums import TranscriptStatus
@@ -24,7 +24,7 @@ class SyncProgramLessonsAction:
             result.append(
                 await self.lessons.upsert_from_catalog(
                     Lesson(
-                        uuid=uuid4(),
+                        uuid=uuid7(),
                         platform_video_id=row.platform_video_id,
                         program_slug=row.program_slug,
                         module_slug=row.module_slug,

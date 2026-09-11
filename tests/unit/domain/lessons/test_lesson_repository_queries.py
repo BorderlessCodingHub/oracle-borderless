@@ -104,6 +104,9 @@ async def test_list_pending_filters_by_status_attempts_and_program(fake_session)
     assert "transcript_status IN ('pending', 'failed')" in sql
     assert "attempts < 3" in sql
     assert "program_slug = 'base'" in sql
+    # Desempate determinístico: aulas sincronizadas na mesma transação
+    # compartilham `created_at`, então `--limit N` precisa de mais critério.
+    assert "ORDER BY lessons.created_at, lessons.module_slug, lessons.video_slug" in sql
 
 
 @pytest.mark.asyncio

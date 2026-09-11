@@ -58,6 +58,12 @@ class BorderlessLessonsClient:
         return httpx.AsyncClient(transport=self._transport, timeout=_TIMEOUT_SECONDS)
 
     async def _get(self, path: str) -> dict:
+        if not settings.BORDERLESS_INTERNAL_SECRET or not settings.BORDERLESS_INTERNAL_SECRET.strip():
+            # Falha cedo em vez de mandar o header vazio: uma borderless-api
+            # que exige o segredo devolveria 401/403 de qualquer forma, mas
+            # aqui a causa fica clara sem depender do comportamento do lado
+            # de lá.
+            raise LessonCatalogUnavailableError("BORDERLESS_INTERNAL_SECRET não configurado")
         try:
             async with self._http() as client:
                 response = await client.get(

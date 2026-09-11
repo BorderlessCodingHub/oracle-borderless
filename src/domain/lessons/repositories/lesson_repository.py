@@ -69,7 +69,13 @@ class LessonRepository:
         `MENTOR_CLAIM_STALE_MINUTES` — processo que morreu entre o claim e o
         save final) volta ao lote. O teto de tentativas se aplica aos dois
         ramos: uma aula que já esgotou as tentativas fica de fora de qualquer
-        jeito."""
+        jeito.
+
+        A ordenação desempata por `module_slug`/`video_slug` além de
+        `created_at`: aulas sincronizadas na mesma transação de catálogo
+        compartilham o mesmo `created_at`, e sem um desempate determinístico
+        o `--limit N` do comando de ingestão pegaria um subconjunto diferente
+        a cada execução."""
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.MENTOR_CLAIM_STALE_MINUTES)
         result = await self.session.execute(
             select(LessonModel)
@@ -86,6 +92,6 @@ class LessonRepository:
                     ),
                 ),
             )
-            .order_by(LessonModel.created_at)
+            .order_by(LessonModel.created_at, LessonModel.module_slug, LessonModel.video_slug)
         )
         return [LessonMapper.to_entity(m) for m in result.scalars().all()]

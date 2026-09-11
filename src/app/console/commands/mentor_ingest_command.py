@@ -55,6 +55,22 @@ def _select_targets(
     return [], f"aula '{only}' já está {target.transcript_status} (use --force para reprocessar)"
 
 
+def _apply_limit(
+    targets: list[Lesson], limit: int | None, program: str
+) -> tuple[list[Lesson], str | None]:
+    """Recorta `targets` para `--limit N`. Pura, como `_select_targets`.
+
+    `--limit 0` precisa significar "não processe nada" — `if limit:` trataria
+    0 como falsy e o confundiria com "sem limite" (`--limit` não informado,
+    `limit is None`).
+    """
+    if limit is None:
+        return targets, None
+    if limit == 0:
+        return [], f"--limit 0: nenhuma aula será processada em {program}"
+    return targets[:limit], None
+
+
 class MentorIngestCommand(Command):
     signature = "mentor:ingest {program:str} {--lesson:str=} {--force:bool} {--limit:int=}"
     description = "Transcreve e indexa as aulas de um programa para o mentor de aula."
@@ -86,8 +102,9 @@ class MentorIngestCommand(Command):
                     print(message)
                     return
 
-                if limit:
-                    targets = targets[:limit]
+                targets, limit_note = _apply_limit(targets, limit, program)
+                if limit_note:
+                    print(limit_note)
 
                 action = IngestLessonAction(
                     embeddings=get_embeddings_client(),
