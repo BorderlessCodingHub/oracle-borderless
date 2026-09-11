@@ -10,6 +10,11 @@
 
 Dar ao mentorado do programa **Mentoria Base** um mentor de IA dentro da própria página da aula: um chat onde ele pergunta qualquer coisa sobre aquela aula ou sobre o conceito técnico que foi falado nela, e recebe resposta ancorada no que o professor disse, com o ponto do vídeo onde aquilo aparece.
 
+Toda pergunta feita ao mentor fica registrada no nosso banco. Pergunta que a
+aula não cobre vira backlog de conteúdo; volume de citação vira sinal de
+retenção. Esse dado é o ativo que o mentor gera (seção 9) — o valor não para
+no aluno atendido.
+
 O alvo imediato é um **MVP para apresentar ao time**. O mentor começa só no Base; a expansão para os outros programas vem depois da aprovação, e o desenho abaixo é escolhido para que essa expansão seja configuração, não reescrita.
 
 O cérebro é o **Oracle Borderless**, que já tem tudo que um RAG precisa em produção: `document_chunks` com pgvector e índice HNSW cosine, `EmbeddingsClient`, `ChunkingService`, grafo LangGraph com tool loop, streaming SSE de `StreamEvent`s e autenticação em ponte com a Platform. O que falta é a transcrição das aulas e um escopo de busca por aula.
@@ -25,6 +30,7 @@ O cérebro é o **Oracle Borderless**, que já tem tudo que um RAG precisa em pr
 | Abrangência do MVP | **Programa Base inteiro** — custo de transcrição na ordem de US$10, uma vez |
 | Escopo da tool | `lesson_id` **injetado pelo `config.configurable`**, não passado pelo modelo |
 | Persistência dos chunks | Tabelas próprias (`lessons`, `lesson_chunks`), **separadas de `documents`** |
+| Perguntas dos alunos | **Logadas no nosso banco**, estendendo `agent_traces` (ADR-0013). Pergunta sem cobertura vira backlog de conteúdo; volume de citação vira sinal de retenção |
 
 ### 2.1 Divergência consciente da conversa de origem
 
@@ -179,7 +185,8 @@ Por aula, em ordem:
 
 **Dependência nova:** `ffmpeg` disponível no ambiente do Oracle e na imagem Docker.
 
-**Configuração nova** (`settings`): `MENTOR_ENABLED`, `MENTOR_CHUNK_SIZE`, `MENTOR_TOP_K`, `MENTOR_MAX_ATTEMPTS`, `MENTOR_AUDIO_SEGMENT_SECONDS`, `MENTOR_TRANSCRIBE_MODEL`, `BORDERLESS_INTERNAL_SECRET`.
+**Configuração nova** (`settings`): `MENTOR_ENABLED`, `MENTOR_CHUNK_SIZE`, `MENTOR_TOP_K`, `MENTOR_MAX_ATTEMPTS`, `MENTOR_AUDIO_SEGMENT_SECONDS`, `MENTOR_TRANSCRIBE_MODEL`, `BORDERLESS_INTERNAL_SECRET`, `MENTOR_COVERAGE_NEAR`,
+`MENTOR_COVERAGE_FAR`.
 
 ## 8. Platform (Next.js) — aba Mentor
 
@@ -199,7 +206,90 @@ A aba entra na `TabsList` que já existe na página, atrás da flag `NEXT_PUBLIC
 
 **Citação com timestamp.** O `url` da citação carrega `?t=<segundos>`. Fazer o player pular para esse ponto depende do parâmetro de start do embed de Vimeo/Panda; a implementação verifica e, se não der em uma tarefa, a citação continua sendo um link para a aula — o timestamp permanece visível no texto da resposta de qualquer forma.
 
-## 9. Casos de borda
+## 9. O dado como ativo — perguntas, lacunas e retenção
+
+Toda pergunta de aluno, respondida ou não, fica **no nosso banco**. Isso não é
+subproduto do mentor: é a razão pela qual o mentor se paga. Uma pergunta que a
+aula não cobre é um item de backlog de conteúdo escrito pelo próprio aluno, e o
+volume de citação por aula é um sinal de engajamento que hoje não existe em
+lugar nenhum — progresso de vídeo diz que o aluno *assistiu*, não que ele
+*entendeu*.
+
+### 9.1 Onde mora
+
+Não há tabela nova. O Oracle já grava uma linha por turno em `agent_traces`, com
+`question`, `user_email`, `retrieval_best_distance`, `citations_count`,
+`outcome`, `intent` e latências — e o **ADR-0013** já fixou a regra: sinal novo
+entra no `TurnTraceDraft` **e** na tabela, nunca em log solto, sob `try/except`
+que nunca derruba o turno. O mentor obedece à mesma regra e acrescenta quatro
+colunas:
+
+```
+agent_traces  (+4 colunas, todas nullable — turno não-mentor não paga nada)
+  lesson_id           String(64)  NULL INDEX      ← qual aula
+  program_slug        String(255) NULL INDEX      ← já preparado para a expansão
+  lesson_coverage     String(16)  NULL INDEX      ← covered | partial | gap
+  question_embedding  Vector(EMBEDDING_DIM) NULL  ← sem índice ANN, de propósito
+```
+
+As colunas que já existem carregam o resto: `intent = "mentor"`,
+`retrieval_best_distance` é a distância do melhor trecho da aula,
+`citations_count` é o volume de citação do turno, `question` é a pergunta
+literal e `user_email` é quem perguntou.
+
+**Por que guardar o embedding da pergunta.** Ele **já foi calculado** para fazer
+a busca. Descartá-lo significa re-embedar o backlog inteiro no dia em que
+quisermos agrupar "o que é autorregressão?" com "não entendi autoregressivo" —
+que é exatamente o que transforma uma lista de perguntas soltas em pauta de
+conteúdo. Uma coluna nullable é o preço de manter essa porta aberta. Sem índice
+HNSW: agrupar alguns milhares de perguntas é varredura, não busca vetorial, e um
+índice ANN sobre coluna majoritariamente nula só custaria manutenção.
+
+### 9.2 O que é "pergunta não respondida"
+
+O mentor não recusa (seção 3, passo 5), então "não respondida" **não** pode ser
+lida do desfecho do turno como no oráculo. Aqui ela é medida, não inferida:
+
+| `lesson_coverage` | Condição | Leitura de produto |
+| --- | --- | --- |
+| `covered` | `retrieval_best_distance ≤ MENTOR_COVERAGE_NEAR` | A aula respondeu |
+| `partial` | entre os dois limiares | A aula tangencia; candidata a aprofundamento |
+| `gap` | `> MENTOR_COVERAGE_FAR`, ou nenhum chunk | **A aula não cobre — vira backlog** |
+
+Os dois limiares **não bloqueiam nada**: são rótulos aplicados depois da
+resposta. É a diferença deliberada em relação ao `RAG_MAX_DISTANCE` do oráculo,
+que corta contexto. Aqui o aluno é respondido de qualquer jeito e nós ficamos
+sabendo que a aula tinha um buraco. Calibrar esses dois números é tarefa da fase
+4, com dados reais, e é para isso que `retrieval_best_distance` é gravado como
+número e não só como rótulo — reclassificar o histórico é um `UPDATE`, não uma
+re-execução.
+
+### 9.3 As duas leituras
+
+**Backlog de conteúdo.** Perguntas com `lesson_coverage = 'gap'` agrupadas por
+aula e ordenadas por frequência. Cada linha é "N alunos perguntaram isto nesta
+aula e a aula não responde" — pauta de gravação vinda de quem assiste, não de
+quem produz.
+
+**Sinal de retenção.** Por aula e por semana: alunos distintos que perguntaram,
+turnos por aluno, citações por turno e o próprio `% gap`. A leitura que interessa
+é a combinação: muitos turnos com **poucas** citações é aula confusa ou fora do
+assunto; muitos turnos com **muitas** citações é aula sendo minerada de verdade.
+
+Ambas vivem na página `/ops` que já existe no Oracle, atrás do allowlist
+`ADMIN_EMAILS` — uma aba "Mentor" ao lado das que já estão lá, não uma
+ferramenta nova.
+
+### 9.4 Privacidade
+
+Pergunta de aluno é conteúdo do aluno, e o `user_email` fica junto porque sem ele
+não há "alunos distintos". O dado não sai do nosso Postgres, é visível só pelo
+`/ops` (allowlist de admin, 404 para os demais) e **nunca** entra na base de
+conhecimento nem em contexto de outro aluno. Se o time quiser o backlog sem
+identificação, a agregação por aula já é anônima por construção — é só não expor
+a coluna.
+
+## 10. Casos de borda
 
 | Caso | Comportamento |
 | --- | --- |
@@ -212,29 +302,40 @@ A aba entra na `TabsList` que já existe na página, atrás da flag `NEXT_PUBLIC
 | `borderless-api` fora do ar no entitlement | Fail-closed: 403, sem chamar modelo |
 | Aluno troca de aula com um turno em voo | `useOracleTurn` já tem generation guard e `AbortController`; a aba desmonta e aborta |
 
-## 10. Testes
+## 11. Testes
 
-**Oracle** — unitários: `TranscriptChunkingService` (agrupamento, propagação de start/end, segmento maior que o limite), `route_entry` com `mode="mentor"`, `search_lesson` (escopo por `lesson_id`, formato `<<TOOL_CONTENT>>`, falha não derruba), `CheckLessonAccessAction` (fail-closed), máquina de estados do comando de ingestão. Integração: migration do pgvector, `search_similar` com escopo, idempotência por `content_hash`. Evals: `evals/cases/mentor_set.json` no harness existente.
+**Oracle** — unitários: `TranscriptChunkingService` (agrupamento, propagação de start/end, segmento maior que o limite), `route_entry` com `mode="mentor"`, `search_lesson` (escopo por `lesson_id`, formato `<<TOOL_CONTENT>>`, falha não derruba), `CheckLessonAccessAction` (fail-closed), máquina de estados do comando de ingestão. Integração: migration do pgvector, `search_similar` com escopo, idempotência por `content_hash`. Trace: `lesson_coverage` classificado nos três limiares (incluindo aula sem chunk),
+e a garantia do ADR-0013 de que falha ao gravar trace **não derruba o turno**.
+Evals: `evals/cases/mentor_set.json` no harness existente.
 
 **borderless-api** — unitários das duas rotas internas (segredo ausente/errado → 401) e de `getMediaUrl` nos dois adapters.
 
 **Platform** — Playwright reusando `e2e/fixtures/oracle-fake-server.ts`, que já existe com 11 specs de oracle: cenário de aula pronta, de aula sem transcrição e de aula bloqueada.
 
-## 11. Ordem de entrega
+## 12. Ordem de entrega
 
 | Fase | O quê | Demonstrável como |
 | --- | --- | --- |
 | 1 | Rotas internas na API + domain `lessons` + `mentor:ingest` no Oracle | `mentor:ingest --lesson <slug>` transcreve e indexa uma aula, no terminal |
-| 2 | `mode="mentor"` + `search_lesson` + prompt + entitlement | `curl` no `/conversations/ask` responde com citação e timestamp |
+| 2 | `mode="mentor"` + `search_lesson` + prompt + entitlement + colunas de trace | `curl` no `/conversations/ask` responde com citação e timestamp, e a linha em `agent_traces` sai com `lesson_coverage` |
 | 3 | Aba Mentor na Platform + endpoint de prontidão | a demo no browser |
 | 4 | Lote completo do Base | mentor ativo em todas as aulas do programa |
+| 5 | Aba Mentor no `/ops`: backlog de lacunas + retenção por aula | a tela que vende ao time |
 
-## 12. Fora de escopo
+A fase 5 é a que muda a conversa com o time — sai de "fizemos um chat" para
+"os alunos já pediram estes assuntos que o Base não cobre". Ressalva honesta:
+na data da apresentação ela mostra o volume que existir, e o backlog só fica
+denso depois de alunos reais usarem. Se a apresentação vier antes disso, a
+tela deve ser mostrada com dado de uso próprio, dito como tal.
+
+## 13. Fora de escopo
 
 - Outros programas além do Base — expansão depois da aprovação do time
 - Mentor que enxerga o programa inteiro em vez de uma aula
 - Re-transcrição automática quando o vídeo é substituído no provider
 - Restaurar o histórico da conversa ao reabrir a aula (as mensagens já ficam persistidas; falta só a leitura)
+- Clusterização semântica do backlog de lacunas — o `question_embedding` já fica
+  gravado, então é leitura nova sobre dado existente, não migração
 - Memória do mentor entre aulas ou perfil de dificuldade do aluno
 - Voz (o aluno fala, o mentor responde falando)
 - Diarização — transcrição é do professor, não há por que separar falantes
