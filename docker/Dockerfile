@@ -4,6 +4,10 @@ FROM python:3.13-slim
 # uv para gerenciar dependências.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+# ffmpeg/ffprobe: extração e fatiamento de áudio das aulas (Mentor).
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Instala dependências primeiro (cache de camadas).
