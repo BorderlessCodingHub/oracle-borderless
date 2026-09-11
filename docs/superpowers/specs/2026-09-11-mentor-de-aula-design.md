@@ -170,13 +170,13 @@ mentor:ingest --program base [--lesson <slug>] [--force] [--limit N]
 
 Por aula, em ordem:
 
-1. **Claim** — `pending|failed → transcribing`, `attempts += 1`, commit imediato. Duas execuções concorrentes não transcrevem a mesma aula duas vezes.
+1. **Claim** — `pending|failed → transcribing`, `attempts += 1`, **commit imediato, antes de qualquer trabalho** (a própria action commita o claim; o comando commita o resultado por aula). É o que torna o claim visível a outra execução e ao endpoint de prontidão, e o que faz a recuperação de claim obsoleto funcionar. Duas execuções concorrentes não transcrevem a mesma aula duas vezes.
 2. **Mídia** — `GET /api/internal/videos/:id/media`, download para arquivo temporário.
 3. **Áudio** — `ffmpeg` extrai mono 16 kHz.
 4. **Fatiamento** — blocos de ~10 min. **Não é capricho:** a API de transcrição tem limite de 25 MB por arquivo e uma aula de 1 h passa disso; sem fatiar, o pipeline quebra exatamente nas aulas mais longas.
-5. **Transcrição** — por bloco, `whisper-1` com `response_format="verbose_json"`, `language="pt"` e `prompt` de glossário montado a partir do título e da descrição da aula, para segurar os termos técnicos. Os timestamps de cada bloco recebem o offset do bloco antes de concatenar.
+5. **Transcrição** — por bloco, `whisper-1` com `response_format="verbose_json"`, `language="pt"` e `prompt` de glossário montado a partir do título da aula mais uma lista fixa de termos técnicos do programa (a rota interna de catálogo não expõe descrição), para segurar os termos técnicos. O áudio sai a 64 kbps mono: é o que deixa uma janela de 600 s em ~4,8 MB, abaixo do limite. Os timestamps de cada bloco recebem o offset do bloco antes de concatenar.
 6. **Hash** — `sha256` do texto final. Igual ao `content_hash` gravado e sem `--force`: pula chunking e embedding.
-7. **Chunk + embed** — `TranscriptChunkingService` → `EmbeddingsClient.embed_documents` → `replace_for_lesson` em transação.
+7. **Chunk + embed** — `TranscriptChunkingService` → `EmbeddingsClient.embed` → `replace_for_lesson` em transação.
 8. **`ready`**, com `transcribed_at` e `failure_reason = NULL`.
 
 **Tolerância a falha.** Cada aula roda no seu próprio `try/except`: falha grava `failure_reason`, marca `failed` e **o lote continua** — inclusive quando é a própria gravação da falha que falha (o registro é best-effort; o lote nunca morre por causa dele). A re-execução pega `pending` e `failed` com `attempts < MENTOR_MAX_ATTEMPTS` (default 3), **e também claims obsoletos**: aula em `transcribing` cujo `updated_at` tem mais de `MENTOR_CLAIM_STALE_MINUTES` (default 120) é tratada como abandonada por um processo que morreu (OOM, restart) e volta ao lote — sem isso ela ficaria presa para sempre. O relatório final lista transcritas, puladas por hash, e falhas com motivo.
@@ -185,7 +185,7 @@ Por aula, em ordem:
 
 **Dependência nova:** `ffmpeg` disponível no ambiente do Oracle e na imagem Docker.
 
-**Configuração nova** (`settings`): `MENTOR_ENABLED`, `MENTOR_CHUNK_SIZE`, `MENTOR_TOP_K`, `MENTOR_MAX_ATTEMPTS`, `MENTOR_AUDIO_SEGMENT_SECONDS`, `MENTOR_TRANSCRIBE_MODEL`, `BORDERLESS_INTERNAL_SECRET`, `MENTOR_COVERAGE_NEAR`,
+**Configuração nova** (`settings`): `MENTOR_ENABLED`, `MENTOR_CHUNK_SIZE`, `MENTOR_TOP_K`, `MENTOR_MAX_ATTEMPTS`, `MENTOR_AUDIO_SEGMENT_SECONDS`, `MENTOR_TRANSCRIBE_MODEL`, `MENTOR_TRANSCRIBE_LANGUAGE`, `MENTOR_FFMPEG_BIN`, `MENTOR_FFPROBE_BIN`, `MENTOR_CLAIM_STALE_MINUTES`, `BORDERLESS_INTERNAL_SECRET`, `MENTOR_COVERAGE_NEAR`,
 `MENTOR_COVERAGE_FAR`.
 
 ## 8. Platform (Next.js) — aba Mentor
