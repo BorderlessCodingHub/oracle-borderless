@@ -1,0 +1,187 @@
+"""Testes unitários dos repositórios de aula com uma sessão fake — sem banco.
+
+Cobrem o que dá para verificar sem PostgreSQL: o SQL que `list_pending` monta,
+que `upsert_from_catalog` não pisa no estado de transcrição de um model já
+existente, e que `replace_for_lesson` manda o DELETE antes dos inserts. A
+cobertura de ponta a ponta (constraints, pgvector, HNSW) fica para
+`tests/integration/domain/lessons/test_lesson_repository.py`.
+"""
+
+from uuid import uuid4
+
+import pytest
+
+from src.domain.lessons.entities.lesson import Lesson
+from src.domain.lessons.entities.lesson_chunk import LessonChunk
+from src.domain.lessons.enums import TranscriptStatus
+from src.domain.lessons.models.lesson import LessonModel
+from src.domain.lessons.repositories.lesson_chunk_repository import LessonChunkRepository
+from src.domain.lessons.repositories.lesson_repository import LessonRepository
+from src.support.core.context import CurrentAsyncSessionContext
+
+
+class _Scalars:
+    """Mimetiza o pedaço de `Result` usado por `.scalars().all()`."""
+
+    def __init__(self, rows: list) -> None:
+        self._rows = rows
+
+    def all(self) -> list:
+        return self._rows
+
+
+class FakeResult:
+    """Mimetiza só o que os repositórios chamam num `Result` do SQLAlchemy."""
+
+    def __init__(self, *, scalar=None, rows: list | None = None) -> None:
+        self._scalar = scalar
+        self._rows = rows if rows is not None else []
+
+    def scalar_one_or_none(self):
+        return self._scalar
+
+    def scalar_one(self):
+        return self._scalar
+
+    def scalars(self) -> _Scalars:
+        return _Scalars(self._rows)
+
+
+class FakeSession:
+    """Sessão fake: grava o que recebeu, sem tocar em banco nenhum.
+
+    `execute_results` é consumida em ordem — cada chamada a `execute()` some
+    o próximo resultado da fila (ou devolve um `FakeResult()` vazio se a fila
+    acabou).
+    """
+
+    def __init__(self, execute_results: list[FakeResult] | None = None) -> None:
+        self.executed_statements: list = []
+        self.added: list = []
+        self.flush_calls = 0
+        self.refreshed: list = []
+        self._execute_results = list(execute_results or [])
+
+    async def execute(self, stmt):
+        self.executed_statements.append(stmt)
+        if self._execute_results:
+            return self._execute_results.pop(0)
+        return FakeResult()
+
+    def add(self, model) -> None:
+        self.added.append(model)
+
+    async def flush(self) -> None:
+        self.flush_calls += 1
+
+    async def refresh(self, model) -> None:
+        self.refreshed.append(model)
+
+
+@pytest.fixture
+def fake_session():
+    session = FakeSession()
+    CurrentAsyncSessionContext.set(session)
+    try:
+        yield session
+    finally:
+        CurrentAsyncSessionContext.clear()
+
+
+def _compiled(stmt) -> str:
+    return str(stmt.compile(compile_kwargs={"literal_binds": True}))
+
+
+@pytest.mark.asyncio
+async def test_list_pending_filters_by_status_attempts_and_program(fake_session):
+    repo = LessonRepository()
+
+    await repo.list_pending("base", max_attempts=3)
+
+    assert len(fake_session.executed_statements) == 1
+    sql = _compiled(fake_session.executed_statements[0])
+    assert "transcript_status IN ('pending', 'failed')" in sql
+    assert "attempts < 3" in sql
+    assert "program_slug = 'base'" in sql
+
+
+@pytest.mark.asyncio
+async def test_upsert_from_catalog_updates_only_catalog_fields_on_existing_model():
+    existing = LessonModel(
+        uuid=uuid4(),
+        platform_video_id="v1",
+        program_slug="base",
+        module_slug="modulo-1",
+        video_slug="aula-1",
+        title="Tokens",
+        duration_seconds=100,
+        provider="PANDA_VIDEO",
+        provider_ref="ref-1",
+        transcript_text="conteúdo já transcrito",
+        transcript_status="ready",
+        content_hash="h",
+        attempts=0,
+        failure_reason=None,
+    )
+    session = FakeSession(execute_results=[FakeResult(scalar=existing)])
+    CurrentAsyncSessionContext.set(session)
+    try:
+        repo = LessonRepository()
+        incoming = Lesson(
+            uuid=uuid4(),
+            platform_video_id="v1",
+            program_slug="base",
+            module_slug="modulo-1",
+            video_slug="aula-1",
+            title="Tokens (revisado)",
+            provider="PANDA_VIDEO",
+            provider_ref="ref-1",
+            transcript_status=TranscriptStatus.PENDING,
+        )
+
+        result = await repo.upsert_from_catalog(incoming)
+    finally:
+        CurrentAsyncSessionContext.clear()
+
+    assert existing.title == "Tokens (revisado)"
+    # estado de transcrição não pode ser tocado pelo upsert de catálogo
+    assert existing.transcript_status == "ready"
+    assert existing.content_hash == "h"
+    assert result.title == "Tokens (revisado)"
+    assert result.transcript_status == TranscriptStatus.READY
+    assert result.content_hash == "h"
+    # não deve ter criado um model novo — só atualizou o existente
+    assert session.added == []
+    assert session.flush_calls == 1
+    assert session.refreshed == [existing]
+
+
+@pytest.mark.asyncio
+async def test_replace_for_lesson_deletes_before_adding_new_models(fake_session):
+    lesson_id = uuid4()
+    repo = LessonChunkRepository()
+
+    chunks = [
+        LessonChunk(
+            uuid=uuid4(),
+            lesson_id=lesson_id,
+            ordinal=0,
+            content="trecho 0",
+            start_seconds=0.0,
+            end_seconds=9.0,
+            embedding=[0.0] * 1536,
+        )
+    ]
+
+    await repo.replace_for_lesson(lesson_id, chunks)
+
+    # o DELETE precisa ser a primeira instrução recebida pela sessão
+    assert len(fake_session.executed_statements) == 1
+    delete_sql = _compiled(fake_session.executed_statements[0])
+    assert "DELETE FROM lesson_chunks" in delete_sql
+    assert str(lesson_id).replace("-", "") in delete_sql
+
+    # e só depois do DELETE os novos models entram via add()
+    assert len(fake_session.added) == 1
+    assert fake_session.added[0].lesson_id == lesson_id
+    assert fake_session.flush_calls == 1
