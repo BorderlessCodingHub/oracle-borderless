@@ -12,13 +12,14 @@ from src.support.agent.tools import NAVIGATE_TOOL_NAME
 
 
 def route_entry(state: TurnState) -> Literal["answer", "gate"]:
-    """Knowledge pré-semeado pula gate e retrieval; `mode == "navigate"` também
-    pula o gate — a barra já fixou a intenção (spec §5.3).
+    """Knowledge pré-semeado pula gate e retrieval; `mode == "navigate"` e
+    `mode == "mentor"` também pulam o gate — a barra já fixou a intenção
+    (spec §5.3), e o mentor não tem recusa (spec §3).
 
     Existe para o harness de eval: nos casos `adversarial` o contexto envenenado
     é injetado à mão, e fazer o gate classificá-lo mediria a coisa errada.
     """
-    if state.get("preset_knowledge") or state.get("mode") == "navigate":
+    if state.get("preset_knowledge") or state.get("mode") in ("navigate", "mentor"):
         return "answer"
     return "gate"
 

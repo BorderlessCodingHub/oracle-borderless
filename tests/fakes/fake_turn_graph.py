@@ -136,6 +136,7 @@ class FakeTurnGraph:
         self.received_mode = None
         self.received_locale = None
         self.received_extra_config = None
+        self.received_lesson_id = None
         self.last_run: FakeTurnRun | None = None
 
     def with_config(self, **kw) -> "FakeTurnGraph":
@@ -157,6 +158,7 @@ class FakeTurnGraph:
         mode: str = "chat",
         locale: str = "pt-BR",
         extra_config: dict | None = None,
+        lesson_id: str | None = None,
     ) -> FakeTurnRun:
         self.question = question
         self.knowledge = knowledge
@@ -166,6 +168,7 @@ class FakeTurnGraph:
         self.received_mode = mode
         self.received_locale = locale
         self.received_extra_config = extra_config
+        self.received_lesson_id = lesson_id
         if signals is not None:
             signals.outcome = self._outcome
             signals.gate_retrieve = self._retrieve
@@ -227,7 +230,7 @@ class _FailingGraph:
         self.run_id = kw.get("run_id") or self.run_id
         return self
 
-    def run(self, question, history, deps=None, signals=None, knowledge=None, mode="chat", locale="pt-BR", extra_config=None):
+    def run(self, question, history, deps=None, signals=None, knowledge=None, mode="chat", locale="pt-BR", extra_config=None, lesson_id=None):
         if signals is not None:
             if self.where == "stream":
                 signals.outcome = "answer"

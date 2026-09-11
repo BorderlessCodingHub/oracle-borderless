@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from src.support.agent.graph.state import TurnState
 from src.support.agent.models import build_chat_model, build_small_model
 from src.support.agent.prompts import build_system_prompt
-from src.support.agent.tools import format_knowledge, model_bound_tools
+from src.support.agent.tools import build_mentor_tools, format_knowledge, model_bound_tools
 from src.support.core.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -174,11 +174,21 @@ def _navigation_enabled(config) -> bool:
 def _answer_messages(state: TurnState, config) -> list:
     """Histórico, contexto embrulhado, pergunta — e, depois dela, perfil do
     usuário (quando presente na config), idioma da resposta e, para intent
-    navigate, o marcador que afasta a RESPOSTA PADRÃO (ver bloco NAVEGAÇÃO)."""
+    navigate, o marcador que afasta a RESPOSTA PADRÃO (ver bloco NAVEGAÇÃO).
+
+    No modo mentor o bloco de contexto da base **não** entra: o contexto chega
+    pela tool `search_lesson`, e um bloco vazio de "contexto recuperado" só
+    confundiria o modelo."""
+    mode = state.get("mode", "chat")
     parts = [f"{m.role}: {m.content}" for m in state.get("history", [])]
-    parts.append("Contexto recuperado da base de conhecimento:")
-    parts.append(format_knowledge(state.get("knowledge", [])))
+
+    if mode != "mentor":
+        parts.append("Contexto recuperado da base de conhecimento:")
+        parts.append(format_knowledge(state.get("knowledge", [])))
+
     parts.append(f"Pergunta do usuário: {state['question']}")
+    if mode == "mentor" and state.get("lesson_id"):
+        parts.append(f"Aula em foco (id da plataforma): {state['lesson_id']}")
 
     profile = config.get("configurable", {}).get("user_profile")
     if profile:
@@ -192,18 +202,20 @@ def _answer_messages(state: TurnState, config) -> list:
     if state.get("intent") == "navigate":
         parts.append("Intenção: navegação (não use a RESPOSTA PADRÃO)")
 
-    system = build_system_prompt(_navigation_enabled(config))
+    system = build_system_prompt(_navigation_enabled(config), mode=mode)
     return [SystemMessage(content=system), HumanMessage(content="\n\n".join(parts))]
 
 
-def _answer_model(config, enable_tools: bool = True):
+def _answer_model(config, enable_tools: bool = True, mode: str = "chat"):
     cfg = config.get("configurable", {})
     injected = cfg.get("answer_model")
     model = injected or build_chat_model()
     if not enable_tools:
         return model
-    # search_lesson fica fora do bind aqui — Task 3 liga build_mentor_tools()
-    # ao modelo quando mode == "mentor" (ver model_bound_tools em tools.py).
+    if mode == "mentor":
+        # O mentor só vê `search_lesson` — nada de web_search, notion ou
+        # navegação (spec §2.1): o escopo da busca é a aula, não a base geral.
+        return model.bind_tools(build_mentor_tools())
     return model.bind_tools(
         model_bound_tools(_navigation_enabled(config), cfg.get("navigation_catalog_text"))
     )
@@ -239,7 +251,7 @@ async def answer_node(state: TurnState, config) -> dict:
 
     existing_messages = state.get("messages")
     messages = existing_messages or _answer_messages(state, config)
-    model = _answer_model(config, enable_tools=cfg.get("enable_tools", True))
+    model = _answer_model(config, enable_tools=cfg.get("enable_tools", True), mode=state.get("mode", "chat"))
     message = await model.ainvoke(messages)
 
     _fill_usage(signals, message)

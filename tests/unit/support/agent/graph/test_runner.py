@@ -200,6 +200,51 @@ def test_initial_state_navigate_mode_presets_intent_and_skips_the_gate():
     assert state["navigation"] is None
 
 
+def test_initial_state_carries_the_lesson_id_in_mentor_mode():
+    """C1: `lesson_id` (id do vídeo na Platform) precisa chegar ao state para
+    que o prompt do mentor (nodes.py::_answer_messages) o cite."""
+    state = _initial_state("q", [], None, mode="mentor", lesson_id="v1")
+
+    assert state["lesson_id"] == "v1"
+
+
+def test_initial_state_omits_lesson_id_when_absent():
+    state = _initial_state("q", [], None)
+
+    assert "lesson_id" not in state
+
+
+@pytest.mark.asyncio
+async def test_run_passes_the_lesson_id_through_to_the_initial_state():
+    """C1, ponta a ponta: `TurnGraphRunner.run(..., lesson_id=...)` precisa
+    chegar ao state inicial que o grafo recebe — não só a `_initial_state`
+    isoladamente."""
+
+    class _SpyGraph:
+        def __init__(self) -> None:
+            self.state = None
+
+        def astream_events(self, state, config, **kw):
+            self.state = state
+
+            async def _empty():
+                return
+                yield  # pragma: no cover
+
+            return _empty()
+
+    spy = _SpyGraph()
+    runner = TurnGraphRunner(graph=spy)
+
+    runner.run(
+        "q", [], _deps(_RecordingSearch([])), TurnSignals(),
+        mode="mentor", lesson_id="v1", extra_config=_models(),
+    )
+
+    assert spy.state["lesson_id"] == "v1"
+    assert spy.state["mode"] == "mentor"
+
+
 # --- fases ------------------------------------------------------------------
 
 

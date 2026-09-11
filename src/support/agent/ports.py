@@ -241,6 +241,7 @@ class TurnGraphPort(Protocol):
         mode: str = "chat",
         locale: str = "pt-BR",
         extra_config: dict | None = None,
+        lesson_id: str | None = None,
     ) -> TurnRun:
         """Monta o turno. Síncrono: só constrói o gerador do grafo e o emitter.
 
@@ -249,6 +250,11 @@ class TurnGraphPort(Protocol):
 
         `mode`/`locale` vêm do input do cliente (a barra manda "navigate", o
         chat manda "chat") e entram no state inicial do grafo.
+
+        `lesson_id` (mode="mentor"): id do vídeo na Platform, para o
+        prompt/trace — entra no state como `state["lesson_id"]`. O id interno
+        da aula (`lessons.uuid`) que a tool `search_lesson` usa viaja à parte,
+        em `extra_config["lesson_id"]`.
 
         `extra_config` injeta entradas no `configurable` do grafo — existe para
         os testes passarem modelos fakes sem monkeypatch.

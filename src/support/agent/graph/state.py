@@ -22,6 +22,8 @@ class TurnState(TypedDict, total=False):
     locale: str
     intent: str
     navigation: dict | None
+    # mode="mentor": id do vídeo da Platform cuja aula está sendo estudada.
+    lesson_id: str
 
     # tool loop — o reducer add_messages acumula as idas e voltas
     messages: Annotated[list[AnyMessage], add_messages]

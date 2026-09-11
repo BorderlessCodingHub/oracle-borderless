@@ -568,6 +568,32 @@ async def test_with_navigation_enabled_the_model_sees_navigate_platform():
     assert "navigate_platform" in model.bound
 
 
+# --- C4b: mode="mentor" liga só search_lesson ao modelo -------------------
+
+
+@pytest.mark.asyncio
+async def test_mentor_mode_binds_only_search_lesson():
+    model = _ToolRecordingChatModel()
+    config = _answer_config(TurnSignals(), model=model)
+
+    await answer_node({"question": "q", "history": [], "knowledge": [], "mode": "mentor"}, config)
+
+    assert set(model.bound) == {"search_lesson"}
+
+
+@pytest.mark.asyncio
+async def test_chat_mode_keeps_the_oracle_tools_unchanged():
+    """Mesma asserção de `test_without_navigation_enabled_the_model_never_sees_navigate_platform`,
+    agora explícita sobre `mode`: passar por `_answer_model(mode=...)` não pode
+    mudar o conjunto de tools do chat comum."""
+    model = _ToolRecordingChatModel()
+    config = _answer_config(TurnSignals(), model=model)
+
+    await answer_node({"question": "q", "history": [], "knowledge": [], "mode": "chat"}, config)
+
+    assert set(model.bound) == {"web_search", "fetch_notion_page"}
+
+
 def test_the_system_message_carries_the_navigation_block_only_when_enabled():
     from src.support.agent.graph.nodes import _answer_messages
 

@@ -40,6 +40,18 @@ def test_navigate_mode_skips_the_gate():
     assert route_entry({"mode": "navigate", "intent": "navigate"}) == "answer"
 
 
+def test_mentor_mode_skips_the_gate():
+    from src.support.agent.graph.edges import route_entry
+
+    assert route_entry({"mode": "mentor"}) == "answer"
+
+
+def test_chat_mode_still_reaches_the_gate():
+    from src.support.agent.graph.edges import route_entry
+
+    assert route_entry({"mode": "chat"}) == "gate"
+
+
 # --- should_retrieve -----------------------------------------------------
 
 def test_a_substantive_question_goes_to_retrieval():
