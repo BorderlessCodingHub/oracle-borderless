@@ -47,6 +47,9 @@ class FakeResult:
     def scalars(self) -> _Scalars:
         return _Scalars(self._rows)
 
+    def all(self) -> list:
+        return self._rows
+
 
 class FakeSession:
     """Sessão fake: grava o que recebeu, sem tocar em banco nenhum.
@@ -223,3 +226,60 @@ async def test_replace_for_lesson_deletes_before_adding_new_models(fake_session)
     assert len(fake_session.added) == 1
     assert fake_session.added[0].lesson_id == lesson_id
     assert fake_session.flush_calls == 1
+
+
+class _Row:
+    """Mimetiza uma linha nomeada devolvida por `select(...)` com colunas soltas."""
+
+    def __init__(self, **kwargs) -> None:
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+
+@pytest.mark.asyncio
+async def test_search_similar_scopes_to_the_lesson_excludes_null_embeddings_and_has_no_threshold(
+    fake_session,
+):
+    lesson_id = uuid4()
+    repo = LessonChunkRepository()
+
+    await repo.search_similar(lesson_id, [0.0] * 1536)
+
+    assert len(fake_session.executed_statements) == 1
+    sql = _compiled(fake_session.executed_statements[0])
+    assert f"lesson_chunks.lesson_id = '{str(lesson_id).replace('-', '')}'" in sql
+    # nullable: distância contra embedding nulo é indefinida (ruling C3)
+    assert "lesson_chunks.embedding IS NOT NULL" in sql
+    assert "ORDER BY lesson_chunks.embedding <=>" in sql
+    # default top_k vem de settings.MENTOR_TOP_K, sem corte por distância
+    assert "LIMIT 6" in sql
+    assert "0.55" not in sql
+    assert "RAG_MAX_DISTANCE" not in sql
+
+
+@pytest.mark.asyncio
+async def test_search_similar_maps_each_row_to_a_lesson_citation_with_the_timestamp():
+    row = _Row(
+        content="sobre autorregressão",
+        start_seconds=750.4,
+        title="Aula v-cite",
+        program_slug="base",
+        module_slug="m1",
+        video_slug="aula-v-cite",
+        distance=0.12,
+    )
+    session = FakeSession(execute_results=[FakeResult(rows=[row])])
+    CurrentAsyncSessionContext.set(session)
+    try:
+        repo = LessonChunkRepository()
+        rows = await repo.search_similar(uuid4(), [0.0] * 1536)
+    finally:
+        CurrentAsyncSessionContext.clear()
+
+    assert len(rows) == 1
+    snippet, distance = rows[0]
+    assert snippet.content == "sobre autorregressão"
+    assert snippet.citation.source_type == "lesson"
+    assert snippet.citation.url == "/programs/base/m1/aula-v-cite?t=750"
+    assert snippet.citation.title == "Aula v-cite"
+    assert distance == 0.12
