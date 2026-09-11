@@ -19,14 +19,22 @@ def test_segments_under_the_limit_become_a_single_chunk():
     assert chunks == [("olá pessoal hoje é sobre tokens", 0.0, 5.0)]
 
 
-def test_packing_breaks_at_the_limit_and_carries_the_right_window():
+def test_packing_fills_exactly_to_the_limit_then_breaks():
+    # 15 + 1 (espaço) + 4 = 20 == size: cabe (limite inclusivo); o próximo estoura.
     service = TranscriptChunkingService(size=20)
     chunks = service.split(
-        [seg("a" * 15, 0.0, 1.0), seg("b" * 15, 1.0, 2.0), seg("c" * 5, 2.0, 3.0)]
+        [seg("a" * 15, 0.0, 1.0), seg("b" * 4, 1.0, 2.0), seg("c" * 10, 2.0, 3.0)]
     )
-    assert [c[0] for c in chunks] == ["a" * 15, "b" * 15 + " " + "c" * 5]
-    assert chunks[0][1] == 0.0 and chunks[0][2] == 1.0
-    assert chunks[1][1] == 1.0 and chunks[1][2] == 3.0
+    assert [c[0] for c in chunks] == ["a" * 15 + " " + "b" * 4, "c" * 10]
+    assert chunks[0][1] == 0.0 and chunks[0][2] == 2.0
+    assert chunks[1][1] == 2.0 and chunks[1][2] == 3.0
+
+
+def test_one_char_over_the_limit_breaks_the_chunk():
+    # 15 + 1 + 5 = 21 > 20: NÃO cabe. "Até size" é teto duro, sem tolerância.
+    service = TranscriptChunkingService(size=20)
+    chunks = service.split([seg("a" * 15, 0.0, 1.0), seg("b" * 5, 1.0, 2.0)])
+    assert [c[0] for c in chunks] == ["a" * 15, "b" * 5]
 
 
 def test_a_segment_longer_than_the_limit_becomes_its_own_chunk_unsplit():

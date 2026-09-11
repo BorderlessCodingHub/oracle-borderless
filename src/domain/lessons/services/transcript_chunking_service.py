@@ -41,13 +41,8 @@ class TranscriptChunkingService:
                 continue
             candidate = len(" ".join(texts)) + 1 + len(text)
             if candidate > self.size:
-                # Allow exceeding size by a small margin (10%) to avoid fragmenting small segments
-                if candidate <= self.size * 1.1:
-                    texts.append(text)
-                    end = segment.end
-                else:
-                    chunks.append((" ".join(texts), start, end))
-                    texts, start, end = [text], segment.start, segment.end
+                chunks.append((" ".join(texts), start, end))
+                texts, start, end = [text], segment.start, segment.end
             else:
                 texts.append(text)
                 end = segment.end
