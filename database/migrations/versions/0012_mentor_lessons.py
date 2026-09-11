@@ -9,12 +9,12 @@ import sqlalchemy as sa
 from alembic import op
 from pgvector.sqlalchemy import Vector
 
-from src.support.core.settings import settings
-
 revision = "0012_mentor_lessons"
 down_revision = "0011_navigation_persistence"
 branch_labels = None
 depends_on = None
+
+EMBEDDING_DIM = 1536  # settings.EMBEDDING_DIM (snapshot na migration)
 
 
 def upgrade() -> None:
@@ -50,7 +50,7 @@ def upgrade() -> None:
         sa.Column("content", sa.Text(), nullable=False),
         sa.Column("start_seconds", sa.Float(), nullable=False),
         sa.Column("end_seconds", sa.Float(), nullable=False),
-        sa.Column("embedding", Vector(settings.EMBEDDING_DIM), nullable=True),
+        sa.Column("embedding", Vector(EMBEDDING_DIM), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
