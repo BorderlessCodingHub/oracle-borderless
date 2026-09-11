@@ -126,6 +126,8 @@ class Settings(BaseSettings):
     MENTOR_CHUNK_SIZE: int = 800
     MENTOR_TOP_K: int = 6
     MENTOR_MAX_ATTEMPTS: int = 3
+    # Claim mais antigo que isso é de processo que morreu — volta pro lote.
+    MENTOR_CLAIM_STALE_MINUTES: int = 120
     # A API de transcrição limita o arquivo a 25 MB; uma aula de 1h passa disso.
     MENTOR_AUDIO_SEGMENT_SECONDS: int = 600
     MENTOR_TRANSCRIBE_MODEL: str = "whisper-1"

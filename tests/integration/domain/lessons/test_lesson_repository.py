@@ -60,6 +60,12 @@ async def test_list_pending_returns_pending_and_failed_under_the_attempt_ceiling
     ready.transcript_status = TranscriptStatus.READY
     await repo.save(ready)
 
+    # claim recente (updated_at fresco) — outra execução está trabalhando nela agora
+    transcribing_fresh = await repo.upsert_from_catalog(_catalog_lesson("v-transcribing-fresh"))
+    transcribing_fresh.transcript_status = TranscriptStatus.TRANSCRIBING
+    transcribing_fresh.attempts = 1
+    await repo.save(transcribing_fresh)
+
     ids = {l.platform_video_id for l in await repo.list_pending("base", max_attempts=3)}
     assert ids == {"v-pending", "v-failed"}
 

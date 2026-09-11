@@ -178,3 +178,62 @@ async def test_the_glossary_prompt_carries_the_lesson_title(monkeypatch):
     await action.execute(a_lesson(title="Tokens e embeddings"))
 
     assert "Tokens e embeddings" in seen[0]
+
+
+@pytest.mark.asyncio
+async def test_failure_path_save_is_guarded_and_still_returns_failed(monkeypatch):
+    """Se o próprio save() do status FAILED explodir (ex.: banco fora do ar),
+    o execute() ainda não pode propagar — e o motivo relatado é o ORIGINAL
+    (a falha da transcrição), não o erro do save."""
+
+    class BoomTranscription:
+        async def transcribe(self, audio_path, prompt):
+            raise RuntimeError("provider 503")
+
+    class FlakyOnSecondSave(FakeLessonRepo):
+        async def save(self, lesson: Lesson) -> Lesson:
+            if len(self.saved) == 1:  # segunda chamada: o save do caminho de falha
+                raise RuntimeError("db down")
+            return await super().save(lesson)
+
+    lesson_repo = FlakyOnSecondSave()
+    action = build_action(monkeypatch, transcription=BoomTranscription(), lesson_repo=lesson_repo)
+
+    result = await action.execute(a_lesson())
+
+    assert result.status == TranscriptStatus.FAILED
+    assert "provider 503" in result.failure_reason
+    assert "db down" not in result.failure_reason
+
+
+@pytest.mark.asyncio
+async def test_multiple_audio_windows_get_their_offsets_applied(monkeypatch):
+    """Aula longa o bastante para virar 3 janelas de 600s (probe = 1500.0s):
+    cada fatia devolve UM segmento (30.0, 40.0) relativo à própria fatia; o
+    offset da janela precisa ser somado antes do chunking. Como cada janela
+    produz um segmento isolado e o chunker empacota por tamanho (não por
+    janela), aqui garantimos os offsets olhando o primeiro e o último chunk
+    persistido: o primeiro começa em 30.0 (janela 0, sem offset) e o último
+    termina em 1240.0 (janela 2, offset 1200 + fim do segmento 40.0)."""
+    from src.domain.lessons.actions import ingest_lesson_action as module
+
+    monkeypatch.setattr(module.settings, "MENTOR_AUDIO_SEGMENT_SECONDS", 600)
+
+    class OneSegmentPerCall:
+        async def transcribe(self, audio_path, prompt):
+            return [TranscriptSegment("x", 30.0, 40.0)]
+
+    async def fake_probe(path):
+        return 1500.0
+
+    chunk_repo = FakeChunkRepo()
+    action = build_action(
+        monkeypatch, transcription=OneSegmentPerCall(), chunk_repo=chunk_repo
+    )
+    monkeypatch.setattr(module.AudioToolkit, "probe_duration", staticmethod(fake_probe))
+
+    await action.execute(a_lesson())
+
+    chunks = chunk_repo.replaced[0][1]
+    assert chunks[0].start_seconds == 30.0
+    assert chunks[-1].end_seconds == 1240.0

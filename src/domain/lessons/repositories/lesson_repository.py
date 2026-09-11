@@ -1,4 +1,6 @@
-from sqlalchemy import select
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import and_, or_, select
 
 from src.domain.lessons.entities.lesson import Lesson
 from src.domain.lessons.enums import TranscriptStatus
@@ -6,6 +8,7 @@ from src.domain.lessons.mappers.lesson_mapper import LessonMapper
 from src.domain.lessons.models.lesson import LessonModel
 from src.support.core.context import CurrentAsyncSessionContext
 from src.support.core.exceptions import NotFoundError
+from src.support.core.settings import settings
 
 # Campos que vêm do catálogo da plataforma. O estado de transcrição NÃO está
 # aqui de propósito: re-sincronizar o catálogo não pode jogar fora o trabalho
@@ -61,16 +64,27 @@ class LessonRepository:
 
     async def list_pending(self, program_slug: str, max_attempts: int) -> list[Lesson]:
         """Aulas que o lote deve processar: nunca transcritas, ou que falharam e
-        ainda têm tentativa. `transcribing` fica de fora — é claim de outra
-        execução."""
+        ainda têm tentativa. `transcribing` recente fica de fora — é claim de
+        outra execução; `transcribing` obsoleto (mais velho que
+        `MENTOR_CLAIM_STALE_MINUTES` — processo que morreu entre o claim e o
+        save final) volta ao lote. O teto de tentativas se aplica aos dois
+        ramos: uma aula que já esgotou as tentativas fica de fora de qualquer
+        jeito."""
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.MENTOR_CLAIM_STALE_MINUTES)
         result = await self.session.execute(
             select(LessonModel)
             .where(
                 LessonModel.program_slug == program_slug,
-                LessonModel.transcript_status.in_(
-                    [str(TranscriptStatus.PENDING), str(TranscriptStatus.FAILED)]
-                ),
                 LessonModel.attempts < max_attempts,
+                or_(
+                    LessonModel.transcript_status.in_(
+                        [str(TranscriptStatus.PENDING), str(TranscriptStatus.FAILED)]
+                    ),
+                    and_(
+                        LessonModel.transcript_status == str(TranscriptStatus.TRANSCRIBING),
+                        LessonModel.updated_at < cutoff,
+                    ),
+                ),
             )
             .order_by(LessonModel.created_at)
         )

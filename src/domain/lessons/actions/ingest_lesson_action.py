@@ -94,7 +94,15 @@ class IngestLessonAction:
             reason = f"{type(exc).__name__}: {exc}"[:1000]
             lesson.transcript_status = TranscriptStatus.FAILED
             lesson.failure_reason = reason
-            await self.lessons.save(lesson)
+            try:
+                await self.lessons.save(lesson)
+            except Exception:
+                # Se nem o registro da falha for salvo (ex.: banco fora do ar),
+                # ainda assim o `execute` não pode propagar — o resultado FAILED
+                # com o motivo ORIGINAL é o que garante que o lote continue.
+                logger.exception(
+                    "falha ao salvar o status FAILED da aula %s", lesson.platform_video_id
+                )
             return IngestResult(
                 lesson.platform_video_id, TranscriptStatus.FAILED,
                 chunks=0, skipped=False, failure_reason=reason, content_hash=lesson.content_hash,

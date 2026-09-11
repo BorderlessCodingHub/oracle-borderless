@@ -107,6 +107,22 @@ async def test_list_pending_filters_by_status_attempts_and_program(fake_session)
 
 
 @pytest.mark.asyncio
+async def test_list_pending_also_recovers_stale_transcribing_claims(fake_session):
+    repo = LessonRepository()
+
+    await repo.list_pending("base", max_attempts=3)
+
+    assert len(fake_session.executed_statements) == 1
+    sql = _compiled(fake_session.executed_statements[0])
+    # claim obsoleto (transcribing há mais tempo que MENTOR_CLAIM_STALE_MINUTES) volta ao lote
+    assert "transcript_status = 'transcribing'" in sql
+    assert "updated_at <" in sql
+    # e o ramo pending/failed original continua lá, com o mesmo teto de tentativas
+    assert "transcript_status IN ('pending', 'failed')" in sql
+    assert "attempts < 3" in sql
+
+
+@pytest.mark.asyncio
 async def test_upsert_from_catalog_updates_only_catalog_fields_on_existing_model():
     existing = LessonModel(
         uuid=uuid4(),
