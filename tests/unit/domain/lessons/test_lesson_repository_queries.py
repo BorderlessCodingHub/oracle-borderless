@@ -18,6 +18,7 @@ from src.domain.lessons.models.lesson import LessonModel
 from src.domain.lessons.repositories.lesson_chunk_repository import LessonChunkRepository
 from src.domain.lessons.repositories.lesson_repository import LessonRepository
 from src.support.core.context import CurrentAsyncSessionContext
+from src.support.core.exceptions import NotFoundError
 
 
 class _Scalars:
@@ -154,6 +155,24 @@ async def test_upsert_from_catalog_updates_only_catalog_fields_on_existing_model
     assert session.added == []
     assert session.flush_calls == 1
     assert session.refreshed == [existing]
+
+
+@pytest.mark.asyncio
+async def test_save_raises_not_found_error_when_lesson_does_not_exist(fake_session):
+    repo = LessonRepository()
+    lesson = Lesson(
+        uuid=uuid4(),
+        platform_video_id="inexistente",
+        program_slug="base",
+        module_slug="modulo-1",
+        video_slug="aula-1",
+        title="Tokens",
+        provider="PANDA_VIDEO",
+        provider_ref="ref-1",
+    )
+
+    with pytest.raises(NotFoundError):
+        await repo.save(lesson)
 
 
 @pytest.mark.asyncio

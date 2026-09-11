@@ -5,6 +5,7 @@ from src.domain.lessons.enums import TranscriptStatus
 from src.domain.lessons.mappers.lesson_mapper import LessonMapper
 from src.domain.lessons.models.lesson import LessonModel
 from src.support.core.context import CurrentAsyncSessionContext
+from src.support.core.exceptions import NotFoundError
 
 # Campos que vêm do catálogo da plataforma. O estado de transcrição NÃO está
 # aqui de propósito: re-sincronizar o catálogo não pode jogar fora o trabalho
@@ -50,7 +51,7 @@ class LessonRepository:
     async def save(self, lesson: Lesson) -> Lesson:
         model = await self._model_by_video_id(lesson.platform_video_id)
         if model is None:
-            raise ValueError(f"aula {lesson.platform_video_id} não existe")
+            raise NotFoundError(f"aula {lesson.platform_video_id} não existe")
         for key, value in LessonMapper.to_model_attrs(lesson).items():
             if key != "uuid":
                 setattr(model, key, value)
