@@ -138,6 +138,73 @@ def build_tools(navigation_catalog_text: str | None = None) -> list:
     return [web_search, fetch_notion_page, navigate_platform]
 
 
+SEARCH_LESSON_TOOL_NAME = "search_lesson"
+
+
+def build_mentor_tools() -> list:
+    """A tool do mentor. O `lesson_id` vem do `config` — o modelo só passa a
+    query. Assim o escopo é do runtime, não do prompt: um aluno não consegue
+    induzir o modelo a ler uma aula que ele não comprou (spec §2.1)."""
+    from langchain_core.runnables import RunnableConfig
+    from langchain_core.tools import tool
+
+    @tool
+    async def search_lesson(query: str, config: RunnableConfig) -> str:
+        """Busca trechos da aula que o aluno está assistindo, por similaridade
+        com a pergunta. Use SEMPRE antes de responder sobre o conteúdo da aula,
+        e quantas vezes precisar para refinar a busca."""
+        cfg = config["configurable"]
+        cfg["signals"].tool_calls += 1
+        try:
+            action = cfg.get("search_lesson_action")
+            if action is None:
+                from src.domain.lessons.actions.search_lesson_action import SearchLessonAction
+                from src.support.clients.embeddings.embeddings_client import get_embeddings_client
+
+                action = SearchLessonAction(embeddings=get_embeddings_client())
+            rows = await action.execute(lesson_id=cfg["lesson_id"], query=query)
+            # Vai para o trace sem custo: o vetor já foi calculado na busca.
+            # Mutação in-place (não atribuição) — o `config["configurable"]` que
+            # o LangChain injeta aqui é uma cópia rasa da do chamador
+            # (`ensure_config`); só sobrevive fora da tool quem já era o MESMO
+            # objeto mutável dos dois lados. Por isso `question_embedding`
+            # entra pré-semeado como lista (igual `lesson_distances`) e a tool
+            # substitui o conteúdo, nunca a chave.
+            cfg["question_embedding"][:] = action.last_query_embedding
+            if not rows:
+                return wrap_tool_content("(nenhum trecho disponível nesta aula)")
+            snippets = [snippet for snippet, _ in rows]
+            cfg["lesson_distances"].extend(distance for _, distance in rows)
+            cfg["citations"].extend(s.citation for s in snippets)
+            return format_knowledge(snippets)
+        except Exception as exc:  # falha de tool não derruba o streaming
+            logger.exception("search_lesson tool failed")
+            return wrap_tool_content(f"(falha ao buscar na aula: {exc})")
+
+    return [search_lesson]
+
+
 def tool_node_tools() -> list:
-    """Só as tools que o ToolNode executa — navigate_platform vai ao nó próprio."""
+    """Só as tools que o ToolNode executa — navigate_platform vai ao nó próprio.
+
+    Inclui também a tool do mentor (`search_lesson`): ela é inerte fora de um
+    turno com `lesson_id` no config (Task 3 decide quando ativar o modo)."""
+    return [t for t in build_tools() if t.name != NAVIGATE_TOOL_NAME] + build_mentor_tools()
+
+
+def model_bound_tools(navigation_enabled: bool, navigation_catalog_text: str | None = None) -> list:
+    """As tools que o MODELO recebe em `bind_tools` neste turno — distinto de
+    `tool_node_tools()`, que são as que o `ToolNode` sabe EXECUTAR.
+
+    `search_lesson` fica de fora daqui (R12: um cliente de chat/navegação comum
+    não está numa aula, não tem `lesson_id` no escopo). É o modo mentor (Task 3)
+    quem liga `build_mentor_tools()` ao modelo, quando `mode == "mentor"`.
+    """
+    if navigation_enabled:
+        # O catálogo ao vivo (buscado com o token do turno) vai na descrição da
+        # tool de navegação; sem ele, `build_tools` cai no snapshot embutido.
+        return build_tools(navigation_catalog_text)
+    # R12: sem capacidade de navegar, o modelo só vê web_search e
+    # fetch_notion_page — oferecer `navigate_platform` a um cliente que não
+    # executa redirect é prometer uma ação que ninguém cumpre.
     return [t for t in build_tools() if t.name != NAVIGATE_TOOL_NAME]

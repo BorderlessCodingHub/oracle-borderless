@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from src.support.agent.graph.state import TurnState
 from src.support.agent.models import build_chat_model, build_small_model
 from src.support.agent.prompts import build_system_prompt
-from src.support.agent.tools import build_tools, format_knowledge, tool_node_tools
+from src.support.agent.tools import format_knowledge, model_bound_tools
 from src.support.core.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -202,14 +202,11 @@ def _answer_model(config, enable_tools: bool = True):
     model = injected or build_chat_model()
     if not enable_tools:
         return model
-    if not _navigation_enabled(config):
-        # R12: sem capacidade de navegar, o modelo só vê web_search e
-        # fetch_notion_page — oferecer `navigate_platform` a um cliente que não
-        # executa redirect é prometer uma ação que ninguém cumpre.
-        return model.bind_tools(tool_node_tools())
-    # O catálogo ao vivo (buscado com o token do turno) vai na descrição da tool
-    # de navegação; sem ele, `build_tools` cai no snapshot embutido.
-    return model.bind_tools(build_tools(cfg.get("navigation_catalog_text")))
+    # search_lesson fica fora do bind aqui — Task 3 liga build_mentor_tools()
+    # ao modelo quando mode == "mentor" (ver model_bound_tools em tools.py).
+    return model.bind_tools(
+        model_bound_tools(_navigation_enabled(config), cfg.get("navigation_catalog_text"))
+    )
 
 
 def _fill_usage(signals, message: AIMessage) -> None:
