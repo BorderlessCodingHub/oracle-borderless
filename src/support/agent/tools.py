@@ -160,22 +160,47 @@ def build_mentor_tools() -> list:
             if action is None:
                 from src.domain.lessons.actions.search_lesson_action import SearchLessonAction
                 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
+                from src.support.core.session_scope import async_session_scope
 
-                action = SearchLessonAction(embeddings=get_embeddings_client())
-            rows = await action.execute(lesson_id=cfg["lesson_id"], query=query)
-            # Vai para o trace sem custo: o vetor já foi calculado na busca.
-            # Mutação in-place (não atribuição) — o `config["configurable"]` que
-            # o LangChain injeta aqui é uma cópia rasa da do chamador
-            # (`ensure_config`); só sobrevive fora da tool quem já era o MESMO
-            # objeto mutável dos dois lados. Por isso `question_embedding`
-            # entra pré-semeado como lista (igual `lesson_distances`) e a tool
-            # substitui o conteúdo, nunca a chave.
-            cfg["question_embedding"][:] = action.last_query_embedding
+                # C1 (ruling C6, ADR-0020): aqui é `stream()` — a sessão do
+                # request e a do prelúdio (escopo 2) já fecharam. Repository
+                # captura `CurrentAsyncSessionContext.get()` no `__init__`, então
+                # a action só pode nascer DEPOIS de abrir um escopo próprio; se
+                # nascesse antes (ou fora do `async with`), o repositório
+                # segurava a referência da sessão fechada do escopo 2 — vazamento
+                # de conexão / erro não determinístico, não algo que apareça toda
+                # vez. Curto de propósito: só durante a chamada da tool.
+                async with async_session_scope():
+                    action = SearchLessonAction(embeddings=get_embeddings_client())
+                    rows = await action.execute(lesson_id=cfg["lesson_id"], query=query)
+            else:
+                # Testes injetam a action pronta — já nasceu no escopo do
+                # chamador, não é este trecho que decide a sessão dela.
+                rows = await action.execute(lesson_id=cfg["lesson_id"], query=query)
+
             if not rows:
                 return wrap_tool_content("(nenhum trecho disponível nesta aula)")
+
             snippets = [snippet for snippet, _ in rows]
             cfg["lesson_distances"].extend(distance for _, distance in rows)
-            cfg["citations"].extend(s.citation for s in snippets)
+            # M7: o tool loop pode buscar de novo e trazer o mesmo trecho —
+            # cada citação entra uma única vez por url.
+            seen_urls = {c.url for c in cfg["citations"]}
+            for s in snippets:
+                if s.citation.url not in seen_urls:
+                    cfg["citations"].append(s.citation)
+                    seen_urls.add(s.citation.url)
+
+            # I1: só depois de citações/distâncias coletadas, e nunca à custa de
+            # uma busca que deu certo. `last_query_embedding` pode ser None (fake
+            # de teste, ou action que não populou); `question_embedding` pode nem
+            # existir no cfg (chamador que não pré-semeou a chave) — nesse caso
+            # o sinal é só perdido, não uma exceção. Mutação in-place (não
+            # atribuição): ver nota original sobre `ensure_config`.
+            embedding_slot = cfg.get("question_embedding")
+            if isinstance(embedding_slot, list):
+                embedding_slot[:] = action.last_query_embedding or []
+
             return format_knowledge(snippets)
         except Exception as exc:  # falha de tool não derruba o streaming
             logger.exception("search_lesson tool failed")

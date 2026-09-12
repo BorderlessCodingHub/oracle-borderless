@@ -35,7 +35,20 @@ class BorderlessLessonAccessClient:
     ) -> bool:
         """`hasAccess` em `data.video.access.hasAccess`. 404 (aula/módulo/programa
         inexistente do ponto de vista da plataforma) nega sem levantar; qualquer
-        outro erro sobe — quem chama (CheckLessonAccessAction) fecha fail-closed."""
+        outro erro sobe — quem chama (CheckLessonAccessAction) fecha fail-closed.
+
+        T4 — o que isso REALMENTE checa: a rota usa `maybeAuthenticate`, então um
+        bearer inválido/expirado não vira erro — a rota apenas DEGRADA para
+        anônimo (sem sessão resolvida) e responde normalmente. Para uma aula
+        GATED (com `membershipPermissions`), isso vira `hasAccess=false` — nega,
+        como se ninguém tivesse comprado. Mas para uma aula UNGATED (sem
+        restrição de membership), `hasAccess=true` sai para QUALQUER bearer,
+        inválido ou não — a plataforma nunca chega a olhar para quem está
+        pedindo. Ou seja: este método NÃO verifica "o token é válido"; ele
+        verifica exatamente o que `membershipPermissions` da aula exige, nem
+        mais nem menos. Um bearer expirado com uma aula pública passa; um
+        bearer válido sem a assinatura certa numa aula gated não passa.
+        """
         async with httpx.AsyncClient(
             transport=self._transport, timeout=settings.NAVIGATION_TIMEOUT_SECONDS
         ) as client:

@@ -15,7 +15,18 @@ logger = logging.getLogger(__name__)
 
 
 class LessonAccessDeniedError(DomainError):
-    """O aluno não tem acesso à aula — ou não deu para confirmar que tem."""
+    """O aluno não tem acesso à aula — ou não deu para confirmar que tem.
+
+    M1: a mensagem da exceção é o que vira corpo do 403 (`exception_handlers.py`)
+    — precisa ser OPACA em todos os casos (aula desconhecida, entitlement
+    indisponível, acesso negado de fato). Diferenciar os casos no corpo HTTP
+    ensinaria um cliente malicioso a distinguir "aula não indexada" de "aula
+    indexada mas eu não comprei" só tentando ids ao acaso; a distinção real
+    (para debug) fica só no log do servidor, via `logger.warning` abaixo.
+    """
+
+
+_OPAQUE_MESSAGE = "sem acesso a esta aula"
 
 
 class CheckLessonAccessAction:
@@ -26,16 +37,18 @@ class CheckLessonAccessAction:
     async def execute(self, bearer: str, platform_video_id: str) -> Lesson:
         lesson = await self.lessons.get_by_platform_video_id(platform_video_id)
         if lesson is None:
-            raise LessonAccessDeniedError(f"aula {platform_video_id} não está indexada")
+            logger.warning("aula %s não está indexada — negando (mensagem opaca ao cliente)", platform_video_id)
+            raise LessonAccessDeniedError(_OPAQUE_MESSAGE)
 
         try:
             allowed = await self.access_client.has_access(
                 bearer, lesson.program_slug, lesson.module_slug, lesson.video_slug
             )
         except Exception as exc:
-            logger.warning("entitlement indisponível para %s: %s", platform_video_id, exc)
-            raise LessonAccessDeniedError("não foi possível confirmar o acesso à aula") from exc
+            logger.warning("entitlement indisponível para %s: %s — negando (mensagem opaca ao cliente)", platform_video_id, exc)
+            raise LessonAccessDeniedError(_OPAQUE_MESSAGE) from exc
 
         if not allowed:
-            raise LessonAccessDeniedError("sem acesso a esta aula")
+            logger.warning("acesso negado a %s pela plataforma — negando (mensagem opaca ao cliente)", platform_video_id)
+            raise LessonAccessDeniedError(_OPAQUE_MESSAGE)
         return lesson

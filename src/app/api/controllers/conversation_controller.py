@@ -34,8 +34,9 @@ from src.support.clients.borderless.borderless_lesson_access_client import (
 )
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
 from src.support.core.context import CurrentAsyncSessionContext, CurrentRequestContext
-from src.support.core.exceptions import DomainError
+from src.support.core.exceptions import DomainError, NotFoundError
 from src.support.core.session_scope import async_session_scope, run_in_async_session
+from src.support.core.settings import settings
 from src.support.observability.langsmith import hash_email
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,12 @@ class ConversationController:
         # mapeado em exception_handlers.py).
         lesson: Lesson | None = None
         if data.mode == "mentor":
+            # I2 (ruling C7): kill switch de verdade. Antes de qualquer outra
+            # checagem — inclusive antes do 400 de lesson_id ausente — porque
+            # com o mentor desligado nem faz sentido diferenciar os dois erros
+            # de entrada; a feature simplesmente não existe.
+            if not settings.MENTOR_ENABLED:
+                raise NotFoundError("mentor desabilitado")
             if not data.lesson_id:
                 raise DomainError("mode mentor exige input.lesson_id")
             lesson = await CheckLessonAccessAction(access_client=BorderlessLessonAccessClient()).execute(
@@ -100,7 +107,7 @@ class ConversationController:
         # é SearchKnowledgeBaseAction — nasce em RunTurnAction, dentro do escopo 2.
         embeddings = get_embeddings_client()
 
-        extra_config = await _build_extra_config(user)
+        extra_config = await _build_extra_config(user, data.mode)
         if lesson is not None:
             extra_config.update(build_mentor_extra_config(lesson))
 
@@ -149,17 +156,7 @@ class ConversationController:
                     await run.aclose()
 
             draft.citations_count = len(captured["citations"])
-            _absorb_engine_metrics(draft)
-
-            # Task 5: pergunta, cobertura e embedding do turno mentor entram no
-            # mesmo draft, a partir do `configurable` que a tool `search_lesson`
-            # preencheu em place. Sob try/except próprio (ADR-0013): observabi-
-            # lidade nunca derruba a persistência da resposta.
-            if data.mode == "mentor":
-                try:
-                    apply_mentor_signals(draft, extra_config)
-                except Exception:
-                    logger.exception("falha ao aplicar sinais do mentor no trace")
+            finalize_mentor_trace(draft, data.mode, extra_config)
 
             # A resposta só é persistida em sucesso (decisão do M2); o trace é
             # gravado SEMPRE — turno que quebrou é o que mais interessa no trace.
@@ -197,7 +194,7 @@ class ConversationController:
         return ConversationDetailResponse.from_entity(conversation, messages)
 
 
-async def _build_extra_config(user) -> dict:
+async def _build_extra_config(user, mode: str = "chat") -> dict:
     """Monta o `extra_config` do turno (vira `configurable` do grafo — ADR-0016/
     0021): token e perfil alimentam a tool `navigate_platform` e o prompt de
     navegação. Roda no escopo do request: `NavigationCatalog().describe` é HTTP
@@ -208,8 +205,14 @@ async def _build_extra_config(user) -> dict:
     cliente embutido na Platform (sessão `platform_bearer`) executa o redirect;
     o SPA do oráculo não sabe navegar, então não recebe a tool, o bloco de
     prompt nem paga a busca do catálogo.
+
+    I3: o mentor liga só `search_lesson` ao modelo (spec §2.1) — nunca
+    `navigate_platform` — então um turno `mode == "mentor"` nem busca o
+    catálogo ao vivo, mesmo vindo de uma sessão `platform_bearer`. Sem isso
+    todo turno mentor pagava um round-trip à borderless-api para um catálogo
+    que o grafo nunca usa (ver `model_bound_tools`/`_answer_model(mode="mentor")`).
     """
-    navigation_enabled = user.session_source == SOURCE_PLATFORM_BEARER
+    navigation_enabled = mode != "mentor" and user.session_source == SOURCE_PLATFORM_BEARER
 
     catalog_text = None
     if navigation_enabled:
@@ -286,6 +289,30 @@ def _absorb_engine_metrics(draft: TurnTraceDraft) -> None:
     # um turno que quebrou no meio do stream continua sendo erro.
     if draft.outcome != "error":
         draft.outcome = s.outcome
+
+
+def finalize_mentor_trace(draft: TurnTraceDraft, mode: str, extra_config: dict) -> None:
+    """A sequência exata que o corpo SSE roda pós-stream (T5), extraída para
+    ser testável sem sessão/HTTP: absorve as métricas do engine PRIMEIRO e só
+    DEPOIS — quando o turno é mentor — aplica os sinais do mentor por cima.
+
+    A ORDEM importa: `apply_mentor_signals` sobrescreve de propósito
+    `draft.intent`/`draft.retrieval_kept` (o mentor não passa pelo gate/retrieve
+    genérico — spec §2.1) com os valores que a tool `search_lesson` preencheu
+    em `extra_config`. Se rodasse ANTES de `_absorb_engine_metrics`, o absorb
+    reescreveria esses mesmos campos com o que `signals` trouxe do grafo (um
+    `intent` de gate que nem rodou, um `retrieval_kept` de RAG genérico que
+    também não rodou) — apagando o que o mentor escreveu.
+
+    Sob try/except próprio (ADR-0013): observabilidade nunca derruba a
+    persistência da resposta.
+    """
+    _absorb_engine_metrics(draft)
+    if mode == "mentor":
+        try:
+            apply_mentor_signals(draft, extra_config)
+        except Exception:
+            logger.exception("falha ao aplicar sinais do mentor no trace")
 
 
 async def _persist_turn(

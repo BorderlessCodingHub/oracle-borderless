@@ -8,6 +8,7 @@ call site real continua sob o `try/except` do ADR-0013, que loga e engole.
 
 from src.domain.lessons.services.coverage_policy import classify_coverage
 from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
+from src.support.core.settings import settings
 
 
 def apply_mentor_signals(draft: TurnTraceDraft, cfg: dict) -> None:
@@ -23,8 +24,15 @@ def apply_mentor_signals(draft: TurnTraceDraft, cfg: dict) -> None:
     draft.lesson_id = cfg.get("lesson_platform_video_id")
     draft.program_slug = cfg.get("lesson_program_slug")
     draft.retrieval_ran = bool(distances)
+    # M2: top_k é o de VERDADE do mentor (`search_lesson` busca `MENTOR_TOP_K`
+    # por chamada) — antes ficava 0 (default do dataclass), como se o mentor
+    # não tivesse top_k nenhum.
+    draft.retrieval_top_k = settings.MENTOR_TOP_K
     draft.retrieval_kept = len(distances)
     draft.retrieval_best_distance = best
+    # M2: sem limiar de propósito (fica 0.0, o default) — `search_similar` não
+    # corta por distância no escopo de uma aula (spec §4); um valor aqui
+    # sugeriria um corte que não existe.
     draft.lesson_coverage = classify_coverage(best)
     # Já foi calculado para fazer a busca: descartá-lo obrigaria a re-embedar
     # o backlog inteiro quando formos agrupar as perguntas.

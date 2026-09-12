@@ -1,3 +1,4 @@
+from urllib.parse import quote
 from uuid import UUID
 
 from sqlalchemy import delete, func, select
@@ -73,9 +74,13 @@ class LessonChunkRepository:
                     citation=Citation(
                         source_type="lesson",
                         title=row.title,
+                        # M8: cada segmento é escapado por si (safe="" — nem "/"
+                        # escapa) para um slug com espaço/acento/caractere
+                        # especial não quebrar a URL nem cruzar segmento.
                         url=(
-                            f"/programs/{row.program_slug}/{row.module_slug}/"
-                            f"{row.video_slug}?t={int(row.start_seconds)}"
+                            f"/programs/{quote(row.program_slug, safe='')}/"
+                            f"{quote(row.module_slug, safe='')}/"
+                            f"{quote(row.video_slug, safe='')}?t={int(row.start_seconds)}"
                         ),
                         snippet=row.content[:200],
                     ),

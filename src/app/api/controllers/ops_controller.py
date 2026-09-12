@@ -1,5 +1,7 @@
 from uuid import UUID
 
+from fastapi import Query
+
 from src.app.api.responses.ops_responses import (
     EvalReportResponse,
     MentorInsightsResponse,
@@ -34,6 +36,11 @@ class OpsController:
         return EvalReportResponse(**await ReadEvalReportAction().execute())
 
     @staticmethod
-    async def mentor(program_slug: str | None = None, days: int = 30) -> MentorInsightsResponse:
+    async def mentor(
+        program_slug: str | None = None,
+        # M4: sem teto, `days` alto vira varredura de tabela inteira — a
+        # página de ops não tem paginação para esse relatório.
+        days: int = Query(30, ge=1, le=365),
+    ) -> MentorInsightsResponse:
         insights = await GetMentorInsightsAction().execute(program_slug=program_slug, days=days)
         return MentorInsightsResponse.from_dto(insights)

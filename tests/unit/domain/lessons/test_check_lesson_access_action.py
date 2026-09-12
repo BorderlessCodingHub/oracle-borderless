@@ -78,3 +78,28 @@ async def test_the_bearer_is_forwarded_so_the_platform_judges_the_real_user():
         bearer="tok-do-aluno", platform_video_id="v1"
     )
     assert access.calls[0][0] == "tok-do-aluno"
+
+
+# --- M1: o corpo do 403 é opaco nos três casos ------------------------------
+
+
+@pytest.mark.asyncio
+async def test_unknown_and_denied_lessons_raise_the_exact_same_opaque_message():
+    """M1: um cliente não pode distinguir 'aula não indexada' de 'aula
+    indexada mas eu não comprei' tentando ids ao acaso — as duas mensagens
+    (e a de entitlement indisponível) precisam ser IDÊNTICAS."""
+    unknown = CheckLessonAccessAction(access_client=FakeAccess(True), lesson_repo=FakeRepo(None))
+    denied = CheckLessonAccessAction(access_client=FakeAccess(False), lesson_repo=FakeRepo(a_lesson()))
+    unavailable = CheckLessonAccessAction(
+        access_client=FakeAccess(raises=RuntimeError("api fora")), lesson_repo=FakeRepo(a_lesson())
+    )
+
+    with pytest.raises(LessonAccessDeniedError) as unknown_exc:
+        await unknown.execute(bearer="tok", platform_video_id="ghost")
+    with pytest.raises(LessonAccessDeniedError) as denied_exc:
+        await denied.execute(bearer="tok", platform_video_id="v1")
+    with pytest.raises(LessonAccessDeniedError) as unavailable_exc:
+        await unavailable.execute(bearer="tok", platform_video_id="v1")
+
+    messages = {str(unknown_exc.value), str(denied_exc.value), str(unavailable_exc.value)}
+    assert messages == {"sem acesso a esta aula"}

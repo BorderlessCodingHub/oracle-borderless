@@ -283,3 +283,28 @@ async def test_search_similar_maps_each_row_to_a_lesson_citation_with_the_timest
     assert snippet.citation.url == "/programs/base/m1/aula-v-cite?t=750"
     assert snippet.citation.title == "Aula v-cite"
     assert distance == 0.12
+
+
+@pytest.mark.asyncio
+async def test_search_similar_url_encodes_each_slug_segment():
+    """M8: um slug com espaço/acento/separador não pode quebrar a URL nem
+    "vazar" um segmento a mais — cada parte é escapada por si (safe="")."""
+    row = _Row(
+        content="trecho",
+        start_seconds=5.0,
+        title="Aula especial",
+        program_slug="básico web",
+        module_slug="mó&dulo",
+        video_slug="aula/1",
+        distance=0.5,
+    )
+    session = FakeSession(execute_results=[FakeResult(rows=[row])])
+    CurrentAsyncSessionContext.set(session)
+    try:
+        repo = LessonChunkRepository()
+        rows = await repo.search_similar(uuid4(), [0.0] * 1536)
+    finally:
+        CurrentAsyncSessionContext.clear()
+
+    snippet, _ = rows[0]
+    assert snippet.citation.url == "/programs/b%C3%A1sico%20web/m%C3%B3%26dulo/aula%2F1?t=5"

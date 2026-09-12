@@ -5,6 +5,7 @@ brief que hoje vive sob o `try/except` de `_persist_turn`."""
 
 from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
 from src.domain.observability.services.mentor_trace import apply_mentor_signals
+from src.support.core.settings import settings
 
 
 def _draft() -> TurnTraceDraft:
@@ -30,6 +31,10 @@ def test_distances_feed_best_kept_ran_and_coverage():
     assert draft.lesson_id == "video-123"
     assert draft.program_slug == "base"
     assert draft.question_embedding == [0.1, 0.2]
+    # M2: top_k é o de verdade do mentor; sem limiar de propósito (busca de
+    # aula não corta por distância — spec §4).
+    assert draft.retrieval_top_k == settings.MENTOR_TOP_K
+    assert draft.retrieval_threshold == 0.0
 
 
 def test_empty_distances_mean_no_retrieval_and_a_content_gap():
@@ -76,3 +81,5 @@ def test_missing_keys_never_raise():
     assert draft.lesson_id is None
     assert draft.program_slug is None
     assert draft.question_embedding is None
+    assert draft.retrieval_top_k == settings.MENTOR_TOP_K
+    assert draft.retrieval_threshold == 0.0

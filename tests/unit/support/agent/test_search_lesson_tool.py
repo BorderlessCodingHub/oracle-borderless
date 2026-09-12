@@ -5,6 +5,7 @@ import pytest
 from src.domain.shared.value_objects.citation import Citation
 from src.support.agent.ports import KnowledgeSnippet
 from src.support.agent.tools import SEARCH_LESSON_TOOL_NAME, build_mentor_tools
+from src.support.core.context import CurrentAsyncSessionContext
 
 
 class Signals:
@@ -98,3 +99,124 @@ async def test_a_failing_search_does_not_break_the_stream():
     out = await the_tool().ainvoke({"query": "x"}, config=config)
     assert "<<TOOL_CONTENT>>" in out
     assert "falha" in out.lower()
+
+
+# --- I1: o embedding não pode sabotar uma busca que deu certo -------------
+
+
+@pytest.mark.asyncio
+async def test_a_none_embedding_and_a_missing_cfg_key_still_return_the_snippets():
+    """`last_query_embedding is None` (fake de teste) e `question_embedding`
+    ausente do cfg (chamador que não pré-semeou a chave): antes, a atribuição
+    `cfg["question_embedding"][:] = ...` explodia ANTES das citações serem
+    coletadas e virava "(falha ao buscar na aula...)" mesmo com trechos bons."""
+
+    class ActionWithNoEmbedding:
+        last_query_embedding = None
+
+        async def execute(self, lesson_id, query, top_k=None):
+            return [(snippet("trecho bom"), 0.2)]
+
+    config = {
+        "configurable": {
+            "signals": Signals(),
+            "citations": [],
+            "lesson_id": uuid4(),
+            "lesson_distances": [],
+            # sem "question_embedding" de propósito
+            "search_lesson_action": ActionWithNoEmbedding(),
+        }
+    }
+
+    out = await the_tool().ainvoke({"query": "x"}, config=config)
+
+    assert "falha" not in out.lower()
+    assert "trecho bom" in out
+    assert len(config["configurable"]["citations"]) == 1
+    assert "question_embedding" not in config["configurable"]
+
+
+# --- M7: mesma citação (mesma url) não duplica -----------------------------
+
+
+@pytest.mark.asyncio
+async def test_duas_buscas_com_o_mesmo_trecho_geram_uma_unica_citacao():
+    action = FakeAction(
+        [(snippet("mesmo trecho"), 0.2), (snippet("mesmo trecho"), 0.2)]
+    )
+    config = make_config(uuid4(), action)
+
+    await the_tool().ainvoke({"query": "x"}, config=config)
+    # segunda busca do tool loop, mesma action (mesmo url de volta)
+    await the_tool().ainvoke({"query": "y"}, config=config)
+
+    assert len(config["configurable"]["citations"]) == 1
+
+
+# --- C1 (ruling C6): sem action injetada, a tool abre seu PRÓPRIO escopo ---
+
+
+@pytest.mark.asyncio
+async def test_without_an_injected_action_the_tool_opens_its_own_session_scope(monkeypatch):
+    """`stream()` não tem sessão (ADR-0020) — quem quer banco aqui precisa abrir
+    escopo próprio. O fake abaixo registra entrada/saída e planta uma sessão
+    "nova" no ContextVar; a `FakeAction` confirma, de dentro de `execute`, que
+    o repositório enxergaria essa sessão nova (nunca a do escopo 2, já fechada)."""
+    fake_session = object()
+    scope_state = {"entered": False, "exited": False}
+
+    class FakeScope:
+        async def __aenter__(self):
+            scope_state["entered"] = True
+            CurrentAsyncSessionContext.set(fake_session)
+            return fake_session
+
+        async def __aexit__(self, *exc):
+            scope_state["exited"] = True
+            CurrentAsyncSessionContext.clear()
+            return False
+
+    def fake_async_session_scope():
+        return FakeScope()
+
+    seen_session_during_execute = {}
+
+    class FakeSearchLessonAction:
+        def __init__(self, embeddings):
+            self.embeddings = embeddings
+            self.last_query_embedding = [0.1, 0.2]
+
+        async def execute(self, lesson_id, query, top_k=None):
+            seen_session_during_execute["session"] = CurrentAsyncSessionContext.get()
+            return [(snippet("achado"), 0.3)]
+
+    monkeypatch.setattr(
+        "src.support.core.session_scope.async_session_scope", fake_async_session_scope
+    )
+    monkeypatch.setattr(
+        "src.domain.lessons.actions.search_lesson_action.SearchLessonAction",
+        FakeSearchLessonAction,
+    )
+    monkeypatch.setattr(
+        "src.support.clients.embeddings.embeddings_client.get_embeddings_client",
+        lambda: object(),
+    )
+
+    config = {
+        "configurable": {
+            "signals": Signals(),
+            "citations": [],
+            "lesson_id": uuid4(),
+            "lesson_distances": [],
+            "question_embedding": [],
+            # sem "search_lesson_action": é o caminho não-injetado que o C1 cobre.
+        }
+    }
+
+    out = await the_tool().ainvoke({"query": "x"}, config=config)
+
+    assert "achado" in out
+    assert scope_state == {"entered": True, "exited": True}
+    assert seen_session_during_execute["session"] is fake_session
+    # a saída do escopo limpou o ContextVar — não sobrou sessão pendurada.
+    assert CurrentAsyncSessionContext.get() is None

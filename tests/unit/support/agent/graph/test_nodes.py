@@ -603,3 +603,22 @@ def test_the_system_message_carries_the_navigation_block_only_when_enabled():
 
     assert "NAVEGAÇÃO" not in off and "navigate_platform" not in off
     assert "NAVEGAÇÃO" in on and "navigate_platform" in on
+
+
+# --- T3: enable_tools=False vence mesmo em mode="mentor" -------------------
+
+
+def test_enable_tools_false_returns_the_bare_model_even_in_mentor_mode():
+    """`enable_tools=False` é do harness de eval (config adversarial/knowledge
+    sem tool loop) — precisa vencer a escolha de tools do `mode`, não só a do
+    chat comum. Sem isso, um eval que desliga tools de propósito acabaria
+    ligando `search_lesson` ao modelo mentor de qualquer jeito."""
+    from src.support.agent.graph.nodes import _answer_model
+
+    model = _ToolRecordingChatModel()
+    config = {"configurable": {"answer_model": model}}
+
+    out = _answer_model(config, enable_tools=False, mode="mentor")
+
+    assert out is model
+    assert model.bound == []  # bind_tools nunca foi chamado
