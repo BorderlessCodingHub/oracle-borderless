@@ -51,6 +51,11 @@ class TurnTraceDraft:
     navigation_called: bool = False
     navigation_access: str | None = None
 
+    lesson_id: str | None = None
+    program_slug: str | None = None
+    lesson_coverage: str | None = None
+    question_embedding: list[float] | None = None
+
     def to_entity(self, conversation_id: UUID) -> TurnTrace:
         return TurnTrace(
             uuid=uuid7(),
@@ -82,5 +87,9 @@ class TurnTraceDraft:
             intent=self.intent,
             navigation_called=self.navigation_called,
             navigation_access=self.navigation_access,
+            lesson_id=self.lesson_id,
+            program_slug=self.program_slug,
+            lesson_coverage=self.lesson_coverage,
+            question_embedding=self.question_embedding,
             created_at=datetime.now(timezone.utc),
         )

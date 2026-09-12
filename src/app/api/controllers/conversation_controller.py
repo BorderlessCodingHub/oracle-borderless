@@ -24,6 +24,7 @@ from src.domain.lessons.actions.check_lesson_access_action import (
 from src.domain.lessons.entities.lesson import Lesson
 from src.domain.observability.actions.record_turn_trace_action import RecordTurnTraceAction
 from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
+from src.domain.observability.services.mentor_trace import apply_mentor_signals
 from src.domain.users.actions.resolve_bearer_action import SOURCE_PLATFORM_BEARER
 from src.support.agent.graph import get_turn_graph_runner
 from src.support.agent.navigation_catalog import NavigationCatalog
@@ -149,6 +150,16 @@ class ConversationController:
 
             draft.citations_count = len(captured["citations"])
             _absorb_engine_metrics(draft)
+
+            # Task 5: pergunta, cobertura e embedding do turno mentor entram no
+            # mesmo draft, a partir do `configurable` que a tool `search_lesson`
+            # preencheu em place. Sob try/except próprio (ADR-0013): observabi-
+            # lidade nunca derruba a persistência da resposta.
+            if data.mode == "mentor":
+                try:
+                    apply_mentor_signals(draft, extra_config)
+                except Exception:
+                    logger.exception("falha ao aplicar sinais do mentor no trace")
 
             # A resposta só é persistida em sucesso (decisão do M2); o trace é
             # gravado SEMPRE — turno que quebrou é o que mais interessa no trace.

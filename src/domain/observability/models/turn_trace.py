@@ -1,11 +1,13 @@
 from datetime import datetime
 from uuid import UUID
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.support.core.mixins import HasUUID
 from src.support.core.models.base_model import BaseModel
+from src.support.core.settings import settings
 
 
 class TurnTraceModel(BaseModel, HasUUID):
@@ -49,6 +51,13 @@ class TurnTraceModel(BaseModel, HasUUID):
     intent: Mapped[str | None] = mapped_column(String(16), nullable=True)
     navigation_called: Mapped[bool] = mapped_column(Boolean, default=False)
     navigation_access: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    lesson_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    program_slug: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    lesson_coverage: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    question_embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(settings.EMBEDDING_DIM), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

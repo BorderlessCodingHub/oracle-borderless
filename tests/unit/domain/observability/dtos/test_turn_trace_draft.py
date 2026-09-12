@@ -57,3 +57,26 @@ def test_navigation_fields_carry_when_set_by_the_graph():
     assert entity.intent == "navigate"
     assert entity.navigation_called is True
     assert entity.navigation_access == "allowed"
+
+
+def test_mentor_fields_default_to_none():
+    draft = TurnTraceDraft(question="x")
+    entity = draft.to_entity(conversation_id=uuid4())
+    assert entity.lesson_id is None
+    assert entity.program_slug is None
+    assert entity.lesson_coverage is None
+    assert entity.question_embedding is None
+
+
+def test_mentor_fields_carry_to_entity():
+    draft = TurnTraceDraft(question="quando usar PSP?")
+    draft.lesson_id = "video-123"
+    draft.program_slug = "base"
+    draft.lesson_coverage = "partial"
+    draft.question_embedding = [0.1, 0.2, 0.3]
+
+    entity = draft.to_entity(conversation_id=uuid4())
+    assert entity.lesson_id == "video-123"
+    assert entity.program_slug == "base"
+    assert entity.lesson_coverage == "partial"
+    assert entity.question_embedding == [0.1, 0.2, 0.3]

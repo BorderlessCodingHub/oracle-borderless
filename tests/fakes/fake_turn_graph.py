@@ -113,6 +113,8 @@ class FakeTurnGraph:
         first_token_ms: int = 7,
         engine_ms: int = 42,
         navigation: dict | None = None,
+        mentor_distances: list[float] | None = None,
+        mentor_embedding: list[float] | None = None,
     ) -> None:
         self._answer = answer
         self._citations = citations or [Citation("notion", "Doc", "https://n/a", "trecho")]
@@ -126,6 +128,8 @@ class FakeTurnGraph:
         self._output_tokens = output_tokens
         self._first_token_ms = first_token_ms
         self._engine_ms = engine_ms
+        self._mentor_distances = mentor_distances
+        self._mentor_embedding = mentor_embedding
         self.thread_id = "fake-thread"
         self.run_id = "fake-run"
         self.question = None
@@ -169,6 +173,15 @@ class FakeTurnGraph:
         self.received_locale = locale
         self.received_extra_config = extra_config
         self.received_lesson_id = lesson_id
+        # Mirror da tool `search_lesson` (Task 2): preenche `lesson_distances`/
+        # `question_embedding` em place no MESMO dict/lista que o controller
+        # guarda em `extra_config` — é assim que o trace pós-stream (Task 5)
+        # enxerga o que a tool encontrou, sem precisar de um valor de retorno.
+        if mode == "mentor" and extra_config is not None:
+            if self._mentor_distances is not None:
+                extra_config["lesson_distances"].extend(self._mentor_distances)
+            if self._mentor_embedding is not None:
+                extra_config["question_embedding"][:] = self._mentor_embedding
         if signals is not None:
             signals.outcome = self._outcome
             signals.gate_retrieve = self._retrieve

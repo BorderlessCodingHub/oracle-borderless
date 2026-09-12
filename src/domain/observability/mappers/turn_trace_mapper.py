@@ -32,6 +32,10 @@ _FLAT_FIELDS = (
     "intent",
     "navigation_called",
     "navigation_access",
+    "lesson_id",
+    "program_slug",
+    "lesson_coverage",
+    "question_embedding",
 )
 
 
