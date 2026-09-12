@@ -36,7 +36,10 @@ export function MentorPanel({ insights }: { insights: MentorInsights | null }) {
       <section className={styles.band}>
         <h3 className={styles.bandTitle}>Backlog de conteúdo</h3>
         {backlog.length === 0 ? (
-          <p className={styles.muted}>Nenhuma pergunta sem cobertura nesta janela.</p>
+          // M3: says "últimos 30 dias" (the API's default `days`), not "nesta
+          // janela" — this panel doesn't wire into the page's WindowPicker yet
+          // (parked; see the fix-wave notes), so "janela" would be misleading.
+          <p className={styles.muted}>Nenhuma pergunta sem cobertura nos últimos 30 dias.</p>
         ) : (
           backlog.map(([lessonId, gaps]) => (
             <div key={lessonId}>
@@ -59,7 +62,7 @@ export function MentorPanel({ insights }: { insights: MentorInsights | null }) {
       <section className={styles.band}>
         <h3 className={styles.bandTitle}>Retenção por aula</h3>
         {engagement.length === 0 ? (
-          <p className={styles.muted}>Nenhum turno do modo mentor nesta janela.</p>
+          <p className={styles.muted}>Nenhum turno do modo mentor nos últimos 30 dias.</p>
         ) : (
           <table className={styles.turns}>
             <thead>

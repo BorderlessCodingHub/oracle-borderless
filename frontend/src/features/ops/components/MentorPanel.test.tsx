@@ -46,7 +46,7 @@ describe("MentorPanel", () => {
     // lançar `TypeError: gaps is not iterable` durante o render.
     const malformed = [] as unknown as MentorInsights;
     render(<MentorPanel insights={malformed} />);
-    expect(screen.getByText("Nenhuma pergunta sem cobertura nesta janela.")).toBeInTheDocument();
-    expect(screen.getByText("Nenhum turno do modo mentor nesta janela.")).toBeInTheDocument();
+    expect(screen.getByText("Nenhuma pergunta sem cobertura nos últimos 30 dias.")).toBeInTheDocument();
+    expect(screen.getByText("Nenhum turno do modo mentor nos últimos 30 dias.")).toBeInTheDocument();
   });
 });
