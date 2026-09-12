@@ -9,13 +9,13 @@ Documento para retomar a execução em outra janela de contexto. Fonte da verdad
 | A — rotas internas | borderless-api | 3/3 | feita + fix wave + re-revisão limpa | **COMPLETO em código** (HEAD `be6d30ba`) |
 | B — ingestão | oracle-borderless | 7/7 | feita + fix wave + re-revisão limpa | **COMPLETO em código** (HEAD `ea2ca90` da fase) |
 | C — modo mentor | oracle-borderless | 7/7 | feita + fix wave + re-revisão limpa | **COMPLETO em código** (HEAD `7300f45`) |
-| D — aba Mentor | borderless-platform | 4/4 | **despachada, resultado NÃO capturado** | tasks completas; falta revisão final + fix wave (HEAD `b2a5a8ea`) |
+| D — aba Mentor | borderless-platform | 4/4 | **feita e CAPTURADA** em `borderless-platform/.superpowers/sdd/2026-09-11-mentor-platform/final-review.md` (With fixes: C1–C3, I1–I6) | tasks completas; falta o fix wave + re-revisão (HEAD `b2a5a8ea`) |
 
 Ledgers: `borderless-api/.superpowers/sdd/2026-09-11-mentor-api/progress.md`, `oracle-borderless/.superpowers/sdd/2026-09-11-mentor-ingestao-oracle/progress.md`, `oracle-borderless/.superpowers/sdd/2026-09-11-mentor-modo-oracle/progress.md`, `borderless-platform/.superpowers/sdd/2026-09-11-mentor-platform/progress.md`. Cada um tem a varredura pré-voo, os rulings, os minors deferidos e uma linha `Task N: complete` por task (a regra de retomada da skill: task com essa linha NÃO se redespacha).
 
 ## 2. Como retomar (ordem)
 
-1. Na nova janela, invocar `superpowers:subagent-driven-development` com o plano D (`borderless-platform/docs/superpowers/plans/2026-09-11-mentor-platform.md`). O ledger já diz que as 4 tasks estão completas; o que falta é a **revisão final de branch**: `scripts/review-package PLAN 329ce90e HEAD` → despachar `requesting-code-review/code-reviewer.md` no modelo mais capaz, apontando os minors deferidos do ledger → UM fix wave → UMA re-revisão escopada → `PLANO D: COMPLETO`.
+1. Na nova janela, invocar `superpowers:subagent-driven-development` com o plano D (`borderless-platform/docs/superpowers/plans/2026-09-11-mentor-platform.md`). O ledger diz que as 4 tasks estão completas e a revisão final JÁ FOI FEITA e está gravada em `.superpowers/sdd/2026-09-11-mentor-platform/final-review.md` (não redespachar). Falta: UM fix wave com C1–C3, I1–I6 e os minors triados como FIX (ver arquivo; C3 — seek por efeito em `startSeconds` — é o item de trabalho real) → `review-package PLAN b2a5a8ea HEAD` → UMA re-revisão escopada → `PLANO D: COMPLETO`.
 2. Subir o ambiente (seção 3) e executar a lista da seção 4 — **obrigatório antes de considerar B, C e D fechados**: migrations e testes de integração/e2e foram escritos e validados offline, nunca executados.
 3. Só então `superpowers:finishing-a-development-branch` nos três repos (decisão de merge/PR é do usuário; branches sem upstream).
 4. Apagar os workspaces `.superpowers/sdd/*` depois que tudo estiver fechado (o histórico git é o registro).
@@ -65,7 +65,7 @@ uv run pytest tests/integration/api/test_ask_mentor_entitlement.py tests/integra
 
 ### D. platform — (lista final entra após a revisão final do D)
 
-### D. platform (e2e — memória `e2e-local-run`: container borderless-postgres 5433 + API 3333 + app 3000)
+### D. platform (comandos exatos e checklist manual da demo em `borderless-platform/.superpowers/sdd/2026-09-11-mentor-platform/final-review.md` §"O que rodar" — resumo:)
 cd borderless-platform
 E2E_SKIP_PENDING_CHECKOUT=true pnpm exec playwright test e2e/tests/oracle/proxy.spec.ts e2e/tests/oracle/mentor-tab.spec.ts e2e/tests/oracle/mentor-citation.spec.ts
 E2E_SKIP_PENDING_CHECKOUT=true pnpm exec playwright test e2e/tests/oracle   # nada regrediu nos 11 specs anteriores
@@ -78,6 +78,8 @@ E2E_SKIP_PENDING_CHECKOUT=true pnpm exec playwright test e2e/tests/oracle   # na
 - `evals/cases/mentor_set.json` (spec §11) não tem task em nenhum plano — criar depois que houver aula ingerida.
 - Entitlement do mentor é exatamente tão forte quanto `membershipPermissions` da aula na plataforma (aula sem exigência de plano é acessível a qualquer bearer, inválido inclusive). Correto por delegação; dizer ao time.
 - Follow-ups parked (sem efeito no contrato): bloco próprio no container da API; `mapPandaError`/`addLogContext`; teste do container cobrindo o ramo PANDA; wiring do WindowPicker no painel mentor do /ops; `LessonAccessDeniedError` em `support/core/exceptions`; cap de iterações do tool loop do mentor; `EXPLAIN ANALYZE` do `search_similar` (post-filter HNSW).
+
+Ruling D9 (pós-revisão final): `status: unknown` esconde a aba Mentor (MVP só Base); spec §10 ganha a linha.
 
 ## 6. Rulings — todas as decisões tomadas em nome do usuário (copiadas dos ledgers)
 
