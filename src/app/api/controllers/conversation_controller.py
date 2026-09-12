@@ -17,14 +17,23 @@ from src.domain.conversations.actions.get_conversation_action import GetConversa
 from src.domain.conversations.actions.list_conversations_action import ListConversationsAction
 from src.domain.conversations.actions.open_turn_action import OpenTurnAction
 from src.domain.conversations.actions.run_turn_action import RunTurnAction
+from src.domain.lessons.actions.check_lesson_access_action import (
+    CheckLessonAccessAction,
+    LessonAccessDeniedError,
+)
+from src.domain.lessons.entities.lesson import Lesson
 from src.domain.observability.actions.record_turn_trace_action import RecordTurnTraceAction
 from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
 from src.domain.users.actions.resolve_bearer_action import SOURCE_PLATFORM_BEARER
 from src.support.agent.graph import get_turn_graph_runner
 from src.support.agent.navigation_catalog import NavigationCatalog
 from src.support.agent.ports import GraphEvent, citations_of, navigation_of, text_of
+from src.support.clients.borderless.borderless_lesson_access_client import (
+    BorderlessLessonAccessClient,
+)
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
 from src.support.core.context import CurrentAsyncSessionContext, CurrentRequestContext
+from src.support.core.exceptions import DomainError
 from src.support.core.session_scope import async_session_scope, run_in_async_session
 from src.support.observability.langsmith import hash_email
 
@@ -41,8 +50,11 @@ class ConversationController:
         `config.configurable.thread_id` é a conversa, `config.run_id` é o run do
         LangSmith.
 
-        - Escopo 1 (request, sessão do middleware): OpenTurnAction grava conversa
-          e pergunta. Tudo que vira status HTTP (401/404/422/500) acontece aqui.
+        - Escopo 1 (request, sessão do middleware): mode="mentor" checa o
+          entitlement (CheckLessonAccessAction — 400 sem lesson_id, 403 sem
+          acesso, fail-closed) ANTES de tudo, e OpenTurnAction grava conversa
+          e pergunta. Tudo que vira status HTTP (400/401/403/404/422/500)
+          acontece aqui.
         - Escopo 2 (corpo SSE, `async_session_scope`): RunTurnAction monta os
           deps e o prelúdio do grafo roda — gate, retrieve, recusa — emitindo os
           eventos ao vivo. Fecha na entrada do nó de resposta.
@@ -60,8 +72,21 @@ class ConversationController:
         user_email = user.email
         run_id = data.run_id
 
+        # Mentor (Task 4): entitlement fail-closed, ANTES de qualquer chamada de
+        # modelo e ainda na sessão do middleware (a LessonRepository precisa
+        # dela) — 400 sem lesson_id, 403 sem acesso (LessonAccessDeniedError,
+        # mapeado em exception_handlers.py).
+        lesson: Lesson | None = None
+        if data.mode == "mentor":
+            if not data.lesson_id:
+                raise DomainError("mode mentor exige input.lesson_id")
+            lesson = await CheckLessonAccessAction(access_client=BorderlessLessonAccessClient()).execute(
+                bearer=user.platform_access_token, platform_video_id=data.lesson_id
+            )
+
         turn = await OpenTurnAction().execute(
-            data.question, data.conversation_id, user_email, mode=data.mode, locale=data.locale
+            data.question, data.conversation_id, user_email, mode=data.mode, locale=data.locale,
+            lesson_id=lesson.platform_video_id if lesson is not None else None,
         )
         draft = turn.draft
         # Gravado sempre — coluna barata; o link só aparece na UI quando
@@ -75,6 +100,8 @@ class ConversationController:
         embeddings = get_embeddings_client()
 
         extra_config = await _build_extra_config(user)
+        if lesson is not None:
+            extra_config.update(build_mentor_extra_config(lesson))
 
         captured: dict = {"text": "", "citations": [], "navigation": None, "root_end": None}
 
@@ -190,6 +217,22 @@ async def _build_extra_config(user) -> dict:
         },
         "navigation_enabled": navigation_enabled,
         "navigation_catalog_text": catalog_text,
+    }
+
+
+def build_mentor_extra_config(lesson: Lesson) -> dict:
+    """`extra_config` do turno mentor (C5): as CINCO chaves que a tool
+    `search_lesson` espera em `configurable`. `lesson_id` aqui é o INTERNO
+    (`lessons.uuid`) — o escopo da tool; o id da Platform vem à parte em
+    `lesson_platform_video_id` (C1: os dois ids nunca se misturam).
+    `lesson_distances`/`question_embedding` nascem vazios — a tool os
+    preenche em place (`extend`/`[:] =`)."""
+    return {
+        "lesson_id": lesson.uuid,
+        "lesson_distances": [],
+        "question_embedding": [],
+        "lesson_platform_video_id": lesson.platform_video_id,
+        "lesson_program_slug": lesson.program_slug,
     }
 
 

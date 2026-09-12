@@ -36,6 +36,7 @@ class OpenTurnAction:
         user_email: str | None,
         mode: str = "chat",
         locale: str = "pt-BR",
+        lesson_id: str | None = None,
     ) -> OpenedTurn:
         now = datetime.now(timezone.utc)
         draft = TurnTraceDraft(question=question, user_email=user_email)
@@ -84,4 +85,5 @@ class OpenTurnAction:
             signals=signals,
             mode=mode,
             locale=locale,
+            lesson_id=lesson_id,
         )

@@ -86,6 +86,10 @@ class StreamEventsRequest(BaseModel):
         return self.input.locale
 
     @property
+    def lesson_id(self) -> str | None:
+        return self.input.lesson_id
+
+    @property
     def conversation_id(self) -> UUID:
         return UUID(self.config.configurable.thread_id)
 
