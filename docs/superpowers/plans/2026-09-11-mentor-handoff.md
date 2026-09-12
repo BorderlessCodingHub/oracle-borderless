@@ -2,6 +2,37 @@
 
 Documento para retomar a execução em outra janela de contexto. Fonte da verdade do progresso são os **ledgers** (git-ignored, mas persistentes em disco) de cada plano; este documento consolida o estado, o que falta e todas as decisões tomadas em nome do usuário.
 
+## 0. Atualização 2026-09-11 (sessão 2) — ambiente destravado, tudo executado
+
+Esta seção substitui o que as seções 1–4 diziam sobre "escrito, não executado". Ledgers seguem sendo a fonte da verdade.
+
+### Estado por plano
+| Plano | Repo | HEAD | Estado |
+| --- | --- | --- | --- |
+| A — rotas internas | borderless-api | `be6d30ba` | COMPLETO. Suíte unitária 3577/3577 verde. Rotas verificadas ao vivo: 401 sem/erro de segredo; lista de `program-base` (2 aulas do seed); 404 vídeo inexistente; rota de mídia devolve 502 legível ("Panda Video API request failed: 401 Unauthorized"). **Verificação ao vivo do Panda BLOQUEADA: a `PANDA_VIDEO_API_KEY` do `.env` responde 401 no Panda (também via curl direto), e todos os vídeos do seed têm `providerRef` vazio.** |
+| B — ingestão | oracle-borderless | `f066ed0` | COMPLETO. `alembic upgrade head`/`check` OK nos dois bancos; ciclo `downgrade 0011 → head` OK; índices esperados presentes (`ix_lesson_chunks_embedding_hnsw` hnsw `vector_cosine_ops`); `tests/integration` 144 OK; suíte total 741 OK. CLI `mentor:ingest program-base --limit 1` percorre sync→claim→mídia e falha legível (502 do Panda), lote continua, `failure_reason`/`attempts=1` gravados. Ingestão real depende da chave do Panda. |
+| C — modo mentor | oracle-borderless | `f066ed0` | COMPLETO. 4 testes de integração escritos offline falharam na 1ª execução — todos defeitos de TESTE (Ruling C9), corrigidos em `d2786cd..cece091`, re-revisão limpa. Verificado ao vivo (Oracle 8000): status pending/failed/unknown/401; turno mentor real com `search_lesson`, 2 citações `source_type=lesson` `?t=0`/`?t=275`; fora do assunto responde com aviso e grava `lesson_coverage=gap`; traces com intent/lesson_id/embedding; `/ops/mentor` 200 na allowlist e 404 fora; log sem "search_lesson tool failed"/"non-checked-in". |
+| D — aba Mentor | borderless-platform | `79375686` | COMPLETO. Fix wave (C1–C3, I1–I6, minors) + re-revisão limpa; e2e executado pela 1ª vez: 3 falhas em `mentor-citation.spec.ts` → fix round 1 (seletor ambíguo "Sources"/"Resources" + BUG REAL: navegação só-de-query na mesma rota pendurava o App Router → citação da mesma aula aplica `?t=` via History API). `--project=oracle e2e/tests/oracle`: **56 passed / 0 failed** (reexecutado pelo controller). Demo automatizada contra o Oracle REAL passou (aba só em aula ready, Fontes, link interno `?t=`, URL atualiza, 400px, 2º turno, failed→"indisponível", unknown→sem aba). Re-revisão escopada da rodada 1 (opus): 5/5 ADDRESSED, nada aberto. |
+
+### Como o ambiente foi destravado (sem Docker, sem sudo)
+Postgres 16.2 + pgvector 0.6.2 via pacote Python `pgserver` (venv 3.12), dados em `~/.local/share/borderless-pg/{oracle,api}` (5432 oracle/oracle; 5433 postgres/postgres, db `borderless_dev`), socket dir `~/.local/share/borderless-pg/sock`; ffmpeg/ffprobe 7.0.2 estáticos em `~/.local/bin`; Chromium do Playwright instalado. Subir: `pg_ctl -D <dir> -o "-p <porta> -k ~/.local/share/borderless-pg/sock -c listen_addresses=localhost" start`. `.env` locais (git-ignored) ganharam: API `MENTOR_INGEST_SECRET`; Oracle `MENTOR_ENABLED=true`, `BORDERLESS_INTERNAL_SECRET` (mesmo valor), `ADMIN_EMAILS=base@borderless.com`. Receita completa na memória do Claude (`local-env-without-docker`).
+
+### Aula da demo
+`b652bb2c…` (`base-construindo-portfolio`) está READY no banco dev do Oracle com **transcrição SINTÉTICA rotulada** ("[TRANSCRIÇÃO SINTÉTICA PARA DEMO]…", 2 chunks, embeddings reais) — só para exercitar o fio enquanto o Panda está bloqueado. Rodar `mentor:ingest program-base --lesson base-construindo-portfolio --force` assim que houver chave válida substitui o conteúdo. `186cad2e…` (`base-mindset-global`) está `failed` (Panda 401).
+
+### O que fica para o usuário
+1. **Chave do Panda**: renovar `PANDA_VIDEO_API_KEY` (e confirmar que as aulas do Base têm `providerRef`) → `curl …/media | ffprobe` → `mentor:ingest program-base --limit 1` 2x (2ª = "sem mudança") → lote completo (~US$10). Só depois disso o seek do player (C3) tem cobertura e a demo usa conteúdo real.
+2. **Merge/PR** dos três repos (`feat/speech-to-text`, sem upstream, nada pushado) — decisão do usuário; criar o secret `MENTOR_INGEST_SECRET` no GitHub Actions antes do deploy da API.
+3. **Follow-ups técnicos** (parked, com rulings nos ledgers): bug do App Router em qualquer link só-de-query (Ruling D10 — só a citação do mentor foi corrigida); `lessons.ts` mapeia body ilegível para `unknown` (com D9 a aba SOME em drift de schema — virar `isError`); M10: HNSW pós-filtra por `lesson_id` — busca exata por aula custa ~1 ms, considerar forçar caminho exato; testes de integração da API do Oracle gravam no banco DEV (não em `DB_NAME_TEST`); pergunta fora do assunto ainda mostra "Fontes" da aula (spec §10 sem limiar — decisão de produto); `evals/cases/mentor_set.json` sem task; `TabsContent` do mentor monta com trigger oculto; Vimeo `setCurrentTime` não verificado em runtime.
+4. Apagar `.superpowers/sdd/*` dos três repos quando tudo estiver mergeado.
+
+### Rulings desta sessão (C9, D9 já constava, D10) — íntegra nos ledgers
+- **C9**: as 4 falhas de integração eram defeitos de teste; verificar se flush recusado no savepoint do trace custa a resposta → confirmado que NÃO (teste de cobertura adicionado) — custo se errado: nenhum.
+- **D10**: correção do router (History API) restrita à citação da mesma aula; o resto vira ticket — custo se errado: outros deep-links só-de-query continuam pendurados até o follow-up.
+- Controller (fora do fluxo de subagente, só docstring): removidas as notas "ESCRITO MAS NÃO EXECUTADO" de 3 testes já executados (`f066ed0`).
+
+---
+
 ## 1. Estado por plano (branch `feat/speech-to-text` em cada repo, nada mergeado, nada pushado)
 
 | Plano | Repo | Tasks | Revisão final | Estado |
