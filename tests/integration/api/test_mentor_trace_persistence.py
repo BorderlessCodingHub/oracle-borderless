@@ -3,8 +3,7 @@ quatro campos do Task 5 (intent, lesson_id, lesson_coverage, question_embedding)
 
 Espelha tests/integration/api/test_ask_trace_persistence.py — mesma montagem
 (monkeypatcha as factories do controller, bate no app via ASGITransport,
-verifica num escopo de sessão próprio). ESCRITO MAS NÃO EXECUTADO (ruling B2):
-sem Postgres disponível neste ambiente, validado só com `--collect-only`.
+verifica num escopo de sessão próprio).
 """
 
 from uuid import UUID, uuid4
@@ -17,9 +16,28 @@ from sqlalchemy import text
 from src.domain.lessons.entities.lesson import Lesson
 from src.domain.lessons.repositories.lesson_repository import LessonRepository
 from src.support.core.session_scope import run_in_async_session
+from src.support.core.settings import settings
 from tests.fakes.auth import auth_headers
+from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
 from tests.fakes.fake_turn_graph import FakeTurnGraph
 from tests.fakes.stream_events import ask_body, events, is_root
+
+
+def _question_embedding(seed: str) -> list[float]:
+    """Um vetor com as `settings.EMBEDDING_DIM` dimensões que a coluna
+    `agent_traces.question_embedding` declara. Vetores de brinquedo (3 casas)
+    fazem o pgvector recusar o INSERT — o trace some e o teste vira um
+    'esperava 1 trace, achei 0' sem explicação."""
+    return FakeEmbeddingsClient(dim=settings.EMBEDDING_DIM)._vector(seed)
+
+
+def _dimensions(stored) -> int:
+    """Casas do vetor gravado. No SELECT cru o pgvector volta como texto (esta
+    conexão não registra o codec), então contar as casas é o que prova que o
+    embedding chegou inteiro à coluna."""
+    if isinstance(stored, str):
+        return len(stored.strip("[]").split(","))
+    return len(stored)
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -50,7 +68,6 @@ def _patch(monkeypatch, graph):
     from src.support.clients.borderless.borderless_lesson_access_client import (
         BorderlessLessonAccessClient,
     )
-    from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
 
     monkeypatch.setattr(ctrl, "get_turn_graph_runner", lambda **kw: graph.with_config(**kw))
     monkeypatch.setattr(ctrl, "get_embeddings_client", lambda: FakeEmbeddingsClient())
@@ -90,7 +107,7 @@ async def test_a_mentor_turn_records_intent_lesson_and_coverage(monkeypatch):
     graph = FakeTurnGraph(
         answer="é o Personal Study Plan",
         mentor_distances=[0.10, 0.40],
-        mentor_embedding=[0.1, 0.2, 0.3],
+        mentor_embedding=_question_embedding("o que é o PSP?"),
     )
     _patch(monkeypatch, graph)
     from main import app
@@ -110,7 +127,10 @@ async def test_a_mentor_turn_records_intent_lesson_and_coverage(monkeypatch):
     assert trace["retrieval_kept"] == 2
     assert trace["retrieval_best_distance"] == 0.10
     assert trace["lesson_coverage"] == "covered"
+    # O embedding que a tool calculou chega inteiro à coluna — não basta "não é
+    # nulo": um vetor de dimensão errada nem seria aceito pelo pgvector.
     assert trace["question_embedding"] is not None
+    assert _dimensions(trace["question_embedding"]) == settings.EMBEDDING_DIM
 
 
 @pytest.mark.asyncio
@@ -119,7 +139,7 @@ async def test_a_mentor_turn_with_a_far_distance_is_a_content_gap(monkeypatch):
     graph = FakeTurnGraph(
         answer="não encontrei isso na aula",
         mentor_distances=[0.90],
-        mentor_embedding=[0.4, 0.5, 0.6],
+        mentor_embedding=_question_embedding("qual a receita de bolo?"),
     )
     _patch(monkeypatch, graph)
     from main import app
@@ -143,7 +163,7 @@ async def test_a_trace_recording_failure_still_lets_the_mentor_turn_answer(monke
     graph = FakeTurnGraph(
         answer="resposta apesar do trace quebrar",
         mentor_distances=[0.20],
-        mentor_embedding=[0.7, 0.8],
+        mentor_embedding=_question_embedding("o que é o PSP?"),
     )
     _patch(monkeypatch, graph)
 
@@ -184,5 +204,7 @@ async def test_a_trace_recording_failure_still_lets_the_mentor_turn_answer(monke
         await s.execute(text("DELETE FROM conversations WHERE uuid = :cid"), {"cid": conversation_id})
         await s.commit()
 
-    assert rows == ["resposta apesar do trace quebrar"]
+    # `FakeTurnRun.stream()` emite cada token como `token + " "`, então o
+    # conteúdo persistido termina com um espaço; o que importa é o texto.
+    assert [r.strip() for r in rows] == ["resposta apesar do trace quebrar"]
     assert trace_rows == []
