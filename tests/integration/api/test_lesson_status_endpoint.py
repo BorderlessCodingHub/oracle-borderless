@@ -1,10 +1,7 @@
 """Task 6 — GET /lessons/{platform_video_id}/status.
 
 Usa o Postgres local, como o resto de integration/ (ver tests/integration/api/
-test_ask_endpoint.py). ESCRITO MAS NÃO EXECUTADO nesta tarefa: sem Postgres
-disponível no ambiente onde a Task 6 foi implementada — `uv run pytest
-tests/integration/api/test_lesson_status_endpoint.py -v` fica pendente de
-rodar com o banco local de pé (ver docs/testing-guide.md / e2e-local-run).
+test_ask_endpoint.py).
 """
 
 from uuid import uuid4

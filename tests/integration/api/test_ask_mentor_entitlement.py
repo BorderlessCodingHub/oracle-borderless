@@ -1,10 +1,7 @@
 """Task 4 — entitlement fail-closed do modo mentor em POST /conversations/ask.
 
 Usa o Postgres local, como o resto de integration/ (ver tests/integration/api/
-test_ask_endpoint.py). ESCRITO MAS NÃO EXECUTADO nesta tarefa: sem Postgres
-disponível no ambiente onde a Task 4 foi implementada — `uv run pytest
-tests/integration/api/test_ask_mentor_entitlement.py -v` fica pendente de
-rodar com o banco local de pé (ver docs/testing-guide.md / e2e-local-run).
+test_ask_endpoint.py).
 """
 
 from uuid import uuid4

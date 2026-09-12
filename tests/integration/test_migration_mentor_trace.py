@@ -1,6 +1,5 @@
 """I4: migração 0013 (colunas de mentor em `agent_traces`) espelhando
-`test_migration_mentor_lessons.py`. ESCRITO MAS NÃO EXECUTADO (ruling B2): sem
-Postgres disponível neste ambiente, validado só com `--collect-only`."""
+`test_migration_mentor_lessons.py`."""
 
 import pytest
 from sqlalchemy import text
