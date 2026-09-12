@@ -9,9 +9,6 @@ Ao contrário de `test_ask_mentor_entitlement.py`/`test_mentor_trace_persistence
 tool `search_lesson` sobrevive à passagem de `stream()` sem sessão (ADR-0020) e
 ainda assim entrega uma citação `source_type == "lesson"` até a mensagem do
 assistente persistida.
-
-ESCRITO MAS NÃO EXECUTADO (ruling B2): sem Postgres disponível neste ambiente,
-validado só com `uv run pytest tests/integration --collect-only -q`.
 """
 
 from uuid import UUID, uuid4
@@ -29,6 +26,7 @@ from src.domain.lessons.repositories.lesson_repository import LessonRepository
 from src.support.core.session_scope import run_in_async_session
 from tests.fakes.auth import auth_headers
 from tests.fakes.fake_embeddings_client import FakeEmbeddingsClient
+from tests.fakes.scripted_chat_model import ScriptedChatModel
 from tests.fakes.stream_events import ask_body
 
 QUESTION = "o que é um token?"
@@ -68,29 +66,44 @@ async def _seed_lesson_with_chunk(video_id: str) -> Lesson:
     return await run_in_async_session(_work)
 
 
-class _FakeMentorChatModel:
+ANSWER = "Um token é a unidade que o modelo processa."
+
+
+class _FakeMentorChatModel(ScriptedChatModel):
     """Modelo fake do turno mentor: primeira chamada pede `search_lesson`,
-    segunda devolve a resposta final. `bind_tools` devolve `self` — o grafo
-    real ainda assim decide o roteamento pelas tool_calls da mensagem."""
+    segunda devolve a resposta final.
 
-    def __init__(self) -> None:
-        self.call_count = 0
-        self.bound_tool_names: list[str] = []
+    Herda de `ScriptedChatModel` porque precisa ser um `BaseChatModel` DE
+    VERDADE: o nó `answer` chama `ainvoke` dentro do `astream_events`, e só um
+    modelo que streama por callbacks emite `on_chat_model_stream`. É desses
+    eventos — e só deles — que `text_of` (`src/support/agent/ports.py`) monta o
+    texto da resposta; um objeto solto com `ainvoke` devolve a `AIMessage` mas
+    não emite token nenhum, e a mensagem do assistente jamais seria persistida.
 
-    def bind_tools(self, tools):
+    `bind_tools` devolve `self` (o grafo real decide o roteamento pelas
+    tool_calls da mensagem) e ainda anota os nomes ligados, para a asserção de
+    que o mentor só enxerga `search_lesson`.
+    """
+
+    bound_tool_names: list[str] = []
+
+    def bind_tools(self, tools, **kwargs):
         self.bound_tool_names = [t.name for t in tools]
         return self
 
-    async def ainvoke(self, messages):
-        self.call_count += 1
-        if self.call_count == 1:
-            return AIMessage(
+
+def _scripted_model() -> _FakeMentorChatModel:
+    return _FakeMentorChatModel(
+        replies=[
+            AIMessage(
                 content="",
                 tool_calls=[
                     {"name": "search_lesson", "args": {"query": QUESTION}, "id": "call-1"}
                 ],
-            )
-        return AIMessage(content="Um token é a unidade que o modelo processa.")
+            ),
+            AIMessage(content=ANSWER),
+        ]
+    )
 
 
 def _patch(monkeypatch):
@@ -100,7 +113,7 @@ def _patch(monkeypatch):
         BorderlessLessonAccessClient,
     )
 
-    model = _FakeMentorChatModel()
+    model = _scripted_model()
     monkeypatch.setattr(nodes_module, "build_chat_model", lambda: model)
 
     # Deliberadamente NÃO monkeypatcha `ctrl.get_turn_graph_runner`: este teste
@@ -119,14 +132,14 @@ def _patch(monkeypatch):
     return model
 
 
-async def _fetch_assistant_sources(conversation_id: UUID) -> list[dict]:
+async def _fetch_assistant_message(conversation_id: UUID) -> dict:
     from src.support.core.database import AsyncSessionLocal
 
     async with AsyncSessionLocal() as s:
         row = (
             await s.execute(
                 text(
-                    "SELECT sources FROM messages WHERE conversation_id = :cid "
+                    "SELECT content, sources FROM messages WHERE conversation_id = :cid "
                     "AND role = 'assistant'"
                 ),
                 {"cid": conversation_id},
@@ -134,7 +147,7 @@ async def _fetch_assistant_sources(conversation_id: UUID) -> list[dict]:
         ).mappings().one()
         await s.execute(text("DELETE FROM conversations WHERE uuid = :cid"), {"cid": conversation_id})
         await s.commit()
-    return row["sources"] or []
+    return dict(row)
 
 
 @pytest.mark.asyncio
@@ -152,12 +165,17 @@ async def test_a_real_mentor_turn_with_the_real_graph_and_tool_reaches_a_lesson_
         assert resp.status_code == 200
 
     # o modelo foi chamado duas vezes: pediu a busca, depois respondeu de fato.
-    assert model.call_count == 2
+    assert model.calls == 2
     assert model.bound_tool_names == ["search_lesson"]
 
     conversation_id = UUID(body["config"]["configurable"]["thread_id"])
-    sources = await _fetch_assistant_sources(conversation_id)
+    message = await _fetch_assistant_message(conversation_id)
 
+    # O texto só chega aqui pelos `on_chat_model_stream` do nó `answer` — é a
+    # prova de que o turno atravessou o grafo real, e não só de que a linha
+    # existe.
+    assert message["content"].strip() == ANSWER
+    sources = message["sources"] or []
     assert len(sources) == 1
     assert sources[0]["source_type"] == "lesson"
     assert "Tokens e embeddings" in sources[0]["title"]
