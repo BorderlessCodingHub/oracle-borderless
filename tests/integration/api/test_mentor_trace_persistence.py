@@ -208,3 +208,53 @@ async def test_a_trace_recording_failure_still_lets_the_mentor_turn_answer(monke
     # conteúdo persistido termina com um espaço; o que importa é o texto.
     assert [r.strip() for r in rows] == ["resposta apesar do trace quebrar"]
     assert trace_rows == []
+
+
+@pytest.mark.asyncio
+async def test_a_trace_rejected_by_the_database_does_not_cost_the_assistant_message(monkeypatch):
+    """Ruling C9: o irmão acima quebra ANTES do banco (a Action levanta). Aqui a
+    falha é a de verdade — um `flush()` recusado pelo Postgres DENTRO do
+    savepoint do trace (embedding com dimensão errada). É o caso que
+    `_persist_turn` promete aguentar: um erro de banco aborta só o savepoint
+    dele, e a resposta do assistente, que vai num savepoint próprio depois,
+    ainda tem que ser gravada.
+    """
+    lesson = await _seed_lesson("v-trace-rejected")
+    graph = FakeTurnGraph(
+        answer="resposta apesar do insert recusado",
+        mentor_distances=[0.20],
+        # DE PROPÓSITO fora da dimensão da coluna: é o que faz o pgvector
+        # recusar o INSERT e o flush estourar dentro do `begin_nested`.
+        mentor_embedding=[0.1, 0.2, 0.3],
+    )
+    _patch(monkeypatch, graph)
+    from main import app
+
+    body = ask_body("o que é o PSP?", mode="mentor", lesson_id=lesson.platform_video_id)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/conversations/ask", json=body, headers=await auth_headers("mentor-rejected@x.com"))
+        assert resp.status_code == 200
+        last = events(resp.text)[-1]
+        assert last["event"] == "on_chain_end" and is_root(last)
+    conversation_id = UUID(body["config"]["configurable"]["thread_id"])
+
+    from src.support.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as s:
+        rows = (
+            await s.execute(
+                text("SELECT content FROM messages WHERE conversation_id = :cid AND role = 'assistant'"),
+                {"cid": conversation_id},
+            )
+        ).scalars().all()
+        trace_rows = (
+            await s.execute(
+                text("SELECT 1 FROM agent_traces WHERE conversation_id = :cid"),
+                {"cid": conversation_id},
+            )
+        ).all()
+        await s.execute(text("DELETE FROM conversations WHERE uuid = :cid"), {"cid": conversation_id})
+        await s.commit()
+
+    assert trace_rows == []
+    assert [r.strip() for r in rows] == ["resposta apesar do insert recusado"]
