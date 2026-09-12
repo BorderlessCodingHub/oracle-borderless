@@ -1,6 +1,7 @@
 import * as api from "../lib/api/ops";
 import type {
   EvalReportPayload,
+  MentorInsights,
   OpsOverview,
   OpsWindow,
   TurnDetail,
@@ -127,6 +128,27 @@ const DEMO_DETAILS: Record<string, TurnDetail> = {
 
 const DEMO_EVAL: EvalReportPayload = { status: "no_runs", report: null, history: [] };
 
+const DEMO_MENTOR: MentorInsights = {
+  gaps: [
+    {
+      lesson_id: "aula-tokenizacao",
+      program_slug: "base",
+      question: "o que é autorregressão?",
+      asked_at: "2026-08-04T09:12:00+00:00",
+      user_email: "aluno.demo@x.com",
+    },
+  ],
+  engagement: [
+    {
+      lesson_id: "aula-tokenizacao",
+      turns: 8,
+      distinct_users: 5,
+      avg_citations: 2.4,
+      gap_ratio: 0.25,
+    },
+  ],
+};
+
 export function getOverview(window: OpsWindow): Promise<OpsOverview> {
   if (DEMO) return Promise.resolve({ ...DEMO_OVERVIEW, window });
   return api.getOverview(window);
@@ -150,4 +172,9 @@ export function getTurn(id: string): Promise<TurnDetail> {
 export function getEvalReport(): Promise<EvalReportPayload> {
   if (DEMO) return Promise.resolve(DEMO_EVAL);
   return api.getEvalReport();
+}
+
+export function getMentorInsights(programSlug?: string, days = 30): Promise<MentorInsights> {
+  if (DEMO) return Promise.resolve(DEMO_MENTOR);
+  return api.getMentorInsights(programSlug, days);
 }

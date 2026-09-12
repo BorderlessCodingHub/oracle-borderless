@@ -117,3 +117,41 @@ def seed_traces(db_session):
         return traces
 
     return _seed
+
+
+@pytest.fixture
+def seed_trace(db_session):
+    """Insere uma linha de `agent_traces` por chamada, com kwargs soltos.
+
+    Complemento a `seed_traces` (lista de dicts) para testes que preferem uma
+    linha por chamada — caso das leituras do mentor (`GetMentorInsightsAction`),
+    onde cada `await seed_trace(intent=..., lesson_id=..., ...)` lê melhor como
+    "esta pergunta aconteceu assim". Mesmas regras: os campos não passados
+    levam o default da Entity `TurnTrace`, cada chamada cria sua própria
+    `Conversation`, e o rollback do `db_session` limpa tudo no fim do teste.
+    """
+
+    async def _seed(**kwargs) -> TurnTrace:
+        now = datetime.now(timezone.utc)
+        conversation = await ConversationRepository().create(
+            Conversation(uuid=uuid7(), user_email=None, title="t", created_at=now, updated_at=now, deleted_at=None)
+        )
+        await db_session.flush()
+
+        attrs = dict(
+            uuid=uuid7(),
+            conversation_id=conversation.uuid,
+            question="q",
+            outcome="answer",
+            created_at=now,
+            # "base" é o `program_slug` de convenção nos testes deste repo
+            # (ver `test_mentor_trace.py`) — default sensato para quem chama
+            # `seed_trace` sem se importar com qual programa é.
+            program_slug="base",
+        )
+        attrs.update(kwargs)
+        trace = await TurnTraceRepository().append(TurnTrace(**attrs))
+        await db_session.flush()
+        return trace
+
+    return _seed

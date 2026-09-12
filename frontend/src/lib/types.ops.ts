@@ -86,6 +86,32 @@ export interface TurnDetail extends TurnSummary {
   langsmith_url: string | null;
 }
 
+/** `LessonGapResponse` — pergunta do modo mentor que a aula não cobriu.
+ * `user_email` viaja porque `/ops/mentor` é admin-only (allowlist
+ * `ADMIN_EMAILS`) e o backlog só é acionável sabendo quem perguntou. */
+export interface LessonGap {
+  lesson_id: string | null;
+  program_slug: string | null;
+  question: string;
+  asked_at: string;
+  user_email: string | null;
+}
+
+/** `LessonEngagementResponse` — retenção por aula. Sem `user_email`, de
+ * propósito: só a contagem de distintos, não quem são. */
+export interface LessonEngagement {
+  lesson_id: string | null;
+  turns: number;
+  distinct_users: number;
+  avg_citations: number;
+  gap_ratio: number;
+}
+
+export interface MentorInsights {
+  gaps: LessonGap[];
+  engagement: LessonEngagement[];
+}
+
 /** Uma métrica agregada do report — `evals/report.py::_report_dict`. */
 export interface EvalMetric {
   metric: string;

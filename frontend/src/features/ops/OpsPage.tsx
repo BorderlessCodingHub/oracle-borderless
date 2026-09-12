@@ -4,6 +4,7 @@ import { Footer } from "../../components/Footer/Footer";
 import { useOpsOverview } from "../../hooks/useOpsOverview";
 import { useOpsTurns } from "../../hooks/useOpsTurns";
 import { useEvalReport } from "../../hooks/useEvalReport";
+import { useMentorInsights } from "../../hooks/useMentorInsights";
 import { getTurn } from "../../data/opsSource";
 import type { OpsWindow, TurnDetail as Detail } from "../../lib/types.ops";
 import type { MapBox } from "./architectureMap";
@@ -11,6 +12,7 @@ import { ArchitectureMap } from "./components/ArchitectureMap";
 import { BoxDetail } from "./components/BoxDetail";
 import { EvalPanel } from "./components/EvalPanel";
 import { KnowledgeGaps } from "./components/KnowledgeGaps";
+import { MentorPanel } from "./components/MentorPanel";
 import { TurnDetail } from "./components/TurnDetail";
 import { TurnList } from "./components/TurnList";
 import { WindowPicker } from "./components/WindowPicker";
@@ -26,6 +28,7 @@ export default function OpsPage() {
   const { overview, error: overviewError } = useOpsOverview(window);
   const { turns, error: turnsError } = useOpsTurns(window);
   const { payload: evalPayload, error: evalError } = useEvalReport();
+  const { insights: mentorInsights, error: mentorError } = useMentorInsights();
 
   // A janela mudou: o turno selecionado pode nem estar mais na lista.
   useEffect(() => {
@@ -97,6 +100,14 @@ export default function OpsPage() {
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>Lacunas da base</h2>
           <KnowledgeGaps overview={overview} />
+        </section>
+
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>Mentor</h2>
+          {mentorError && (
+            <p className={styles.error}>Não foi possível carregar o mentor: {mentorError}</p>
+          )}
+          <MentorPanel insights={mentorInsights} />
         </section>
 
         <section className={styles.section}>

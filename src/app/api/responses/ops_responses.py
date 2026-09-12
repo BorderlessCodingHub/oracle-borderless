@@ -2,6 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from src.domain.observability.dtos.mentor_insights import MentorInsights
 from src.domain.observability.dtos.ops_overview import OpsOverview
 from src.domain.observability.entities.turn_trace import TurnTrace
 from src.support.observability.langsmith import run_url
@@ -145,6 +146,40 @@ class TurnDetailResponse(TurnSummaryResponse):
             output_tokens=t.output_tokens,
             error=t.error,
             langsmith_url=run_url(t.langsmith_run_id),
+        )
+
+
+class LessonGapResponse(BaseModel):
+    """Uma pergunta que a aula não cobriu — inclui `user_email` de propósito:
+    esta rota nasce sob `require_admin` (allowlist `ADMIN_EMAILS`, ADR-0017),
+    e saber quem perguntou é o que torna o backlog acionável (spec §9.4)."""
+
+    lesson_id: str | None
+    program_slug: str | None
+    question: str
+    asked_at: str
+    user_email: str | None
+
+
+class LessonEngagementResponse(BaseModel):
+    """Retenção por aula — sem `user_email`: só a contagem de distintos."""
+
+    lesson_id: str | None
+    turns: int
+    distinct_users: int
+    avg_citations: float
+    gap_ratio: float
+
+
+class MentorInsightsResponse(BaseModel):
+    gaps: list[LessonGapResponse]
+    engagement: list[LessonEngagementResponse]
+
+    @classmethod
+    def from_dto(cls, dto: MentorInsights) -> "MentorInsightsResponse":
+        return cls(
+            gaps=[LessonGapResponse(**vars(g)) for g in dto.gaps],
+            engagement=[LessonEngagementResponse(**vars(e)) for e in dto.engagement],
         )
 
 
