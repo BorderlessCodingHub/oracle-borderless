@@ -295,6 +295,7 @@ a coluna.
 | --- | --- |
 | Aula sem transcrição (`pending`/`failed`) | Aba renderiza estado vazio explicando que o mentor ainda está preparando aquela aula; sem composer |
 | Aula bloqueada para o usuário | Aba não renderiza; se chamarem `/ask` direto, Oracle responde 403 |
+| Aula fora do lote ingerido (`status: unknown`) | Aba Mentor não renderiza (MVP cobre só o Base) |
 | Pergunta sem relação com a aula | Sem limiar de distância a busca **sempre** devolve `top_k` trechos, então quem julga relevância é o modelo: o prompt manda dizer que aquilo não foi tratado na aula e responder pelo conhecimento próprio |
 | Aula indexada mas com zero chunks | Tool devolve "(nenhum trecho disponível nesta aula)"; o mentor responde sem ancoragem e avisa |
 | Transcrição com termo técnico errado | Glossário no `prompt` da transcrição mitiga; erro residual é aceito no MVP |
