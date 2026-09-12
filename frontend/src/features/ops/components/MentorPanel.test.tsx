@@ -37,4 +37,16 @@ describe("MentorPanel", () => {
     render(<MentorPanel insights={null} />);
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
+
+  it("não explode com um payload malformado (shape que não é {gaps, engagement})", () => {
+    // Reproduz o que um stub de teste desatualizado ou um endpoint fora do
+    // shape esperado devolve: `getJSON` não valida em runtime, então
+    // `insights` pode chegar como `[]` (ou qualquer outra coisa) em vez de
+    // `{gaps, engagement}`. O painel precisa cair no estado vazio, não
+    // lançar `TypeError: gaps is not iterable` durante o render.
+    const malformed = [] as unknown as MentorInsights;
+    render(<MentorPanel insights={malformed} />);
+    expect(screen.getByText("Nenhuma pergunta sem cobertura nesta janela.")).toBeInTheDocument();
+    expect(screen.getByText("Nenhum turno do modo mentor nesta janela.")).toBeInTheDocument();
+  });
 });

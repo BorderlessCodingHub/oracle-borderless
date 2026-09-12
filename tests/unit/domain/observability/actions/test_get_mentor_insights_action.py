@@ -2,18 +2,26 @@
 uma linha de query (qualquer objeto com os atributos certos, aqui um
 `SimpleNamespace`) para os DTOs, sem sessão nem banco. A aritmética de
 `gap_ratio`/`avg_citations` mora aqui porque é a parte que vale a pena testar
-sem PostgreSQL."""
+sem PostgreSQL. `_scope` é o outro pedaço puro: monta as condições SQLAlchemy
+compartilhadas pelas duas queries — testável compilando o SQL, sem sessão."""
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import select
 
 from src.domain.observability.actions.get_mentor_insights_action import (
     _engagement_from_row,
     _gap_from_row,
+    _scope,
 )
 from src.domain.observability.dtos.mentor_insights import LessonEngagement, LessonGap
+from src.domain.observability.models.turn_trace import TurnTraceModel
+
+
+def _compiled(stmt) -> str:
+    return str(stmt.compile(compile_kwargs={"literal_binds": True}))
 
 
 def _gap_row(**overrides):
@@ -78,3 +86,34 @@ def test_engagement_from_row_defaults_null_gap_count_to_zero():
     engagement = _engagement_from_row(row)
 
     assert engagement.gap_ratio == 0.0
+
+
+def test_scope_filters_by_program_slug_only_when_given():
+    """Regressão: o teste de integração do brief passa `program_slug="base"`
+    sem nenhuma linha semeada declarar esse campo (o default vem do fixture
+    `seed_trace`). Isso só prova a filtragem funciona se o filtro realmente
+    existir no SQL — este teste checa isso direto, sem depender do fixture."""
+    since = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    with_program = _compiled(select(TurnTraceModel).where(*_scope("base", since)))
+    without_program = _compiled(select(TurnTraceModel).where(*_scope(None, since)))
+
+    assert "program_slug = 'base'" in with_program
+    # `select(TurnTraceModel)` sempre lista a coluna `program_slug` (é um
+    # campo do model) — o que não pode aparecer é a CONDIÇÃO de igualdade.
+    assert "program_slug =" not in without_program
+    # Ambas sempre trazem o filtro de intent + janela.
+    for sql in (with_program, without_program):
+        assert "intent = 'mentor'" in sql
+        assert "created_at >=" in sql
+
+
+def test_scope_with_a_different_program_slug_excludes_the_other():
+    """`program_slug="outro"` não deveria casar com linhas de `"base"` — o
+    filtro é uma igualdade estrita, não um "contém"."""
+    since = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    sql = _compiled(select(TurnTraceModel).where(*_scope("outro", since)))
+
+    assert "program_slug = 'outro'" in sql
+    assert "program_slug = 'base'" not in sql

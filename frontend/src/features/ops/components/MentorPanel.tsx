@@ -22,7 +22,14 @@ function groupByLesson(gaps: LessonGap[]): [string, LessonGap[]][] {
 export function MentorPanel({ insights }: { insights: MentorInsights | null }) {
   if (!insights) return null;
 
-  const backlog = groupByLesson(insights.gaps);
+  // Defesa contra shape inesperado (endpoint fora do ar, stub de teste
+  // desatualizado, resposta que não é `{gaps, engagement}`): sem isso,
+  // `insights.gaps`/`insights.engagement` vêm `undefined` e o `for...of` de
+  // `groupByLesson` ou o `.map` abaixo explodem em render, derrubando a
+  // OpsPage inteira sem error boundary.
+  const gaps = Array.isArray(insights.gaps) ? insights.gaps : [];
+  const engagement = Array.isArray(insights.engagement) ? insights.engagement : [];
+  const backlog = groupByLesson(gaps);
 
   return (
     <div className={styles.map}>
@@ -51,7 +58,7 @@ export function MentorPanel({ insights }: { insights: MentorInsights | null }) {
 
       <section className={styles.band}>
         <h3 className={styles.bandTitle}>Retenção por aula</h3>
-        {insights.engagement.length === 0 ? (
+        {engagement.length === 0 ? (
           <p className={styles.muted}>Nenhum turno do modo mentor nesta janela.</p>
         ) : (
           <table className={styles.turns}>
@@ -65,7 +72,7 @@ export function MentorPanel({ insights }: { insights: MentorInsights | null }) {
               </tr>
             </thead>
             <tbody>
-              {insights.engagement.map((row) => (
+              {engagement.map((row) => (
                 <tr key={row.lesson_id ?? "(sem aula)"}>
                   <td>{row.lesson_id ?? "(sem aula)"}</td>
                   <td>{row.turns}</td>

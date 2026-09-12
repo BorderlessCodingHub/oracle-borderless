@@ -8,7 +8,7 @@ com MUITAS citações é aula sendo minerada de verdade.
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import case, func, select
+from sqlalchemy import ColumnElement, case, func, select
 
 from src.domain.observability.dtos.mentor_insights import (
     LessonEngagement,
@@ -17,6 +17,20 @@ from src.domain.observability.dtos.mentor_insights import (
 )
 from src.domain.observability.models.turn_trace import TurnTraceModel
 from src.support.core.context import CurrentAsyncSessionContext
+
+
+def _scope(program_slug: str | None, since: datetime) -> list[ColumnElement]:
+    """Filtro comum às duas queries: só turnos do mentor, dentro da janela, e
+    — quando informado — de um programa específico. Fatorado à parte (em vez
+    de inline no `execute`) para poder ser testado sem sessão: só monta
+    condições SQLAlchemy, não toca em banco."""
+    scope: list[ColumnElement] = [
+        TurnTraceModel.intent == "mentor",
+        TurnTraceModel.created_at >= since,
+    ]
+    if program_slug:
+        scope.append(TurnTraceModel.program_slug == program_slug)
+    return scope
 
 
 def _gap_from_row(row) -> LessonGap:
@@ -50,9 +64,7 @@ class GetMentorInsightsAction:
 
     async def execute(self, program_slug: str | None = None, days: int = 30) -> MentorInsights:
         since = datetime.now(timezone.utc) - timedelta(days=days)
-        scope = [TurnTraceModel.intent == "mentor", TurnTraceModel.created_at >= since]
-        if program_slug:
-            scope.append(TurnTraceModel.program_slug == program_slug)
+        scope = _scope(program_slug, since)
 
         gaps_rows = (
             await self.session.execute(
