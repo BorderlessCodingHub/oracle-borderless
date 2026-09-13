@@ -26,6 +26,23 @@ class NotionMCPError(RuntimeError):
     """Falha ao falar com o servidor MCP do Notion."""
 
 
+def decode_tool_result(tool: str, result: Any) -> dict[str, Any]:
+    """Texto do resultado de uma tool MCP -> dict.
+
+    O sinal de erro é `result.is_error`: o SDK do MCP (2.x, ver o pin em
+    pyproject) expõe o campo em snake_case e mantém `isError` apenas como
+    alias de serialização, então ler o nome antigo levanta AttributeError em
+    TODA chamada — inclusive nas bem-sucedidas. Vive fora do gerador para ser
+    testável sem subir o servidor por `npx`.
+    """
+    text = "".join(getattr(block, "text", "") for block in result.content).strip()
+    if result.is_error:
+        raise NotionMCPError(f"tool {tool!r} retornou erro: {text[:300]}")
+    if not text:
+        return {}
+    return json.loads(text)
+
+
 @asynccontextmanager
 async def notion_mcp_session() -> AsyncIterator[ToolCall]:
     """Abre uma sessão stdio com o notion-mcp-server e entrega um `call`."""
@@ -46,14 +63,6 @@ async def notion_mcp_session() -> AsyncIterator[ToolCall]:
             await session.initialize()
 
             async def call(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
-                result = await session.call_tool(tool, arguments)
-                text = "".join(
-                    getattr(block, "text", "") for block in result.content
-                ).strip()
-                if result.isError:
-                    raise NotionMCPError(f"tool {tool!r} retornou erro: {text[:300]}")
-                if not text:
-                    return {}
-                return json.loads(text)
+                return decode_tool_result(tool, await session.call_tool(tool, arguments))
 
             yield call
