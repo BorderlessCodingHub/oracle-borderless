@@ -173,3 +173,34 @@ async def test_history_tokens_are_estimated_from_the_loaded_recency():
 
     assert turn.draft.history_messages == 1
     assert turn.draft.history_tokens_est == 100  # 400 // 4
+
+
+@pytest.mark.asyncio
+async def test_new_conversation_is_born_with_the_turn_mode():
+    conv_repo = _FakeConvRepo()
+
+    await _make(conv_repo, _FakeMsgRepo()).execute("me leve ao blog", uuid4(), "a@x.com", mode="navigate")
+
+    assert conv_repo.created.mode == "navigate"
+
+
+@pytest.mark.asyncio
+async def test_new_conversation_defaults_to_chat_mode():
+    conv_repo = _FakeConvRepo()
+
+    await _make(conv_repo, _FakeMsgRepo()).execute("oi", uuid4(), "a@x.com")
+
+    assert conv_repo.created.mode == "chat"
+
+
+@pytest.mark.asyncio
+async def test_existing_conversation_keeps_its_original_mode():
+    """Um turno `chat` sobre uma thread nascida `navigate` não a reclassifica."""
+    now = datetime(2026, 7, 10, tzinfo=timezone.utc)
+    existing = Conversation(uuid4(), "a@x.com", "T", now, now, None, mode="navigate")
+    conv_repo = _FakeConvRepo(existing=existing)
+
+    await _make(conv_repo, _FakeMsgRepo()).execute("continua", existing.uuid, "a@x.com", mode="chat")
+
+    assert conv_repo.created is None
+    assert existing.mode == "navigate"

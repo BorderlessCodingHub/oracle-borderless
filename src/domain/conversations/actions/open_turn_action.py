@@ -54,6 +54,7 @@ class OpenTurnAction:
                     created_at=now,
                     updated_at=now,
                     deleted_at=None,
+                    mode=mode,
                 )
             )
         else:
