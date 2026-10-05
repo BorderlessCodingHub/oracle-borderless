@@ -41,10 +41,11 @@ class ConversationSummaryResponse(BaseModel):
     id: UUID
     title: str | None
     updated_at: datetime
+    mode: str | None = None
 
     @classmethod
     def from_entity(cls, c) -> "ConversationSummaryResponse":
-        return cls(id=c.uuid, title=c.title, updated_at=c.updated_at)
+        return cls(id=c.uuid, title=c.title, updated_at=c.updated_at, mode=c.mode)
 
 
 class ConversationDetailResponse(BaseModel):

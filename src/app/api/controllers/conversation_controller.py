@@ -1,7 +1,8 @@
 import logging
-from typing import AsyncIterator
+from typing import AsyncIterator, Literal
 from uuid import UUID
 
+from fastapi import Query
 from fastapi.responses import StreamingResponse
 
 from src.app.api.requests.stream_events_request import StreamEventsRequest
@@ -40,6 +41,8 @@ from src.support.core.settings import settings
 from src.support.observability.langsmith import hash_email
 
 logger = logging.getLogger(__name__)
+
+ConversationMode = Literal["chat", "navigate", "mentor"]
 
 
 class ConversationController:
@@ -180,9 +183,13 @@ class ConversationController:
         return StreamingResponse(event_source(), media_type=CONTENT_TYPE)
 
     @staticmethod
-    async def list() -> list[ConversationSummaryResponse]:
+    async def list(
+        mode: ConversationMode | None = Query(default=None),
+    ) -> list[ConversationSummaryResponse]:
+        """`?mode=chat` é o que a coluna de chats da Platform pede: consultas da
+        barra (`navigate`) e do Mentor (`mentor`) ficam fora da lista."""
         user_email = CurrentRequestContext.get_user().email
-        conversations = await ListConversationsAction().execute(user_email)
+        conversations = await ListConversationsAction().execute(user_email, mode=mode)
         return [ConversationSummaryResponse.from_entity(c) for c in conversations]
 
     @staticmethod
