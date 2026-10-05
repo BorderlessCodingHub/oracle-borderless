@@ -13,3 +13,5 @@ class Conversation:
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None
+    # "chat" | "navigate" | "mentor" | None (linhas anteriores à 0014 já backfilladas).
+    mode: str | None = None
