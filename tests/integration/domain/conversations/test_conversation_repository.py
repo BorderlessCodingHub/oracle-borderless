@@ -112,3 +112,20 @@ async def test_mode_defaults_to_none_when_omitted(db_session):
     found = await repo.get_by_id(created.uuid)
     assert found is not None
     assert found.mode is None
+
+
+@pytest.mark.asyncio
+async def test_list_by_user_filters_by_mode_strictly(db_session):
+    repo = ConversationRepository()
+    now = datetime(2026, 10, 5, tzinfo=timezone.utc)
+    email = "filter@x.com"
+    await repo.create(Conversation(uuid4(), email, "Chat", now, now, None, mode="chat"))
+    await repo.create(Conversation(uuid4(), email, "Nav", now, now, None, mode="navigate"))
+    await repo.create(Conversation(uuid4(), email, "Legado", now, now, None, mode=None))
+    await db_session.flush()
+
+    everything = await repo.list_by_user(email)
+    assert {c.title for c in everything} == {"Chat", "Nav", "Legado"}
+
+    only_chat = await repo.list_by_user(email, mode="chat")
+    assert [c.title for c in only_chat] == ["Chat"]

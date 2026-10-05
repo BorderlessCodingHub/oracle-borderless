@@ -78,3 +78,15 @@ async def test_list_conversations_by_user(db_session):
     result = await ListConversationsAction().execute("a@x.com")
     assert all(c.user_email == "a@x.com" for c in result)
     assert len(result) >= 1
+
+
+@pytest.mark.asyncio
+async def test_list_conversations_passes_mode_through(db_session):
+    now = datetime(2026, 10, 5, tzinfo=timezone.utc)
+    repo = ConversationRepository()
+    await repo.create(Conversation(uuid4(), "act@x.com", "C", now, now, None, mode="chat"))
+    await repo.create(Conversation(uuid4(), "act@x.com", "M", now, now, None, mode="mentor"))
+    await db_session.flush()
+
+    result = await ListConversationsAction().execute("act@x.com", mode="mentor")
+    assert [c.title for c in result] == ["M"]
