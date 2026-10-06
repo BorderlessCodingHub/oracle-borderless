@@ -91,9 +91,10 @@ async def test_list_filters_by_mode_and_rejects_unknown_mode():
     from main import app
     from src.domain.conversations.entities.conversation import Conversation
     from src.domain.conversations.repositories.conversation_repository import ConversationRepository
+    from src.support.core.database import AsyncSessionLocal
     from src.support.core.session_scope import run_in_async_session
 
-    email = "modefilter@x.com"
+    email = f"modefilter-{uuid4().hex}@x.com"
     now = datetime(2026, 10, 5, tzinfo=timezone.utc)
     chat_id, nav_id = uuid4(), uuid4()
 
@@ -104,28 +105,28 @@ async def test_list_filters_by_mode_and_rejects_unknown_mode():
 
     await run_in_async_session(_seed)
 
-    transport = ASGITransport(app=app)
-    headers = await auth_headers(email)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        listing = await client.get("/conversations", params={"mode": "chat"}, headers=headers)
-        assert listing.status_code == 200
-        rows = listing.json()
-        assert [r["id"] for r in rows] == [str(chat_id)]
-        assert rows[0]["mode"] == "chat"
+    try:
+        transport = ASGITransport(app=app)
+        headers = await auth_headers(email)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            listing = await client.get("/conversations", params={"mode": "chat"}, headers=headers)
+            assert listing.status_code == 200
+            rows = listing.json()
+            assert [r["id"] for r in rows] == [str(chat_id)]
+            assert rows[0]["mode"] == "chat"
 
-        unfiltered = await client.get("/conversations", headers=headers)
-        assert {r["id"] for r in unfiltered.json()} >= {str(chat_id), str(nav_id)}
+            unfiltered = await client.get("/conversations", headers=headers)
+            assert {r["id"] for r in unfiltered.json()} >= {str(chat_id), str(nav_id)}
 
-        bad = await client.get("/conversations", params={"mode": "xpto"}, headers=headers)
-        assert bad.status_code == 422
-
-    from src.support.core.database import AsyncSessionLocal
-
-    async with AsyncSessionLocal() as s:
-        await s.execute(
-            text("DELETE FROM conversations WHERE uuid IN (:a, :b)"), {"a": chat_id, "b": nav_id}
-        )
-        await s.commit()
+            bad = await client.get("/conversations", params={"mode": "xpto"}, headers=headers)
+            assert bad.status_code == 422
+    finally:
+        async with AsyncSessionLocal() as s:
+            await s.execute(
+                text("DELETE FROM conversations WHERE uuid IN (:a, :b)"),
+                {"a": chat_id, "b": nav_id},
+            )
+            await s.commit()
 
 
 @pytest.mark.asyncio
