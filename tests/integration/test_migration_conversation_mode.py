@@ -56,7 +56,7 @@ async def _insert_conversation(db_session) -> UUID:
     return conversation_id
 
 
-async def _insert_trace(db_session, conversation_id: UUID, intent: str) -> None:
+async def _insert_trace(db_session, conversation_id: UUID, intent: str | None) -> None:
     await db_session.execute(
         text(
             "INSERT INTO agent_traces ("
@@ -97,12 +97,17 @@ async def test_backfill_classifies_legacy_conversations_by_trace_intents(db_sess
 
     no_traces = await _insert_conversation(db_session)
 
+    # Com `<>` no lugar de `IS DISTINCT FROM`, um trace sem intent passaria pelo
+    # NOT EXISTS e a conversa seria marcada como navigate.
+    null_intent = await _insert_conversation(db_session)
+    await _insert_trace(db_session, null_intent, None)
+
     for statement in migration.BACKFILL_STATEMENTS:
         await db_session.execute(text(statement))
 
     rows = await db_session.execute(
         text("SELECT uuid, mode FROM conversations WHERE uuid = ANY(:ids)"),
-        {"ids": [navigate_only, mentor_only, mixed, no_traces]},
+        {"ids": [navigate_only, mentor_only, mixed, no_traces, null_intent]},
     )
     modes = {row.uuid: row.mode for row in rows}
 
@@ -111,4 +116,5 @@ async def test_backfill_classifies_legacy_conversations_by_trace_intents(db_sess
         mentor_only: "mentor",
         mixed: "chat",
         no_traces: "chat",
+        null_intent: "chat",
     }

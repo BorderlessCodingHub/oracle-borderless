@@ -10,6 +10,10 @@ nunca gravou de onde a conversa veio, mas cada turno grava um trace com o
 - traces existem e são TODOS `intent = 'mentor'` → `mode = 'mentor'`;
 - o resto (intents mistos, knowledge, chit-chat ou sem traces) → `mode = 'chat'`.
 Jogar tudo em 'chat' poluiria a lista de chats com threads da ⌘K e do Mentor.
+Limitação conhecida: no modo chat o gate também pode rotular um turno como
+`intent='navigate'`, então uma thread do painel de chat em que todo turno saiu
+como navigate vira `navigate`; aceito porque a regra só roda sobre dados
+locais legados (o Oracle nunca teve deploy).
 
 Revision ID: 0014_conversation_mode
 Revises: 0013_mentor_trace
