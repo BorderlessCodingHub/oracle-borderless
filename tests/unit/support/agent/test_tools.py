@@ -5,9 +5,11 @@ from src.support.agent.navigation_catalog import NavigationCatalog
 from src.support.agent.ports import KnowledgeSnippet
 from src.support.agent.tools import (
     NAVIGATE_TOOL_NAME,
+    SEARCH_LESSON_TOOL_NAME,
     WebSearchTool,
     build_tools,
     format_knowledge,
+    model_bound_tools,
     tool_node_tools,
     wrap_tool_content,
 )
@@ -67,5 +69,16 @@ def test_without_a_catalog_the_navigate_tool_falls_back_to_the_embedded_snapshot
 def test_tool_node_tools_excludes_navigate_platform():
     """`navigate_platform` é executada pelo nó `navigate`, nunca pelo ToolNode —
     o corpo da declaração é um RuntimeError de propósito."""
-    assert [t.name for t in tool_node_tools()] == ["web_search", "fetch_notion_page"]
+    assert [t.name for t in tool_node_tools()] == ["web_search", "fetch_notion_page", SEARCH_LESSON_TOOL_NAME]
     assert NAVIGATE_TOOL_NAME not in [t.name for t in tool_node_tools()]
+
+
+def test_search_lesson_is_executable_but_never_bound_to_the_answer_model():
+    """`search_lesson` entra no ToolNode (ele precisa saber executá-la), mas
+    não é oferecida ao modelo em turnos comuns — o modo mentor (Task 3) é quem
+    decide ligá-la via `build_mentor_tools()`."""
+    assert SEARCH_LESSON_TOOL_NAME in [t.name for t in tool_node_tools()]
+
+    for navigation_enabled in (False, True):
+        bound_names = [t.name for t in model_bound_tools(navigation_enabled)]
+        assert SEARCH_LESSON_TOOL_NAME not in bound_names

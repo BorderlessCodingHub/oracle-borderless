@@ -248,13 +248,17 @@ def _initial_state(
     knowledge: list[KnowledgeSnippet] | None,
     mode: str = "chat",
     locale: str = "pt-BR",
+    lesson_id: str | None = None,
 ) -> dict:
     """`preset_knowledge` liga a aresta que pula gate/retrieve (eval adversarial).
 
     `mode`/`locale` vêm do input do cliente. Em `mode == "navigate"` a barra já
     fixou a intenção: o state nasce com `intent`/`retrieve`/`search_query`/
     `degraded` preset, sem passar pelo gate (spec §5.3; as arestas que usam
-    isso são a Task 4)."""
+    isso são a Task 4).
+
+    `lesson_id` (mode="mentor"): id do vídeo na Platform. Só entra no state
+    quando presente — o prompt do mentor (nodes.py::_answer_messages) o cita."""
     state = {
         "question": question,
         "history": history,
@@ -268,6 +272,8 @@ def _initial_state(
     if mode == "navigate":
         # A barra fixa a intenção: sem gate, sem RAG, sem recusa (spec §5.3).
         state.update({"intent": "navigate", "retrieve": False, "search_query": "", "degraded": False})
+    if lesson_id is not None:
+        state["lesson_id"] = lesson_id
     return state
 
 
@@ -382,6 +388,7 @@ class TurnGraphRunner:
         mode: str = "chat",
         locale: str = "pt-BR",
         extra_config: dict | None = None,
+        lesson_id: str | None = None,
     ) -> TurnRun:
         if mode == "navigate":
             # O gate é pulado em mode == "navigate" (route_entry) — sem isto,
@@ -389,7 +396,7 @@ class TurnGraphRunner:
             # da barra ficaria sem intent == "navigate" (ruling R5).
             signals.intent = "navigate"
         agen = self._graph.astream_events(
-            _initial_state(question, history, knowledge, mode=mode, locale=locale),
+            _initial_state(question, history, knowledge, mode=mode, locale=locale, lesson_id=lesson_id),
             config=self._config(deps, signals, extra_config),
             version="v2",
             stream_mode=["values", "updates"],

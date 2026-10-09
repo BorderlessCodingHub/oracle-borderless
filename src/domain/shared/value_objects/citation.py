@@ -8,7 +8,7 @@ from typing import Literal
 class Citation:
     """Uma fonte atribuída a uma resposta do oráculo."""
 
-    source_type: Literal["notion", "web"]
+    source_type: Literal["notion", "web", "lesson"]
     title: str
     url: str
     snippet: str
@@ -16,3 +16,6 @@ class Citation:
 
     def is_notion(self) -> bool:
         return self.source_type == "notion"
+
+    def is_lesson(self) -> bool:
+        return self.source_type == "lesson"

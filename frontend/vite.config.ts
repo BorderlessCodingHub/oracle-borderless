@@ -12,10 +12,11 @@ export default defineConfig({
       // Chaves específicas (não "/ops") — o proxy do Vite casa por prefixo, e
       // "/ops" bateria também no document request de quem digita a URL
       // /ops no navegador, quebrando a SPA. Backend só expõe estes subpaths
-      // (src/app/api/routes/ops.py): overview, turns (+ turns/:id) e eval.
+      // (src/app/api/routes/ops.py): overview, turns (+ turns/:id), eval e mentor.
       "/ops/overview": "http://localhost:8000",
       "/ops/turns": "http://localhost:8000",
       "/ops/eval": "http://localhost:8000",
+      "/ops/mentor": "http://localhost:8000",
     },
   },
   test: {

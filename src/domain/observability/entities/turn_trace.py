@@ -43,5 +43,10 @@ class TurnTrace:
     navigation_called: bool = False
     navigation_access: str | None = None
 
+    lesson_id: str | None = None
+    program_slug: str | None = None
+    lesson_coverage: str | None = None
+    question_embedding: list[float] | None = None
+
     def is_refusal(self) -> bool:
         return self.outcome == "refusal"

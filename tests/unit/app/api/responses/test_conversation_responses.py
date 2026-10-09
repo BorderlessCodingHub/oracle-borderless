@@ -43,3 +43,16 @@ def test_from_entity_still_maps_role_content_and_sources():
     assert response.role == "assistant"
     assert response.content == "resposta"
     assert response.sources[0].source_type == "notion"
+
+
+def test_summary_exposes_mode():
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    from src.app.api.responses.conversation_responses import ConversationSummaryResponse
+    from src.domain.conversations.entities.conversation import Conversation
+
+    now = datetime(2026, 10, 5, tzinfo=timezone.utc)
+    conv = Conversation(uuid4(), "a@x.com", "T", now, now, None, mode="navigate")
+
+    assert ConversationSummaryResponse.from_entity(conv).mode == "navigate"

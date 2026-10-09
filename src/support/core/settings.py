@@ -119,6 +119,30 @@ class Settings(BaseSettings):
     MEMORY_RECENCY_TOKEN_BUDGET: int = 2000
     MEMORY_RECENCY_MAX_MESSAGES: int = 50
 
+    # --- Mentor de aula (spec 2026-09-11) ---
+    MENTOR_ENABLED: bool = False
+    # Chunk menor que o do Notion: fala é mais diluída que texto escrito, e
+    # chunk grande demais dilui o embedding e piora a citação temporal.
+    MENTOR_CHUNK_SIZE: int = 800
+    MENTOR_TOP_K: int = 6
+    MENTOR_MAX_ATTEMPTS: int = 3
+    # Claim mais antigo que isso é de processo que morreu — volta pro lote.
+    MENTOR_CLAIM_STALE_MINUTES: int = 120
+    # A API de transcrição limita o arquivo a 25 MB; uma aula de 1h passa disso.
+    MENTOR_AUDIO_SEGMENT_SECONDS: int = 600
+    MENTOR_TRANSCRIBE_MODEL: str = "whisper-1"
+    MENTOR_TRANSCRIBE_LANGUAGE: str = "pt"
+    MENTOR_FFMPEG_BIN: str = "ffmpeg"
+    MENTOR_FFPROBE_BIN: str = "ffprobe"
+    # Teto de segurança: sem isso, um ffmpeg/ffprobe travado prende o processo para sempre.
+    MENTOR_SUBPROCESS_TIMEOUT_SECONDS: int = 900
+    # Rótulos de cobertura — NÃO bloqueiam nada, só classificam (spec §9.2).
+    MENTOR_COVERAGE_NEAR: float = 0.35
+    MENTOR_COVERAGE_FAR: float = 0.55
+    # borderless-api: as rotas /api/internal. O segredo é o mesmo valor que lá
+    # se chama MENTOR_INGEST_SECRET.
+    BORDERLESS_INTERNAL_SECRET: str = ""
+
     @property
     def database_url_async(self) -> str:
         """URL do engine assíncrono (asyncpg)."""

@@ -26,12 +26,17 @@ class ConversationRepository:
         await self.session.refresh(model)
         return ConversationMapper.to_entity(model)
 
-    async def list_by_user(self, user_email: str | None) -> list[Conversation]:
+    async def list_by_user(
+        self, user_email: str | None, mode: str | None = None
+    ) -> list[Conversation]:
         stmt = select(ConversationModel).where(ConversationModel.deleted_at.is_(None))
         if user_email is None:
             stmt = stmt.where(ConversationModel.user_email.is_(None))
         else:
             stmt = stmt.where(ConversationModel.user_email == user_email)
+        # Filtro estrito: linhas com mode NULL ficam fora de qualquer filtro.
+        if mode is not None:
+            stmt = stmt.where(ConversationModel.mode == mode)
         stmt = stmt.order_by(ConversationModel.updated_at.desc())
         rows = (await self.session.execute(stmt)).scalars().all()
         return [ConversationMapper.to_entity(m) for m in rows]

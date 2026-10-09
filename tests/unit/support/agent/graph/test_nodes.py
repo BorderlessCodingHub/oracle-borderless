@@ -568,6 +568,32 @@ async def test_with_navigation_enabled_the_model_sees_navigate_platform():
     assert "navigate_platform" in model.bound
 
 
+# --- C4b: mode="mentor" liga só search_lesson ao modelo -------------------
+
+
+@pytest.mark.asyncio
+async def test_mentor_mode_binds_only_search_lesson():
+    model = _ToolRecordingChatModel()
+    config = _answer_config(TurnSignals(), model=model)
+
+    await answer_node({"question": "q", "history": [], "knowledge": [], "mode": "mentor"}, config)
+
+    assert set(model.bound) == {"search_lesson"}
+
+
+@pytest.mark.asyncio
+async def test_chat_mode_keeps_the_oracle_tools_unchanged():
+    """Mesma asserção de `test_without_navigation_enabled_the_model_never_sees_navigate_platform`,
+    agora explícita sobre `mode`: passar por `_answer_model(mode=...)` não pode
+    mudar o conjunto de tools do chat comum."""
+    model = _ToolRecordingChatModel()
+    config = _answer_config(TurnSignals(), model=model)
+
+    await answer_node({"question": "q", "history": [], "knowledge": [], "mode": "chat"}, config)
+
+    assert set(model.bound) == {"web_search", "fetch_notion_page"}
+
+
 def test_the_system_message_carries_the_navigation_block_only_when_enabled():
     from src.support.agent.graph.nodes import _answer_messages
 
@@ -577,3 +603,22 @@ def test_the_system_message_carries_the_navigation_block_only_when_enabled():
 
     assert "NAVEGAÇÃO" not in off and "navigate_platform" not in off
     assert "NAVEGAÇÃO" in on and "navigate_platform" in on
+
+
+# --- T3: enable_tools=False vence mesmo em mode="mentor" -------------------
+
+
+def test_enable_tools_false_returns_the_bare_model_even_in_mentor_mode():
+    """`enable_tools=False` é do harness de eval (config adversarial/knowledge
+    sem tool loop) — precisa vencer a escolha de tools do `mode`, não só a do
+    chat comum. Sem isso, um eval que desliga tools de propósito acabaria
+    ligando `search_lesson` ao modelo mentor de qualquer jeito."""
+    from src.support.agent.graph.nodes import _answer_model
+
+    model = _ToolRecordingChatModel()
+    config = {"configurable": {"answer_model": model}}
+
+    out = _answer_model(config, enable_tools=False, mode="mentor")
+
+    assert out is model
+    assert model.bound == []  # bind_tools nunca foi chamado

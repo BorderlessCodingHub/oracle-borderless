@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
-from src.app.api.requests.stream_events_request import StreamEventsRequest
+from src.app.api.requests.stream_events_request import StreamEventsRequest, StreamInput
 
 
 def _body(question="como funciona a renovação?", thread_id=None, run_id=None) -> dict:
@@ -95,3 +95,23 @@ def test_ids_are_canonicalised():
 
     assert req.run_id == "123e4567-e89b-12d3-a456-426614174000"
     assert str(req.conversation_id) == "123e4567-e89b-12d3-a456-426614174001"
+
+
+# --- mode="mentor" e lesson_id (StreamInput) ------------------------------
+
+
+def test_mentor_is_an_accepted_mode():
+    assert StreamInput(question="oi", mode="mentor").mode == "mentor"
+
+
+def test_lesson_id_travels_in_the_input():
+    assert StreamInput(question="oi", mode="mentor", lesson_id="v1").lesson_id == "v1"
+
+
+def test_lesson_id_is_optional_for_the_other_modes():
+    assert StreamInput(question="oi", mode="chat").lesson_id is None
+
+
+def test_an_unknown_mode_is_still_rejected():
+    with pytest.raises(ValidationError):
+        StreamInput(question="oi", mode="teleport")

@@ -1,7 +1,8 @@
 import logging
-from typing import AsyncIterator
+from typing import AsyncIterator, Literal
 from uuid import UUID
 
+from fastapi import Query
 from fastapi.responses import StreamingResponse
 
 from src.app.api.requests.stream_events_request import StreamEventsRequest
@@ -17,18 +18,31 @@ from src.domain.conversations.actions.get_conversation_action import GetConversa
 from src.domain.conversations.actions.list_conversations_action import ListConversationsAction
 from src.domain.conversations.actions.open_turn_action import OpenTurnAction
 from src.domain.conversations.actions.run_turn_action import RunTurnAction
+from src.domain.lessons.actions.check_lesson_access_action import (
+    CheckLessonAccessAction,
+    LessonAccessDeniedError,
+)
+from src.domain.lessons.entities.lesson import Lesson
 from src.domain.observability.actions.record_turn_trace_action import RecordTurnTraceAction
 from src.domain.observability.dtos.turn_trace_draft import TurnTraceDraft
+from src.domain.observability.services.mentor_trace import apply_mentor_signals
 from src.domain.users.actions.resolve_bearer_action import SOURCE_PLATFORM_BEARER
 from src.support.agent.graph import get_turn_graph_runner
 from src.support.agent.navigation_catalog import NavigationCatalog
 from src.support.agent.ports import GraphEvent, citations_of, navigation_of, text_of
+from src.support.clients.borderless.borderless_lesson_access_client import (
+    BorderlessLessonAccessClient,
+)
 from src.support.clients.embeddings.embeddings_client import get_embeddings_client
 from src.support.core.context import CurrentAsyncSessionContext, CurrentRequestContext
+from src.support.core.exceptions import DomainError, NotFoundError
 from src.support.core.session_scope import async_session_scope, run_in_async_session
+from src.support.core.settings import settings
 from src.support.observability.langsmith import hash_email
 
 logger = logging.getLogger(__name__)
+
+ConversationMode = Literal["chat", "navigate", "mentor"]
 
 
 class ConversationController:
@@ -41,8 +55,11 @@ class ConversationController:
         `config.configurable.thread_id` é a conversa, `config.run_id` é o run do
         LangSmith.
 
-        - Escopo 1 (request, sessão do middleware): OpenTurnAction grava conversa
-          e pergunta. Tudo que vira status HTTP (401/404/422/500) acontece aqui.
+        - Escopo 1 (request, sessão do middleware): mode="mentor" checa o
+          entitlement (CheckLessonAccessAction — 400 sem lesson_id, 403 sem
+          acesso, fail-closed) ANTES de tudo, e OpenTurnAction grava conversa
+          e pergunta. Tudo que vira status HTTP (400/401/403/404/422/500)
+          acontece aqui.
         - Escopo 2 (corpo SSE, `async_session_scope`): RunTurnAction monta os
           deps e o prelúdio do grafo roda — gate, retrieve, recusa — emitindo os
           eventos ao vivo. Fecha na entrada do nó de resposta.
@@ -60,8 +77,27 @@ class ConversationController:
         user_email = user.email
         run_id = data.run_id
 
+        # Mentor (Task 4): entitlement fail-closed, ANTES de qualquer chamada de
+        # modelo e ainda na sessão do middleware (a LessonRepository precisa
+        # dela) — 400 sem lesson_id, 403 sem acesso (LessonAccessDeniedError,
+        # mapeado em exception_handlers.py).
+        lesson: Lesson | None = None
+        if data.mode == "mentor":
+            # I2 (ruling C7): kill switch de verdade. Antes de qualquer outra
+            # checagem — inclusive antes do 400 de lesson_id ausente — porque
+            # com o mentor desligado nem faz sentido diferenciar os dois erros
+            # de entrada; a feature simplesmente não existe.
+            if not settings.MENTOR_ENABLED:
+                raise NotFoundError("mentor desabilitado")
+            if not data.lesson_id:
+                raise DomainError("mode mentor exige input.lesson_id")
+            lesson = await CheckLessonAccessAction(access_client=BorderlessLessonAccessClient()).execute(
+                bearer=user.platform_access_token, platform_video_id=data.lesson_id
+            )
+
         turn = await OpenTurnAction().execute(
-            data.question, data.conversation_id, user_email, mode=data.mode, locale=data.locale
+            data.question, data.conversation_id, user_email, mode=data.mode, locale=data.locale,
+            lesson_id=lesson.platform_video_id if lesson is not None else None,
         )
         draft = turn.draft
         # Gravado sempre — coluna barata; o link só aparece na UI quando
@@ -74,7 +110,9 @@ class ConversationController:
         # é SearchKnowledgeBaseAction — nasce em RunTurnAction, dentro do escopo 2.
         embeddings = get_embeddings_client()
 
-        extra_config = await _build_extra_config(user)
+        extra_config = await _build_extra_config(user, data.mode)
+        if lesson is not None:
+            extra_config.update(build_mentor_extra_config(lesson))
 
         captured: dict = {"text": "", "citations": [], "navigation": None, "root_end": None}
 
@@ -121,7 +159,7 @@ class ConversationController:
                     await run.aclose()
 
             draft.citations_count = len(captured["citations"])
-            _absorb_engine_metrics(draft)
+            finalize_mentor_trace(draft, data.mode, extra_config)
 
             # A resposta só é persistida em sucesso (decisão do M2); o trace é
             # gravado SEMPRE — turno que quebrou é o que mais interessa no trace.
@@ -145,9 +183,13 @@ class ConversationController:
         return StreamingResponse(event_source(), media_type=CONTENT_TYPE)
 
     @staticmethod
-    async def list() -> list[ConversationSummaryResponse]:
+    async def list(
+        mode: ConversationMode | None = Query(default=None),
+    ) -> list[ConversationSummaryResponse]:
+        """`?mode=chat` é o que a coluna de chats da Platform pede: consultas da
+        barra (`navigate`) e do Mentor (`mentor`) ficam fora da lista."""
         user_email = CurrentRequestContext.get_user().email
-        conversations = await ListConversationsAction().execute(user_email)
+        conversations = await ListConversationsAction().execute(user_email, mode=mode)
         return [ConversationSummaryResponse.from_entity(c) for c in conversations]
 
     @staticmethod
@@ -159,7 +201,7 @@ class ConversationController:
         return ConversationDetailResponse.from_entity(conversation, messages)
 
 
-async def _build_extra_config(user) -> dict:
+async def _build_extra_config(user, mode: str = "chat") -> dict:
     """Monta o `extra_config` do turno (vira `configurable` do grafo — ADR-0016/
     0021): token e perfil alimentam a tool `navigate_platform` e o prompt de
     navegação. Roda no escopo do request: `NavigationCatalog().describe` é HTTP
@@ -170,8 +212,14 @@ async def _build_extra_config(user) -> dict:
     cliente embutido na Platform (sessão `platform_bearer`) executa o redirect;
     o SPA do oráculo não sabe navegar, então não recebe a tool, o bloco de
     prompt nem paga a busca do catálogo.
+
+    I3: o mentor liga só `search_lesson` ao modelo (spec §2.1) — nunca
+    `navigate_platform` — então um turno `mode == "mentor"` nem busca o
+    catálogo ao vivo, mesmo vindo de uma sessão `platform_bearer`. Sem isso
+    todo turno mentor pagava um round-trip à borderless-api para um catálogo
+    que o grafo nunca usa (ver `model_bound_tools`/`_answer_model(mode="mentor")`).
     """
-    navigation_enabled = user.session_source == SOURCE_PLATFORM_BEARER
+    navigation_enabled = mode != "mentor" and user.session_source == SOURCE_PLATFORM_BEARER
 
     catalog_text = None
     if navigation_enabled:
@@ -190,6 +238,22 @@ async def _build_extra_config(user) -> dict:
         },
         "navigation_enabled": navigation_enabled,
         "navigation_catalog_text": catalog_text,
+    }
+
+
+def build_mentor_extra_config(lesson: Lesson) -> dict:
+    """`extra_config` do turno mentor (C5): as CINCO chaves que a tool
+    `search_lesson` espera em `configurable`. `lesson_id` aqui é o INTERNO
+    (`lessons.uuid`) — o escopo da tool; o id da Platform vem à parte em
+    `lesson_platform_video_id` (C1: os dois ids nunca se misturam).
+    `lesson_distances`/`question_embedding` nascem vazios — a tool os
+    preenche em place (`extend`/`[:] =`)."""
+    return {
+        "lesson_id": lesson.uuid,
+        "lesson_distances": [],
+        "question_embedding": [],
+        "lesson_platform_video_id": lesson.platform_video_id,
+        "lesson_program_slug": lesson.program_slug,
     }
 
 
@@ -232,6 +296,30 @@ def _absorb_engine_metrics(draft: TurnTraceDraft) -> None:
     # um turno que quebrou no meio do stream continua sendo erro.
     if draft.outcome != "error":
         draft.outcome = s.outcome
+
+
+def finalize_mentor_trace(draft: TurnTraceDraft, mode: str, extra_config: dict) -> None:
+    """A sequência exata que o corpo SSE roda pós-stream (T5), extraída para
+    ser testável sem sessão/HTTP: absorve as métricas do engine PRIMEIRO e só
+    DEPOIS — quando o turno é mentor — aplica os sinais do mentor por cima.
+
+    A ORDEM importa: `apply_mentor_signals` sobrescreve de propósito
+    `draft.intent`/`draft.retrieval_kept` (o mentor não passa pelo gate/retrieve
+    genérico — spec §2.1) com os valores que a tool `search_lesson` preencheu
+    em `extra_config`. Se rodasse ANTES de `_absorb_engine_metrics`, o absorb
+    reescreveria esses mesmos campos com o que `signals` trouxe do grafo (um
+    `intent` de gate que nem rodou, um `retrieval_kept` de RAG genérico que
+    também não rodou) — apagando o que o mentor escreveu.
+
+    Sob try/except próprio (ADR-0013): observabilidade nunca derruba a
+    persistência da resposta.
+    """
+    _absorb_engine_metrics(draft)
+    if mode == "mentor":
+        try:
+            apply_mentor_signals(draft, extra_config)
+        except Exception:
+            logger.exception("falha ao aplicar sinais do mentor no trace")
 
 
 async def _persist_turn(

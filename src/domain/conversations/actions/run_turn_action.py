@@ -46,4 +46,5 @@ class RunTurnAction:
         return self.graph.run(
             turn.question, turn.history, deps, turn.signals,
             mode=turn.mode, locale=turn.locale, extra_config=extra_config,
+            lesson_id=turn.lesson_id,
         )

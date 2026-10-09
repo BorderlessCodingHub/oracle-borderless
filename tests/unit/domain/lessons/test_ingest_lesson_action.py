@@ -1,0 +1,331 @@
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+
+from src.domain.lessons.actions.ingest_lesson_action import IngestLessonAction
+from src.domain.lessons.entities.lesson import Lesson
+from src.domain.lessons.entities.transcript_segment import TranscriptSegment
+from src.domain.lessons.enums import TranscriptStatus
+from src.support.core.context import CurrentAsyncSessionContext
+
+
+class FakeLessonRepo:
+    def __init__(self) -> None:
+        self.saved: list[Lesson] = []
+
+    async def save(self, lesson: Lesson) -> Lesson:
+        self.saved.append(
+            Lesson(**{**lesson.__dict__})  # snapshot, não referência viva
+        )
+        return lesson
+
+
+class FakeSession:
+    """Sessão fake mínima: só precisa saber commitar o claim (spec §7 passo 1).
+
+    `events`, quando passado, recebe "commit" na ordem em que o commit
+    acontece — usado para provar que ele vem ANTES de qualquer chamada de
+    mídia/transcrição. `fail=True` simula um banco fora do ar no momento do
+    commit do claim.
+    """
+
+    def __init__(self, events: list[str] | None = None, fail: bool = False) -> None:
+        self._events = events
+        self._fail = fail
+
+    async def commit(self) -> None:
+        if self._fail:
+            raise RuntimeError("commit down")
+        if self._events is not None:
+            self._events.append("commit")
+
+
+@pytest.fixture(autouse=True)
+def default_session():
+    """A maioria dos testes deste arquivo não liga para o commit do claim —
+    só não pode ver o `execute` falhar por falta de sessão no contexto."""
+    CurrentAsyncSessionContext.set(FakeSession())
+    yield
+    CurrentAsyncSessionContext.clear()
+
+
+class FakeChunkRepo:
+    def __init__(self) -> None:
+        self.replaced: list[tuple] = []
+
+    async def replace_for_lesson(self, lesson_id, chunks) -> None:
+        self.replaced.append((lesson_id, list(chunks)))
+
+
+class FakeEmbeddings:
+    async def embed(self, texts):
+        return [[float(i)] * 3 for i, _ in enumerate(texts)]
+
+
+class FakeClient:
+    def __init__(self, url="https://cdn.test/a.m3u8", events: list[str] | None = None):
+        self.url = url
+        self._events = events
+
+    async def get_media(self, video_id):
+        from src.support.clients.borderless.borderless_lessons_client import LessonMedia
+
+        if self._events is not None:
+            self._events.append("get_media")
+        return LessonMedia(url=self.url, expires_at=None, content_type=None)
+
+
+class FakeTranscription:
+    def __init__(self, segments):
+        self._segments = segments
+
+    async def transcribe(self, audio_path: Path, prompt: str):
+        return list(self._segments)
+
+
+def a_lesson(**overrides) -> Lesson:
+    base = dict(
+        uuid=uuid4(), platform_video_id="v1", program_slug="base",
+        module_slug="m1", video_slug="a1", title="Tokens",
+        provider="PANDA_VIDEO", provider_ref="ref-1",
+    )
+    base.update(overrides)
+    return Lesson(**base)
+
+
+def build_action(
+    monkeypatch, segments=None, lesson_repo=None, chunk_repo=None, transcription=None, lessons_client=None
+):
+    """Neutraliza o ffmpeg: a Task 5 já cobre o toolkit, aqui interessa o fluxo."""
+    from src.domain.lessons.actions import ingest_lesson_action as module
+
+    async def fake_extract(source_url, dest):
+        Path(dest).write_bytes(b"audio")
+
+    async def fake_probe(path):
+        return 100.0
+
+    async def fake_slice(path, start, length, dest):
+        Path(dest).write_bytes(b"audio")
+
+    monkeypatch.setattr(module.AudioToolkit, "extract_audio", staticmethod(fake_extract))
+    monkeypatch.setattr(module.AudioToolkit, "probe_duration", staticmethod(fake_probe))
+    monkeypatch.setattr(module.AudioToolkit, "slice", staticmethod(fake_slice))
+
+    return IngestLessonAction(
+        embeddings=FakeEmbeddings(),
+        lessons_client=lessons_client or FakeClient(),
+        transcription=transcription or FakeTranscription(segments or []),
+        lesson_repo=lesson_repo or FakeLessonRepo(),
+        chunk_repo=chunk_repo or FakeChunkRepo(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_happy_path_reaches_ready_and_writes_chunks(monkeypatch):
+    lesson_repo, chunk_repo = FakeLessonRepo(), FakeChunkRepo()
+    action = build_action(
+        monkeypatch,
+        segments=[TranscriptSegment("olá pessoal", 0.0, 2.0), TranscriptSegment("tokens", 2.0, 4.0)],
+        lesson_repo=lesson_repo, chunk_repo=chunk_repo,
+    )
+
+    result = await action.execute(a_lesson())
+
+    assert result.status == TranscriptStatus.READY
+    assert result.chunks == 1
+    assert chunk_repo.replaced[0][1][0].start_seconds == 0.0
+    assert chunk_repo.replaced[0][1][0].end_seconds == 4.0
+    # claim antes do trabalho, ready depois
+    assert lesson_repo.saved[0].transcript_status == TranscriptStatus.TRANSCRIBING
+    assert lesson_repo.saved[0].attempts == 1
+    assert lesson_repo.saved[-1].transcript_status == TranscriptStatus.READY
+    assert lesson_repo.saved[-1].failure_reason is None
+
+
+@pytest.mark.asyncio
+async def test_same_hash_skips_the_expensive_half(monkeypatch):
+    segments = [TranscriptSegment("mesmo texto", 0.0, 1.0)]
+    chunk_repo = FakeChunkRepo()
+    action = build_action(monkeypatch, segments=segments, chunk_repo=chunk_repo)
+
+    first = await action.execute(a_lesson())
+    second = await action.execute(
+        a_lesson(content_hash=first.content_hash, transcript_status=TranscriptStatus.READY)
+    )
+
+    assert second.skipped is True
+    assert second.status == TranscriptStatus.READY
+    assert len(chunk_repo.replaced) == 1  # não re-embedou
+
+
+@pytest.mark.asyncio
+async def test_force_re_embeds_even_with_the_same_hash(monkeypatch):
+    segments = [TranscriptSegment("mesmo texto", 0.0, 1.0)]
+    chunk_repo = FakeChunkRepo()
+    action = build_action(monkeypatch, segments=segments, chunk_repo=chunk_repo)
+
+    first = await action.execute(a_lesson())
+    await action.execute(
+        a_lesson(content_hash=first.content_hash, transcript_status=TranscriptStatus.READY),
+        force=True,
+    )
+
+    assert len(chunk_repo.replaced) == 2
+
+
+@pytest.mark.asyncio
+async def test_transcription_failure_marks_failed_and_does_not_raise(monkeypatch):
+    class Boom:
+        async def transcribe(self, audio_path, prompt):
+            raise RuntimeError("provider 503")
+
+    lesson_repo = FakeLessonRepo()
+    action = build_action(monkeypatch, transcription=Boom(), lesson_repo=lesson_repo)
+
+    result = await action.execute(a_lesson())
+
+    assert result.status == TranscriptStatus.FAILED
+    assert "provider 503" in result.failure_reason
+    assert lesson_repo.saved[-1].transcript_status == TranscriptStatus.FAILED
+    assert lesson_repo.saved[-1].attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_transcript_is_a_failure_not_a_silent_success(monkeypatch):
+    action = build_action(monkeypatch, segments=[])
+    result = await action.execute(a_lesson())
+    assert result.status == TranscriptStatus.FAILED
+    assert "vazia" in result.failure_reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_the_glossary_prompt_carries_the_lesson_title(monkeypatch):
+    seen: list[str] = []
+
+    class Spy:
+        async def transcribe(self, audio_path, prompt):
+            seen.append(prompt)
+            return [TranscriptSegment("x", 0.0, 1.0)]
+
+    action = build_action(monkeypatch, transcription=Spy())
+    await action.execute(a_lesson(title="Tokens e embeddings"))
+
+    assert "Tokens e embeddings" in seen[0]
+
+
+@pytest.mark.asyncio
+async def test_failure_path_save_is_guarded_and_still_returns_failed(monkeypatch):
+    """Se o próprio save() do status FAILED explodir (ex.: banco fora do ar),
+    o execute() ainda não pode propagar — e o motivo relatado é o ORIGINAL
+    (a falha da transcrição), não o erro do save."""
+
+    class BoomTranscription:
+        async def transcribe(self, audio_path, prompt):
+            raise RuntimeError("provider 503")
+
+    class FlakyOnSecondSave(FakeLessonRepo):
+        async def save(self, lesson: Lesson) -> Lesson:
+            if len(self.saved) == 1:  # segunda chamada: o save do caminho de falha
+                raise RuntimeError("db down")
+            return await super().save(lesson)
+
+    lesson_repo = FlakyOnSecondSave()
+    action = build_action(monkeypatch, transcription=BoomTranscription(), lesson_repo=lesson_repo)
+
+    result = await action.execute(a_lesson())
+
+    assert result.status == TranscriptStatus.FAILED
+    assert "provider 503" in result.failure_reason
+    assert "db down" not in result.failure_reason
+
+
+@pytest.mark.asyncio
+async def test_multiple_audio_windows_get_their_offsets_applied(monkeypatch):
+    """Aula longa o bastante para virar 3 janelas de 600s (probe = 1500.0s):
+    cada fatia devolve UM segmento (30.0, 40.0) relativo à própria fatia; o
+    offset da janela precisa ser somado antes do chunking. Como cada janela
+    produz um segmento isolado e o chunker empacota por tamanho (não por
+    janela), aqui garantimos os offsets olhando o primeiro e o último chunk
+    persistido: o primeiro começa em 30.0 (janela 0, sem offset) e o último
+    termina em 1240.0 (janela 2, offset 1200 + fim do segmento 40.0)."""
+    from src.domain.lessons.actions import ingest_lesson_action as module
+
+    monkeypatch.setattr(module.settings, "MENTOR_AUDIO_SEGMENT_SECONDS", 600)
+
+    class OneSegmentPerCall:
+        async def transcribe(self, audio_path, prompt):
+            return [TranscriptSegment("x", 30.0, 40.0)]
+
+    async def fake_probe(path):
+        return 1500.0
+
+    chunk_repo = FakeChunkRepo()
+    action = build_action(
+        monkeypatch, transcription=OneSegmentPerCall(), chunk_repo=chunk_repo
+    )
+    monkeypatch.setattr(module.AudioToolkit, "probe_duration", staticmethod(fake_probe))
+
+    await action.execute(a_lesson())
+
+    chunks = chunk_repo.replaced[0][1]
+    assert chunks[0].start_seconds == 30.0
+    assert chunks[-1].end_seconds == 1240.0
+
+
+# --- claim: commit imediato (Controller Ruling B7 / spec §7 passo 1) ---
+
+
+@pytest.mark.asyncio
+async def test_claim_is_committed_before_media_is_fetched(monkeypatch):
+    """O commit do claim precisa acontecer ANTES de qualquer chamada de rede
+    (get_media) ou processamento de áudio — senão o claim fica preso na
+    transação aberta enquanto ffmpeg+Whisper rodam."""
+    events: list[str] = []
+    CurrentAsyncSessionContext.set(FakeSession(events=events))
+
+    action = build_action(
+        monkeypatch,
+        segments=[TranscriptSegment("olá", 0.0, 1.0)],
+        lessons_client=FakeClient(events=events),
+    )
+
+    result = await action.execute(a_lesson())
+
+    assert events == ["commit", "get_media"]
+    assert result.status == TranscriptStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_claim_commit_failure_returns_failed_without_raising(monkeypatch):
+    """Se o commit do claim falhar (ex.: banco fora do ar), `execute` não pode
+    propagar — e não tenta persistir FAILED de novo, porque foi justamente a
+    persistência que acabou de falhar."""
+    CurrentAsyncSessionContext.set(FakeSession(fail=True))
+    events: list[str] = []
+    action = build_action(monkeypatch, lessons_client=FakeClient(events=events))
+
+    result = await action.execute(a_lesson())
+
+    assert result.status == TranscriptStatus.FAILED
+    assert "commit down" in result.failure_reason
+    assert events == []  # nunca chegou a buscar mídia
+
+
+@pytest.mark.asyncio
+async def test_claim_save_failure_returns_failed_without_raising(monkeypatch):
+    """Finding 2: o claim (save + commit) precisa estar dentro da região
+    protegida — se o PRIMEIRO save() explodir, `execute` devolve FAILED em
+    vez de propagar a exceção."""
+
+    class BoomOnFirstSave(FakeLessonRepo):
+        async def save(self, lesson: Lesson) -> Lesson:
+            raise RuntimeError("db down")
+
+    action = build_action(monkeypatch, lesson_repo=BoomOnFirstSave())
+
+    result = await action.execute(a_lesson())
+
+    assert result.status == TranscriptStatus.FAILED
+    assert "db down" in result.failure_reason

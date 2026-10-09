@@ -3,6 +3,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from src.domain.lessons.actions.check_lesson_access_action import LessonAccessDeniedError
 from src.support.core.exceptions import (
     DomainConflictError,
     DomainError,
@@ -44,6 +45,10 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=403, content={"detail": "forbidden", "message": str(exc)}
         )
+
+    @app.exception_handler(LessonAccessDeniedError)
+    async def _lesson_access_denied(request: Request, exc: LessonAccessDeniedError):
+        return JSONResponse(status_code=403, content={"detail": str(exc)})
 
     @app.exception_handler(RateLimitedError)
     async def _rate_limited(request: Request, exc: RateLimitedError):

@@ -18,3 +18,6 @@ class OpenedTurn:
     signals: TurnSignals  # o MESMO objeto pendurado em draft.signals
     mode: str = "chat"
     locale: str = "pt-BR"
+    # Só mode="mentor": id do vídeo na Platform (o mesmo que `state["lesson_id"]`
+    # recebe — C1: o id INTERNO (lessons.uuid) viaja à parte, em extra_config).
+    lesson_id: str | None = None

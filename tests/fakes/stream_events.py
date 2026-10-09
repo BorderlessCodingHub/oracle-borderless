@@ -14,12 +14,15 @@ def ask_body(
     run_id: str | None = None,
     mode: str | None = None,
     locale: str | None = None,
+    lesson_id: str | None = None,
 ) -> dict:
     input_ = {"question": question}
     if mode is not None:
         input_["mode"] = mode
     if locale is not None:
         input_["locale"] = locale
+    if lesson_id is not None:
+        input_["lesson_id"] = lesson_id
     return {
         "input": input_,
         "config": {

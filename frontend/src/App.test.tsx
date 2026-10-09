@@ -50,6 +50,7 @@ const OPS_OVERVIEW_STUB = {
   knowledge_gaps: [],
 };
 const OPS_EVAL_STUB = { status: "no_runs", report: null, history: [] };
+const OPS_MENTOR_STUB = { gaps: [], engagement: [] };
 
 function renderAt(path: string, me: MeOutcome = loggedIn()) {
   stubMatchMedia(true);
@@ -62,6 +63,9 @@ function renderAt(path: string, me: MeOutcome = loggedIn()) {
     }
     if (/\/ops\/eval/.test(url)) {
       return new Response(JSON.stringify(OPS_EVAL_STUB), { status: 200 });
+    }
+    if (/\/ops\/mentor/.test(url)) {
+      return new Response(JSON.stringify(OPS_MENTOR_STUB), { status: 200 });
     }
     if (/\/conversations\/[^/]+$/.test(url)) {
       return new Response(JSON.stringify({ id: "abc-123", title: null, messages: [] }), {

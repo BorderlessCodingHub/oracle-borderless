@@ -73,6 +73,10 @@ Falha em gate/retrieve/refuse vira `RUN_ERROR` **depois dos passos já emitidos*
 
 `TurnTimeline` não tem mais os três pontos. Sem atividade, a lista renderiza vazia com `aria-busy` e altura reservada de uma linha; o primeiro passo chega no round-trip HTTP. Protocolo, parser e `useAskStream` não mudam.
 
+### Tool que precisa do banco durante `stream()` (revisão C1/mentor)
+
+O invariante "`stream()` nunca toca o banco" descreve o que o RUNNER garante (nenhum nó do grafo entre `answer` e o fim abre sessão por conta própria); não impede uma TOOL de precisar do banco depois que o escopo 2 já fechou — `search_lesson` (modo mentor) é o primeiro caso: o modelo pode chamá-la várias vezes dentro do tool loop, todo esse loop rodando em `stream()`. A tool resolve isso abrindo o PRÓPRIO escopo curto (`async_session_scope()`, o mesmo helper do escopo 2/3) só para a duração da chamada — e a Action/Repository só podem nascer DENTRO desse `async with`, porque o Repository captura `CurrentAsyncSessionContext.get()` no `__init__`: construí-los antes (ou fora) do escopo deixaria o repositório preso à sessão já fechada do prelúdio, o que vaza conexão e falha de forma não determinística em vez de sempre. A regra prática vale para qualquer tool futura na mesma situação: se ela precisa do banco e roda em `stream()`, abre seu próprio `async_session_scope()` e constrói tudo o que capture sessão lá dentro — nunca herda a sessão de um escopo que já era do chamador.
+
 ## Consequências
 
 **Positivas**

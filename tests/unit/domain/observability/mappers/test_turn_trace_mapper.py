@@ -36,6 +36,10 @@ def _entity(**overrides) -> TurnTrace:
         intent="navigate",
         navigation_called=True,
         navigation_access="allowed",
+        lesson_id=None,
+        program_slug=None,
+        lesson_coverage=None,
+        question_embedding=None,
         created_at=datetime(2026, 8, 3, tzinfo=timezone.utc),
     )
     base.update(overrides)
@@ -95,4 +99,34 @@ def test_optional_fields_survive_as_none():
     back = TurnTraceMapper.to_entity_from_attrs(
         TurnTraceMapper.to_model_attrs(entity), created_at=entity.created_at
     )
+    assert back == entity
+
+
+def test_mentor_fields_roundtrip_both_directions():
+    """Os quatro campos do Task 5 (lesson_id, program_slug, lesson_coverage,
+    question_embedding) precisam sobreviver às duas direções do mapper — é o
+    que evita a perda silenciosa de dado quando um campo novo esquece uma das
+    quatro camadas."""
+    entity = _entity(
+        lesson_id="video-123",
+        program_slug="base",
+        lesson_coverage="partial",
+        question_embedding=[0.1, 0.2, 0.3],
+    )
+
+    attrs = TurnTraceMapper.to_model_attrs(entity)
+    assert attrs["lesson_id"] == "video-123"
+    assert attrs["program_slug"] == "base"
+    assert attrs["lesson_coverage"] == "partial"
+    assert attrs["question_embedding"] == [0.1, 0.2, 0.3]
+
+    class StubModel:
+        pass
+
+    model = StubModel()
+    for key, value in attrs.items():
+        setattr(model, key, value)
+    model.created_at = entity.created_at
+
+    back = TurnTraceMapper.to_entity(model)
     assert back == entity

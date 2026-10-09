@@ -1,12 +1,12 @@
 """Body do POST /conversations/ask (ADR-0021): os parâmetros de
 `astream_events(input, config)`.
 
-Regra 7 do CLAUDE.md: schema Pydantic mora em src/app/api/. Só cinco campos são
-nossos — `input.question`, `input.mode` (a barra manda "navigate", o chat
-manda "chat"), `input.locale`, `config.run_id` (run do LangSmith) e
-`config.configurable.thread_id` (id da conversa). Qualquer outra chave é aceita
-e ignorada: o servidor monta o `config` real do grafo; o cliente não injeta
-`configurable`.
+Regra 7 do CLAUDE.md: schema Pydantic mora em src/app/api/. Só seis campos são
+nossos — `input.question`, `input.mode` ("chat", "navigate" ou "mentor"),
+`input.locale`, `input.lesson_id` (só mode="mentor"), `config.run_id` (run do
+LangSmith) e `config.configurable.thread_id` (id da conversa). Qualquer outra
+chave é aceita e ignorada: o servidor monta o `config` real do grafo; o
+cliente não injeta `configurable`.
 """
 
 from typing import Literal
@@ -29,8 +29,11 @@ class StreamInput(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     question: str
-    mode: Literal["chat", "navigate"] = "chat"
+    mode: Literal["chat", "navigate", "mentor"] = "chat"
     locale: Literal["en", "pt-BR"] = "pt-BR"
+    # Só o modo mentor usa: id do vídeo na Platform. O escopo da busca sai
+    # daqui, não do modelo (spec §2.1).
+    lesson_id: str | None = None
 
     @field_validator("question")
     @classmethod
@@ -81,6 +84,10 @@ class StreamEventsRequest(BaseModel):
     @property
     def locale(self) -> str:
         return self.input.locale
+
+    @property
+    def lesson_id(self) -> str | None:
+        return self.input.lesson_id
 
     @property
     def conversation_id(self) -> UUID:

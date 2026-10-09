@@ -6,5 +6,5 @@ class ListConversationsAction:
     def __init__(self) -> None:
         self.conversations = ConversationRepository()
 
-    async def execute(self, user_email: str | None) -> list[Conversation]:
-        return await self.conversations.list_by_user(user_email)
+    async def execute(self, user_email: str | None, mode: str | None = None) -> list[Conversation]:
+        return await self.conversations.list_by_user(user_email, mode=mode)

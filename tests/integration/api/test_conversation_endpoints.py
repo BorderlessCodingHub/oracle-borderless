@@ -84,6 +84,52 @@ async def test_list_and_get_conversation():
 
 
 @pytest.mark.asyncio
+async def test_list_filters_by_mode_and_rejects_unknown_mode():
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    from main import app
+    from src.domain.conversations.entities.conversation import Conversation
+    from src.domain.conversations.repositories.conversation_repository import ConversationRepository
+    from src.support.core.database import AsyncSessionLocal
+    from src.support.core.session_scope import run_in_async_session
+
+    email = f"modefilter-{uuid4().hex}@x.com"
+    now = datetime(2026, 10, 5, tzinfo=timezone.utc)
+    chat_id, nav_id = uuid4(), uuid4()
+
+    async def _seed():
+        repo = ConversationRepository()
+        await repo.create(Conversation(chat_id, email, "Chat", now, now, None, mode="chat"))
+        await repo.create(Conversation(nav_id, email, "Blog", now, now, None, mode="navigate"))
+
+    await run_in_async_session(_seed)
+
+    try:
+        transport = ASGITransport(app=app)
+        headers = await auth_headers(email)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            listing = await client.get("/conversations", params={"mode": "chat"}, headers=headers)
+            assert listing.status_code == 200
+            rows = listing.json()
+            assert [r["id"] for r in rows] == [str(chat_id)]
+            assert rows[0]["mode"] == "chat"
+
+            unfiltered = await client.get("/conversations", headers=headers)
+            assert {r["id"] for r in unfiltered.json()} >= {str(chat_id), str(nav_id)}
+
+            bad = await client.get("/conversations", params={"mode": "xpto"}, headers=headers)
+            assert bad.status_code == 422
+    finally:
+        async with AsyncSessionLocal() as s:
+            await s.execute(
+                text("DELETE FROM conversations WHERE uuid IN (:a, :b)"),
+                {"a": chat_id, "b": nav_id},
+            )
+            await s.commit()
+
+
+@pytest.mark.asyncio
 async def test_get_missing_conversation_returns_404():
     from uuid import uuid4
 

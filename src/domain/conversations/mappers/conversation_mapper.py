@@ -12,6 +12,7 @@ class ConversationMapper:
             created_at=model.created_at,
             updated_at=model.updated_at,
             deleted_at=model.deleted_at,
+            mode=model.mode,
         )
 
     @staticmethod
@@ -21,4 +22,5 @@ class ConversationMapper:
             "user_email": entity.user_email,
             "title": entity.title,
             "deleted_at": entity.deleted_at,
+            "mode": entity.mode,
         }
